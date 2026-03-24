@@ -113,6 +113,10 @@ EXPECTED_TOOLS = {
     "import_server_costs",
     "set_bulk_cost",
     "get_cost_summary",
+    # traffic.py
+    "detect_traffic_anomalies",
+    "get_traffic_report",
+    "detect_traffic_drops",
 }
 
 
