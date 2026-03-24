@@ -31,6 +31,21 @@ class ZabbixClient:
         )
         self._request_id = count(1)
         self.rollback_log = RollbackLog()
+        self._cache: dict[str, tuple[float, list]] = {}  # key -> (timestamp, data)
+
+    def _get_cached(self, key: str, ttl: float = 60.0) -> list | None:
+        """Get cached result if fresh."""
+        import time
+        if key in self._cache:
+            ts, data = self._cache[key]
+            if time.monotonic() - ts < ttl:
+                return data
+        return None
+
+    def _set_cache(self, key: str, data: list) -> None:
+        """Cache a result."""
+        import time
+        self._cache[key] = (time.monotonic(), data)
 
     async def close(self):
         """Close the underlying HTTP client and release connections."""
