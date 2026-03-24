@@ -4,7 +4,7 @@ from zbbx_mcp.tools import (
     triggers, templates, maintenance, events, discovery,
     configuration, scripts, services, macros, rollback_tools,
     inventory, report, alerts, users, proxies, maps, media, slack,
-    infra_report,
+    infra_report, costs,
 )
 
 # Tools that modify data — blocked in read-only mode
@@ -41,6 +41,9 @@ WRITE_TOOLS = frozenset({
     # Rollback
     "rollback_last",
     "rollback_by_index",
+    # Costs
+    "import_server_costs",
+    "set_bulk_cost",
 })
 
 
@@ -63,7 +66,7 @@ def register_all(
         triggers, templates, maintenance, events, discovery,
         configuration, scripts, services, macros, rollback_tools,
         inventory, report, alerts, users, proxies, maps, media, slack,
-        infra_report,
+        infra_report, costs,
     ]
     for module in modules:
         module.register(mcp, resolver, skip=skip)
