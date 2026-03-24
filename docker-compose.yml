@@ -1,0 +1,17 @@
+services:
+  zabbix-mcp:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      - ZABBIX_URL=https://your-zabbix.example.com
+      - ZABBIX_TOKEN=your_api_token
+      # Optional:
+      # - ZABBIX_INSTANCES=prod,staging
+      # - ZABBIX_PROD_URL=https://zabbix.prod.company.com
+      # - ZABBIX_PROD_TOKEN=prod_token
+      # - ZABBIX_STAGING_URL=https://zabbix.staging.company.com
+      # - ZABBIX_STAGING_TOKEN=staging_token
+      # - ZABBIX_READ_ONLY=true
+      # - DISABLED_TOOLS=acknowledge_problem
+    restart: unless-stopped
