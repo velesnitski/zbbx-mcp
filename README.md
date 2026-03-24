@@ -60,7 +60,7 @@ You should see `zabbix` listed when Claude starts. Try asking: *"Show current pr
 
 ## What it does
 
-**71 tools** across 28 modules:
+**72 tools** across 29 modules:
 
 | Category | Tools |
 |----------|-------|
@@ -88,7 +88,7 @@ You should see `zabbix` listed when Claude starts. Try asking: *"Show current pr
 | **Slack** | `send_slack_message`, `send_slack_report` |
 | **Costs** | `import_server_costs`, `set_bulk_cost`, `get_cost_summary` |
 | **Traffic** | `detect_traffic_anomalies`, `detect_traffic_drops`, `get_traffic_report` |
-| **Reports** | `generate_server_report`, `generate_infra_report`, `export_dashboard` (Excel) |
+| **Reports** | `generate_server_report`, `generate_infra_report`, `export_dashboard`, `generate_full_report` (Excel) |
 | **Health** | `check_connection` |
 
 ## Environment variables
