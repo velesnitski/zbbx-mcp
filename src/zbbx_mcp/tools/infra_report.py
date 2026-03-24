@@ -75,7 +75,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()):
                 host_map = {h["hostid"]: h for h in hosts}
                 all_ids = list(host_map.keys())
 
-                # Phase 2: metrics + graphs (parallel)
+                # Phase 2: metrics + graphs + cost macros (parallel)
                 tasks = [
                     client.call("item.get", {
                         "hostids": all_ids,
@@ -97,6 +97,12 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()):
                         "output": ["hostid", "lastvalue"],
                         "filter": {"key_": "vm.memory.size[total]"},
                     }),
+                    # Fetch {$COST_MONTH} macro from all hosts
+                    client.call("usermacro.get", {
+                        "hostids": all_ids,
+                        "output": ["hostid", "hostmacroid", "macro", "value"],
+                        "filter": {"macro": "{$COST_MONTH}"},
+                    }),
                 ]
                 if graph_ids:
                     tasks.append(client.call("graph.get", {
@@ -107,7 +113,16 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()):
 
                 results = await asyncio.gather(*tasks)
                 cpu_items, load_items, mem_avail_items, mem_total_items = results[:4]
-                graphs = results[4] if len(results) > 4 else []
+                cost_macros = results[4]
+                graphs = results[5] if len(results) > 5 else []
+
+                # Build cost map from macros
+                cost_map: dict[str, float] = {}
+                for m in cost_macros:
+                    try:
+                        cost_map[m["hostid"]] = float(m.get("value", "0"))
+                    except (ValueError, TypeError):
+                        pass
 
                 # Build dashboard mapping
                 graph_to_host = {}
@@ -170,18 +185,22 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()):
                     dashboard = host_dashboard.get(hid, "")
                     tab = host_tab.get(hid, "")
 
+                    cost_month = cost_map.get(hid)
+                    cost_year = round(cost_month * 12, 2) if cost_month else None
+
                     row = {
                         "Host": h.get("host", ""),
                         "Name": h.get("name", ""),
                         "Product": prod,
                         "Tier": tier,
                         "Provider": provider,
-                        "Region": "",
                         "IP": ip,
                         "RAM Total GB": mem_total,
                         "RAM Avail GB": mem_avail,
                         "CPU Used %": cpu_used,
                         "Load Avg5": load_avg,
+                        "Cost/Month ($)": cost_month,
+                        "Cost/Year ($)": cost_year,
                         "Dashboard": dashboard,
                         "Dashboard Tab": tab,
                         "Groups": groups,
@@ -200,6 +219,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()):
                             "Tier": tier,
                             "CPU Used %": cpu_used,
                             "Load Avg5": load_avg,
+                            "Cost/Month ($)": cost_month,
                             "Reason": f"CPU idle {cpu_idle:.0f}% (used only {cpu_used:.1f}%)",
                             "Recommendation": "Review for decommission",
                             "Priority": "High" if cpu_used < 3 else "Medium",
@@ -215,15 +235,20 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()):
                     prov = r["Provider"] or "No IP"
                     p = prov_data.setdefault(prov, {
                         "servers": 0, "cpu_vals": [], "decomm": 0,
+                        "total_cost": 0.0, "savings": 0.0,
                     })
                     p["servers"] += 1
                     if r["CPU Used %"] is not None:
                         p["cpu_vals"].append(r["CPU Used %"])
+                    if r["Cost/Month ($)"] is not None:
+                        p["total_cost"] += r["Cost/Month ($)"]
 
                 for r in unused_rows:
                     prov = r["Provider"] or "No IP"
                     if prov in prov_data:
                         prov_data[prov]["decomm"] += 1
+                        if r.get("Cost/Month ($)"):
+                            prov_data[prov]["savings"] += r["Cost/Month ($)"]
 
                 # Generate Excel
                 from openpyxl import Workbook
@@ -257,6 +282,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()):
                 ws1.title = "Apps & Infra"
                 h1 = ["#", "Host", "Name", "Product", "Tier", "Provider", "IP",
                        "RAM Total GB", "RAM Avail GB", "CPU Used %", "Load Avg5",
+                       "Cost/Month ($)", "Cost/Year ($)",
                        "Dashboard", "Dashboard Tab", "Groups", "Status"]
                 _write_headers(ws1, h1)
 
@@ -282,8 +308,8 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()):
 
                                 ws2 = wb.create_sheet("Unused & Underloaded")
                 h2 = ["#", "Resource", "Type", "Host/Domain", "Provider", "Product",
-                       "Tier", "CPU Used %", "Load Avg5", "Reason", "Recommendation",
-                       "Priority", "Dashboard"]
+                       "Tier", "CPU Used %", "Load Avg5", "Cost/Month ($)",
+                       "Reason", "Recommendation", "Priority", "Dashboard"]
                 _write_headers(ws2, h2)
 
                 for idx, r in enumerate(unused_rows, 2):
@@ -303,24 +329,34 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()):
                 _auto_width(ws2, h2)
 
                                 ws3 = wb.create_sheet("Provider Summary")
-                h3 = ["Provider", "Servers", "Decomm Candidates",
+                h3 = ["Provider", "Servers", "Cost/Month ($)", "Cost/Year ($)",
+                       "Decomm Candidates", "Potential Savings/Month ($)",
                        "Median CPU %", "Servers < 10% CPU"]
                 _write_headers(ws3, h3)
 
-                sorted_provs = sorted(prov_data.items(), key=lambda x: -x[1]["servers"])
+                sorted_provs = sorted(prov_data.items(), key=lambda x: -x[1]["total_cost"])
                 for idx, (prov, p) in enumerate(sorted_provs, 2):
                     ws3.cell(row=idx, column=1, value=prov)
                     ws3.cell(row=idx, column=2, value=p["servers"])
-                    ws3.cell(row=idx, column=3, value=p["decomm"])
-                    ws3.cell(row=idx, column=4, value=round(median(p["cpu_vals"]), 1) if p["cpu_vals"] else "")
+                    ws3.cell(row=idx, column=3, value=round(p["total_cost"], 2) if p["total_cost"] else "")
+                    ws3.cell(row=idx, column=4, value=round(p["total_cost"] * 12, 2) if p["total_cost"] else "")
+                    ws3.cell(row=idx, column=5, value=p["decomm"])
+                    ws3.cell(row=idx, column=6, value=round(p["savings"], 2) if p["savings"] else "")
+                    ws3.cell(row=idx, column=7, value=round(median(p["cpu_vals"]), 1) if p["cpu_vals"] else "")
                     low_cpu = sum(1 for v in p["cpu_vals"] if v < 10)
-                    ws3.cell(row=idx, column=5, value=low_cpu)
+                    ws3.cell(row=idx, column=8, value=low_cpu)
 
                 # Totals row
                 total_row = len(sorted_provs) + 2
-                ws3.cell(row=total_row, column=1, value="TOTAL").font = Font(bold=True)
-                ws3.cell(row=total_row, column=2, value=sum(p["servers"] for p in prov_data.values())).font = Font(bold=True)
-                ws3.cell(row=total_row, column=3, value=sum(p["decomm"] for p in prov_data.values())).font = Font(bold=True)
+                bold = Font(bold=True)
+                ws3.cell(row=total_row, column=1, value="TOTAL").font = bold
+                ws3.cell(row=total_row, column=2, value=sum(p["servers"] for p in prov_data.values())).font = bold
+                total_cost = sum(p["total_cost"] for p in prov_data.values())
+                ws3.cell(row=total_row, column=3, value=round(total_cost, 2)).font = bold
+                ws3.cell(row=total_row, column=4, value=round(total_cost * 12, 2)).font = bold
+                ws3.cell(row=total_row, column=5, value=sum(p["decomm"] for p in prov_data.values())).font = bold
+                total_savings = sum(p["savings"] for p in prov_data.values())
+                ws3.cell(row=total_row, column=6, value=round(total_savings, 2)).font = bold
 
                 ws3.freeze_panes = "A2"
                 _auto_width(ws3, h3)
@@ -334,26 +370,44 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()):
                 wb.save(filepath)
 
                 # Summary
+                total_cost = sum(p["total_cost"] for p in prov_data.values())
+                total_savings = sum(p["savings"] for p in prov_data.values())
+                costed_servers = sum(1 for r in rows if r["Cost/Month ($)"])
+
                 parts = [
                     f"**Infrastructure Report Generated**",
                     f"",
                     f"**File:** `{filepath}`",
-                    f"**Total servers:** {len(rows)}",
+                    f"**Total servers:** {len(rows)} ({costed_servers} with cost data)",
                     f"**Underloaded (CPU <{100-cpu_idle_threshold:.0f}%):** {len(unused_rows)}",
                     f"**Providers:** {len(prov_data)}",
+                ]
+                if total_cost:
+                    parts.append(f"**Total cost:** ${total_cost:,.2f}/month (${total_cost * 12:,.2f}/year)")
+                if total_savings:
+                    parts.append(f"**Potential savings:** ${total_savings:,.2f}/month from underloaded servers")
+                parts.extend([
                     f"",
                     f"### Sheets",
-                    f"1. **Apps & Infra** — {len(rows)} servers × 15 columns",
+                    f"1. **Apps & Infra** — {len(rows)} servers × {len(h1)} columns",
                     f"2. **Unused & Underloaded** — {len(unused_rows)} decommission candidates",
-                    f"3. **Provider Summary** — {len(prov_data)} providers with decomm counts",
-                ]
+                    f"3. **Provider Summary** — {len(prov_data)} providers with costs and savings",
+                ])
+
+                if costed_servers == 0:
+                    parts.extend([
+                        f"",
+                        f"*No cost data found. Set `{{$COST_MONTH}}` macro on hosts "
+                        f"or use `import_server_costs` to bulk-import from a spreadsheet.*",
+                    ])
 
                 if unused_rows:
                     parts.append(f"\n### Top Decommission Candidates")
                     for r in unused_rows[:5]:
+                        cost_str = f" — ${r['Cost/Month ($)']}/mo" if r.get("Cost/Month ($)") else ""
                         parts.append(
                             f"- **{r['Resource']}** ({r['Provider']}/{r['Product']}) "
-                            f"— CPU {r.get('CPU Used %', '?')}%"
+                            f"— CPU {r.get('CPU Used %', '?')}%{cost_str}"
                         )
 
                 return "\n".join(parts)

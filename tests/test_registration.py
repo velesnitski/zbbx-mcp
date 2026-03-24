@@ -109,6 +109,10 @@ EXPECTED_TOOLS = {
     # slack.py
     "send_slack_message",
     "send_slack_report",
+    # costs.py
+    "import_server_costs",
+    "set_bulk_cost",
+    "get_cost_summary",
 }
 
 
