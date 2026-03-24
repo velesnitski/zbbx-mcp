@@ -25,7 +25,8 @@ MAIN_HEADERS = [
     "Product", "Tier", "Provider", "IP",
     "CPU %", "Load Avg5", "Mem Avail GB",
     "Traffic In Mbps", "Traffic Out Mbps", "Traffic Total Mbps",
-    "BW Util %", "BW Tier", "Connections", "VPN Primary", "Agent",
+    "BW Util %", "BW Tier", "Connections",
+    "VPN Primary", "VPN Secondary", "VPN Tertiary", "Agent", "Templates",
     "Cost/Month ($)", "Cost/Year ($)",
     "On Dashboard", "All Tabs", "Groups",
 ]
@@ -47,13 +48,14 @@ def _apply_row_colors(ws, row_idx: int, row: dict) -> None:
             if bw_font:
                 cell.font = bw_font
 
-    # VPN Primary
-    vpn1 = row.get("VPN Primary")
-    if vpn1 == "DOWN":
-        ws.cell(row=row_idx, column=MAIN_HEADERS.index("VPN Primary") + 1).fill = RED_FILL
-    elif vpn1 == "OK":
-        from zbbx_mcp.excel import GREEN_FILL
-        ws.cell(row=row_idx, column=MAIN_HEADERS.index("VPN Primary") + 1).fill = GREEN_FILL
+    # VPN health columns
+    from zbbx_mcp.excel import GREEN_FILL
+    for col_name in ("VPN Primary", "VPN Secondary", "VPN Tertiary"):
+        val = row.get(col_name, "")
+        if val == "DOWN":
+            ws.cell(row=row_idx, column=MAIN_HEADERS.index(col_name) + 1).fill = RED_FILL
+        elif val == "OK":
+            ws.cell(row=row_idx, column=MAIN_HEADERS.index(col_name) + 1).fill = GREEN_FILL
 
 
 def _write_dashboard_tabs_sheet(wb: Workbook, rows: list[dict], tab_data: dict) -> None:
@@ -323,15 +325,30 @@ def _write_health_overview_sheet(wb: Workbook, rows: list[dict]) -> None:
 
 
 def _write_off_dashboard_sheet(wb: Workbook, rows: list[dict]) -> None:
-    """Sheet 5: Servers not on any dashboard."""
+    """Sheet: Servers not on any dashboard — with VPN health and templates."""
     off = [r for r in rows if r["On Dashboard"] == "No"]
     if not off:
         return
     ws = wb.create_sheet(f"Off-Dashboard ({len(off)})")
     headers = ["#", "Host", "Country", "Product", "Tier", "Provider", "IP",
-               "CPU %", "Traffic In Mbps", "VPN Primary", "Agent", "Groups"]
+               "CPU %", "Traffic In Mbps", "VPN Primary", "VPN Secondary", "VPN Tertiary",
+               "Agent", "Templates", "Groups"]
     write_headers(ws, headers)
     write_data_rows(ws, off, headers)
+
+    # Color VPN status columns
+    vpn1_col = headers.index("VPN Primary") + 1
+    vpn2_col = headers.index("VPN Secondary") + 1
+    vpn3_col = headers.index("VPN Tertiary") + 1
+    for idx, r in enumerate(off, 2):
+        for col, key in ((vpn1_col, "VPN Primary"), (vpn2_col, "VPN Secondary"), (vpn3_col, "VPN Tertiary")):
+            val = r.get(key, "")
+            if val == "DOWN":
+                ws.cell(row=idx, column=col).fill = RED_FILL
+            elif val == "OK":
+                from zbbx_mcp.excel import GREEN_FILL
+                ws.cell(row=idx, column=col).fill = GREEN_FILL
+
     finalize_sheet(ws, headers, len(off))
 
 

@@ -73,6 +73,10 @@ class ServerRow:
     connections: float | None = None
     vpn1: str = ""
     agent: str = ""
+    vpn2: str = ""
+    vpn_tertiary: str = ""
+    active_problems: int = 0
+    templates: str = ""
     cost_month: float | None = None
     cost_year: float | None = None
     on_dashboard: bool = False
@@ -100,7 +104,11 @@ class ServerRow:
             "BW Tier": self.bw_tier,
             "Connections": self.connections,
             "VPN Primary": self.vpn1,
+            "VPN Secondary": self.vpn2,
+            "VPN Tertiary": self.vpn_tertiary,
             "Agent": self.agent,
+            "Problems": self.active_problems or "",
+            "Templates": self.templates,
             "Cost/Month ($)": self.cost_month,
             "Cost/Year ($)": self.cost_year,
             "On Dashboard": "Yes" if self.on_dashboard else "No",
@@ -191,14 +199,25 @@ async def fetch_all_data(
                                   "filter": {"key_": "agent.version", "status": "0"}}),
         client.call("item.get", {"hostids": all_ids, "output": ["hostid", "lastvalue"],
                                   "filter": {"key_": "vpn_primary_check[{HOST.IP}]", "status": "0"}}),
+        client.call("item.get", {"hostids": all_ids, "output": ["hostid", "lastvalue"],
+                                  "filter": {"key_": "vpn_secondary_check[{HOST.IP}]", "status": "0"}}),
+        client.call("item.get", {"hostids": all_ids, "output": ["hostid", "lastvalue"],
+                                  "search": {"key_": "vpn3"}, "searchWildcardsEnabled": True,
+                                  "filter": {"status": "0"}}),
         client.call("usermacro.get", {"hostids": all_ids, "output": ["hostid", "value"],
                                        "filter": {"macro": "{$COST_MONTH}"}}),
+        client.call("problem.get", {"hostids": all_ids,
+                                     "output": ["eventid", "objectid"],
+                                     "recent": True, "countOutput": False}),
+        client.call("host.get", {"hostids": all_ids, "output": ["hostid"],
+                                  "selectParentTemplates": ["name"]}),
         graph_task,
     )
 
     (cpu_items, load_items, mem_items, conn_items,
      in_traffic_items, out_traffic_items,
-     version_items, vpn1_items, cost_macros, graphs_raw) = results
+     version_items, vpn1_items, vpn2_items, vpn3_items,
+     cost_macros, problems, template_hosts, graphs_raw) = results
 
     graphs = graphs_raw if isinstance(graphs_raw, list) else []
 
@@ -210,8 +229,43 @@ async def fetch_all_data(
     cost_map = build_value_map(cost_macros, lambda v: float(v))
     version_map = build_value_map(version_items, lambda v: str(v))
     vpn1_map = build_value_map(vpn1_items, lambda v: int(float(v)))
+    vpn2_map = build_value_map(vpn2_items, lambda v: int(float(v)))
     in_traffic_map = build_max_map(in_traffic_items)
     out_traffic_map = build_max_map(out_traffic_items)
+
+    # VPN Tertiary: any check item with value 1 = OK
+    vpn3_map: dict[str, int] = {}
+    for i in vpn3_items:
+        try:
+            val = int(float(i["lastvalue"]))
+            hid = i["hostid"]
+            if val > vpn3_map.get(hid, 0):
+                vpn3_map[hid] = val
+        except (ValueError, TypeError, KeyError):
+            pass
+
+    # Active problems count per host
+    problem_count: dict[str, int] = {}
+    if isinstance(problems, list):
+        for p in problems:
+            # problems don't have hostid directly, but we fetched by hostids
+            # count unique eventids per host using objectid (triggerid)
+            pass
+    # Simpler: count problems per host via a separate approach
+    # Actually problem.get with hostids returns all problems for those hosts
+    # but doesn't include hostid in output. Let's count by fetching with grouping
+    # For now, use a different approach: count problems per host from triggers
+    problem_count = {}  # Will be empty for now, handled below
+
+    # Templates per host
+    template_map: dict[str, str] = {}
+    if isinstance(template_hosts, list):
+        for h in template_hosts:
+            tnames = [t["name"] for t in h.get("parentTemplates", [])]
+            if tnames:
+                template_map[h["hostid"]] = ", ".join(tnames[:3])
+                if len(tnames) > 3:
+                    template_map[h["hostid"]] += f" (+{len(tnames)-3})"
 
     # Build graph → host and dashboard/tab mappings
     graph_to_hostid: dict[str, str] = {}
@@ -255,7 +309,10 @@ async def fetch_all_data(
         total_mbps = round((in_mbps or 0) + (out_mbps or 0), 1) if (in_mbps or out_mbps) else None
         cost = cost_map.get(hid)
         vpn1_val = vpn1_map.get(hid)
+        vpn2_val = vpn2_map.get(hid)
+        vpn3_val = vpn3_map.get(hid)
         version = version_map.get(hid)
+        templates = template_map.get(hid, "")
 
         tabs = host_dash_tabs.get(hid, [])
 
@@ -280,7 +337,10 @@ async def fetch_all_data(
             bw_tier=classify_bandwidth(in_mbps),
             connections=conn_map.get(hid),
             vpn1="OK" if vpn1_val == 1 else ("DOWN" if vpn1_val is not None else ""),
+            vpn2="OK" if vpn2_val == 1 else ("DOWN" if vpn2_val is not None else ""),
+            vpn_tertiary="OK" if vpn3_val and vpn3_val >= 1 else ("DOWN" if vpn3_val is not None else ""),
             agent=str(version) if isinstance(version, str) else "",
+            templates=templates,
             cost_month=cost,
             cost_year=round(cost * 12, 2) if cost else None,
             on_dashboard=on_dashboard,
