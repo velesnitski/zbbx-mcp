@@ -97,13 +97,23 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()):
                 instance: Zabbix instance name (optional, for multi-instance setups)
             """
             try:
+                try:
+                    since_ts = int(active_since)
+                    till_ts = int(active_till)
+                except (ValueError, TypeError):
+                    return "Invalid timestamps. Use Unix timestamps (e.g., 1710000000)."
+                if till_ts <= since_ts:
+                    return "active_till must be after active_since."
+                if till_ts - since_ts > 365 * 86400:
+                    return "Maintenance window cannot exceed 1 year."
+
                 client = resolver.resolve(instance)
                 params = {
                     "name": name,
-                    "active_since": int(active_since),
-                    "active_till": int(active_till),
+                    "active_since": since_ts,
+                    "active_till": till_ts,
                     "maintenance_type": 0 if collect_data else 1,
-                    "timeperiods": [{"timeperiod_type": 0, "period": int(active_till) - int(active_since)}],
+                    "timeperiods": [{"timeperiod_type": 0, "period": till_ts - since_ts}],
                 }
                 if host_ids:
                     params["hostids"] = [h.strip() for h in host_ids.split(",")]
