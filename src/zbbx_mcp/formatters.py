@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 
-# Zabbix severity levels
+# Zabbix severity levels (shared across triggers, problems, events)
 SEVERITY_NAMES = {
     "0": "Not classified",
     "1": "Information",
@@ -9,6 +9,15 @@ SEVERITY_NAMES = {
     "4": "High",
     "5": "Disaster",
 }
+
+# Host/interface status
+HOST_STATUS = {"0": "Enabled", "1": "Disabled"}
+
+# Interface types
+INTERFACE_TYPES = {"1": "Agent", "2": "SNMP", "3": "IPMI", "4": "JMX"}
+
+# Graph types
+GRAPH_TYPES = {"0": "Normal", "1": "Stacked", "2": "Pie", "3": "Exploded"}
 
 
 def _ts(epoch: str) -> str:

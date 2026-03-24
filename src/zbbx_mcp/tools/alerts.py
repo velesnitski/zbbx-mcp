@@ -1,5 +1,7 @@
 """Alert notification history."""
 
+import time as _time
+
 import httpx
 
 from zbbx_mcp.resolver import InstanceResolver
@@ -94,7 +96,6 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()):
                 instance: Zabbix instance name (optional, for multi-instance setups)
             """
             try:
-                import time as _time
                 client = resolver.resolve(instance)
                 time_from = int(_time.time()) - (hours * 3600)
 
