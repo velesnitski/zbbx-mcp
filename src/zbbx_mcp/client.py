@@ -95,15 +95,20 @@ class ZabbixClient:
 
     async def snapshot_and_record(
         self,
-        action: Action,
+        action: Action | str,
         object_type: str,
         object_id: str,
         description: str = "",
     ) -> None:
         """Take a snapshot of an object and record it in the rollback log."""
+        if isinstance(action, str):
+            action = Action(action)
         snap = {}
         if action in (Action.UPDATE, Action.DELETE):
-            snap = await self.snapshot(object_type, object_id)
+            try:
+                snap = await self.snapshot(object_type, object_id)
+            except (ValueError, Exception):
+                snap = {}  # Record without snapshot rather than fail the operation
         self.rollback_log.record(action, object_type, object_id, snap, description)
 
     def record_create(self, object_type: str, object_id: str, description: str = "") -> None:

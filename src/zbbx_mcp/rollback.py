@@ -70,6 +70,13 @@ class RollbackLog:
     def last(self) -> RollbackEntry | None:
         return self._entries[-1] if self._entries else None
 
+    def remove_by_index(self, index: int) -> bool:
+        """Remove entry at index. Returns True if removed."""
+        if 0 <= index < len(self._entries):
+            del self._entries[index]
+            return True
+        return False
+
     def __len__(self) -> int:
         return len(self._entries)
 

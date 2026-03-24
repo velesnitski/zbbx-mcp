@@ -1,5 +1,9 @@
 """Server cost management via {$COST_MONTH} host macros."""
 
+import asyncio
+import fnmatch
+import json
+
 import httpx
 
 from zbbx_mcp.resolver import InstanceResolver
@@ -26,9 +30,6 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()):
                 costs_json: JSON string mapping hostname patterns to monthly cost in USD
                 instance: Zabbix instance name (optional, for multi-instance setups)
             """
-            import json
-            import fnmatch
-
             try:
                 cost_rules = json.loads(costs_json)
             except json.JSONDecodeError:
@@ -211,7 +212,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()):
 
                 client = resolver.resolve(instance)
 
-                hosts, macros = await __import__("asyncio").gather(
+                hosts, macros = await asyncio.gather(
                     client.call("host.get", {
                         "output": ["hostid", "host"],
                         "selectGroups": ["name"],

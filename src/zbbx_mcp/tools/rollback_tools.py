@@ -3,6 +3,7 @@ import httpx
 from zbbx_mcp.resolver import InstanceResolver
 from zbbx_mcp.rollback import Action, SNAPSHOT_CONFIG
 from zbbx_mcp.formatters import _ts
+from zbbx_mcp.utils import ROLLBACK_STRIP_FIELDS
 
 
 def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()):
@@ -80,9 +81,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()):
                     # Ensure the ID field is present
                     restore[id_field] = entry.object_id
                     # Remove read-only fields that can't be sent back
-                    for key in ("lastchange", "flags", "templateid", "state",
-                                "error", "lastclock", "lastns", "lastvalue",
-                                "prevvalue", "evaltype"):
+                    for key in ROLLBACK_STRIP_FIELDS:
                         restore.pop(key, None)
 
                     await client.call(cfg["update_method"], restore)
@@ -154,9 +153,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()):
                         return f"Cannot roll back #{index}: no snapshot."
                     restore = dict(entry.snapshot)
                     restore[id_field] = entry.object_id
-                    for key in ("lastchange", "flags", "templateid", "state",
-                                "error", "lastclock", "lastns", "lastvalue",
-                                "prevvalue", "evaltype"):
+                    for key in ROLLBACK_STRIP_FIELDS:
                         restore.pop(key, None)
                     await client.call(cfg["update_method"], restore)
                     msg = f"Rolled back UPDATE #{index}: restored {entry.object_type} {entry.object_id}."
@@ -177,7 +174,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()):
                     return f"Unknown action for #{index}."
 
                 # Remove the entry from the log
-                client.rollback_log._entries.remove(entry)
+                client.rollback_log.remove_by_index(index)
                 return msg
             except (httpx.HTTPError, ValueError) as e:
                 return f"Rollback failed: {e}"
