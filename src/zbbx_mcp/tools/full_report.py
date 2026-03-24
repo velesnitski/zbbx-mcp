@@ -13,7 +13,7 @@ from zbbx_mcp.resolver import InstanceResolver
 from zbbx_mcp.data import fetch_all_data
 from zbbx_mcp.excel import (
     BW_RED, BW_ORANGE, BW_GREEN,
-    RED_FILL, BOLD_FONT,
+    RED_FILL, BOLD_FONT, GREEN_FILL, ORANGE_FILL, LIGHT_GREEN_FILL,
     write_headers, write_data_rows, finalize_sheet, auto_width,
     bandwidth_fill, cpu_fill,
 )
@@ -49,7 +49,6 @@ def _apply_row_colors(ws, row_idx: int, row: dict) -> None:
                 cell.font = bw_font
 
     # VPN health columns
-    from zbbx_mcp.excel import GREEN_FILL
     for col_name in ("VPN Primary", "VPN Secondary", "VPN Tertiary"):
         val = row.get(col_name, "")
         if val == "DOWN":
@@ -124,7 +123,6 @@ def _write_provider_product_sheet(wb: Workbook, rows: list[dict]) -> None:
 
 def _write_bandwidth_sheet(wb: Workbook, rows: list[dict]) -> None:
     """Sheet 4: Bandwidth analysis by tier."""
-    from zbbx_mcp.excel import GREEN_FILL, ORANGE_FILL, LIGHT_GREEN_FILL
     ws = wb.create_sheet("Bandwidth Analysis")
     headers = ["Tier", "Range", "Servers", "% of Total", "Median CPU %", "Total Cost ($)"]
     write_headers(ws, headers)
@@ -161,7 +159,6 @@ def _write_bandwidth_sheet(wb: Workbook, rows: list[dict]) -> None:
 
 def _write_product_analytics_sheet(wb: Workbook, rows: list[dict]) -> None:
     """Sheet: Product analytics — aggregated metrics per product/tier."""
-    from zbbx_mcp.excel import GREEN_FILL, ORANGE_FILL, LIGHT_GREEN_FILL, BOLD_FONT
     ws = wb.create_sheet("Product Analytics")
     headers = [
         "Product", "Tier", "Servers", "On Dashboard",
@@ -223,7 +220,6 @@ def _write_product_analytics_sheet(wb: Workbook, rows: list[dict]) -> None:
 
 def _write_country_analytics_sheet(wb: Workbook, rows: list[dict]) -> None:
     """Sheet: Country analytics — servers and traffic per country."""
-    from zbbx_mcp.excel import BOLD_FONT
     ws = wb.create_sheet("Country Analytics")
     headers = [
         "Country", "Servers", "Products", "Providers",
@@ -272,7 +268,6 @@ def _write_country_analytics_sheet(wb: Workbook, rows: list[dict]) -> None:
 
 def _write_health_overview_sheet(wb: Workbook, rows: list[dict]) -> None:
     """Sheet: Health overview — problems summary."""
-    from zbbx_mcp.excel import GREEN_FILL, ORANGE_FILL, BOLD_FONT
     ws = wb.create_sheet("Health Overview")
     headers = [
         "Metric", "Count", "% of Total", "Details",
