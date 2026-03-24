@@ -4,7 +4,7 @@ from zbbx_mcp.tools import (
     triggers, templates, maintenance, events, discovery,
     configuration, scripts, services, macros, rollback_tools,
     inventory, report, alerts, users, proxies, maps, media, slack,
-    infra_report, costs,
+    infra_report, costs, traffic,
 )
 
 # Tools that modify data — blocked in read-only mode
@@ -66,7 +66,7 @@ def register_all(
         triggers, templates, maintenance, events, discovery,
         configuration, scripts, services, macros, rollback_tools,
         inventory, report, alerts, users, proxies, maps, media, slack,
-        infra_report, costs,
+        infra_report, costs, traffic,
     ]
     for module in modules:
         module.register(mcp, resolver, skip=skip)
