@@ -146,15 +146,22 @@ async def fetch_all_data(
     if dashboard_id:
         dash_params["dashboardids"] = [dashboard_id]
 
-    dashboards, hosts = await asyncio.gather(
-        client.call("dashboard.get", dash_params),
-        client.call("host.get", {
-            "output": ["hostid", "host", "name", "status"],
-            "selectGroups": ["name"],
-            "selectInterfaces": ["ip"],
-            "filter": {"status": "0"},
-        }),
-    )
+    # Use cached hosts if available (hosts rarely change)
+    cached_hosts = client._get_cached("all_enabled_hosts", ttl=60.0)
+    if cached_hosts is not None:
+        dashboards = await client.call("dashboard.get", dash_params)
+        hosts = cached_hosts
+    else:
+        dashboards, hosts = await asyncio.gather(
+            client.call("dashboard.get", dash_params),
+            client.call("host.get", {
+                "output": ["hostid", "host", "name", "status"],
+                "selectGroups": ["name"],
+                "selectInterfaces": ["ip"],
+                "filter": {"status": "0"},
+            }),
+        )
+        client._set_cache("all_enabled_hosts", hosts)
 
     # Build graph → (dashboard, tab) mapping
     all_graph_ids: set[str] = set()
@@ -191,10 +198,21 @@ async def fetch_all_data(
                                   "filter": {"key_": "vm.memory.size[available]", "status": "0"}}),
         client.call("item.get", {"hostids": all_ids, "output": ["hostid", "lastvalue"],
                                   "filter": {"key_": "service_connections", "status": "0"}}),
+        # Traffic: fast filter by common interface keys (covers ~88% of hosts)
         client.call("item.get", {"hostids": all_ids, "output": ["hostid", "lastvalue"],
-                                  "search": {"name": "Incoming network traffic"}, "filter": {"status": "0"}}),
+                                  "filter": {"key_": [
+                                      "net.if.in[eno1]", "net.if.in[eno2]", "net.if.in[eth0]",
+                                      "net.if.in[eth1]", "net.if.in[enp1s0f0]", "net.if.in[enp2s0f0]",
+                                      "net.if.in[enp3s0f0]", "net.if.in[enp3s0f1]",
+                                      "net.if.in[ppp0]", "net.if.in[ppp1]",
+                                  ], "status": "0"}}),
         client.call("item.get", {"hostids": all_ids, "output": ["hostid", "lastvalue"],
-                                  "search": {"name": "Outgoing network traffic"}, "filter": {"status": "0"}}),
+                                  "filter": {"key_": [
+                                      "net.if.out[eno1]", "net.if.out[eno2]", "net.if.out[eth0]",
+                                      "net.if.out[eth1]", "net.if.out[enp1s0f0]", "net.if.out[enp2s0f0]",
+                                      "net.if.out[enp3s0f0]", "net.if.out[enp3s0f1]",
+                                      "net.if.out[ppp0]", "net.if.out[ppp1]",
+                                  ], "status": "0"}}),
         client.call("item.get", {"hostids": all_ids, "output": ["hostid", "lastvalue"],
                                   "filter": {"key_": "agent.version", "status": "0"}}),
         client.call("item.get", {"hostids": all_ids, "output": ["hostid", "lastvalue"],
@@ -206,9 +224,6 @@ async def fetch_all_data(
                                   "filter": {"status": "0"}}),
         client.call("usermacro.get", {"hostids": all_ids, "output": ["hostid", "value"],
                                        "filter": {"macro": "{$COST_MONTH}"}}),
-        client.call("problem.get", {"hostids": all_ids,
-                                     "output": ["eventid", "objectid"],
-                                     "recent": True, "countOutput": False}),
         client.call("host.get", {"hostids": all_ids, "output": ["hostid"],
                                   "selectParentTemplates": ["name"]}),
         graph_task,
@@ -224,8 +239,8 @@ async def fetch_all_data(
     (cpu_items, load_items, mem_items, conn_items,
      in_traffic_items, out_traffic_items,
      version_items, service1_items, service2_items, service3_items,
-     cost_macros, problems, template_hosts, graphs_raw) = (
-        _safe(results[i], i) for i in range(14)
+     cost_macros, template_hosts, graphs_raw) = (
+        _safe(results[i], i) for i in range(13)
     )
 
     graphs = graphs_raw if isinstance(graphs_raw, list) else []
@@ -242,6 +257,47 @@ async def fetch_all_data(
     in_traffic_map = build_max_map(in_traffic_items)
     out_traffic_map = build_max_map(out_traffic_items)
 
+    # Phase 3: fallback — fetch traffic for hosts missed by fast filter
+    covered_hosts = set(in_traffic_map.keys())
+    missing_hosts = [hid for hid in all_ids if hid not in covered_hosts]
+    if missing_hosts:
+        try:
+            fallback_in, fallback_out = await asyncio.gather(
+                client.call("item.get", {
+                    "hostids": missing_hosts,
+                    "output": ["hostid", "lastvalue"],
+                    "search": {"name": "Incoming network traffic"},
+                    "filter": {"status": "0"},
+                }),
+                client.call("item.get", {
+                    "hostids": missing_hosts,
+                    "output": ["hostid", "lastvalue"],
+                    "search": {"name": "Outgoing network traffic"},
+                    "filter": {"status": "0"},
+                }),
+                return_exceptions=True,
+            )
+            if isinstance(fallback_in, list):
+                for i in fallback_in:
+                    try:
+                        val = float(i["lastvalue"])
+                        hid = i["hostid"]
+                        if val > in_traffic_map.get(hid, 0):
+                            in_traffic_map[hid] = val
+                    except (ValueError, TypeError, KeyError):
+                        pass
+            if isinstance(fallback_out, list):
+                for i in fallback_out:
+                    try:
+                        val = float(i["lastvalue"])
+                        hid = i["hostid"]
+                        if val > out_traffic_map.get(hid, 0):
+                            out_traffic_map[hid] = val
+                    except (ValueError, TypeError, KeyError):
+                        pass
+        except Exception:
+            pass  # Fallback is best-effort
+
     # service Tertiary: any check item with value 1 = OK
     service3_map: dict[str, int] = {}
     for i in service3_items:
@@ -252,19 +308,6 @@ async def fetch_all_data(
                 service3_map[hid] = val
         except (ValueError, TypeError, KeyError):
             pass
-
-    # Active problems count per host
-    problem_count: dict[str, int] = {}
-    if isinstance(problems, list):
-        for p in problems:
-            # problems don't have hostid directly, but we fetched by hostids
-            # count unique eventids per host using objectid (triggerid)
-            pass
-    # Simpler: count problems per host via a separate approach
-    # Actually problem.get with hostids returns all problems for those hosts
-    # but doesn't include hostid in output. Let's count by fetching with grouping
-    # For now, use a different approach: count problems per host from triggers
-    problem_count = {}  # Will be empty for now, handled below
 
     # Templates per host
     template_map: dict[str, str] = {}
