@@ -119,6 +119,8 @@ EXPECTED_TOOLS = {
     "detect_traffic_drops",
     # dashboard_report.py
     "export_dashboard",
+    # full_report.py
+    "generate_full_report",
 }
 
 
