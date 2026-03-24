@@ -81,7 +81,15 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()):
                 host_map = {h["hostid"]: h for h in hosts}
                 all_ids = list(host_map.keys())
 
-                # Phase 2: metrics + graphs + costs (parallel)
+                # Phase 2: all metrics in parallel (10 calls)
+                graph_task = (
+                    client.call("graph.get", {
+                        "graphids": list(all_graph_ids),
+                        "output": ["graphid"],
+                        "selectHosts": ["hostid"],
+                    }) if all_graph_ids else asyncio.sleep(0)
+                )
+
                 results = await asyncio.gather(
                     client.call("item.get", {
                         "hostids": all_ids,
@@ -109,19 +117,35 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()):
                         "search": {"name": "Incoming network traffic"},
                         "filter": {"status": "0"},
                     }),
+                    client.call("item.get", {
+                        "hostids": all_ids,
+                        "output": ["hostid", "lastvalue"],
+                        "search": {"name": "Outgoing network traffic"},
+                        "filter": {"status": "0"},
+                    }),
+                    client.call("item.get", {
+                        "hostids": all_ids,
+                        "output": ["hostid", "lastvalue"],
+                        "filter": {"key_": "agent.version", "status": "0"},
+                    }),
+                    client.call("item.get", {
+                        "hostids": all_ids,
+                        "output": ["hostid", "lastvalue"],
+                        "filter": {"key_": "service_primary_check[{HOST.IP}]", "status": "0"},
+                    }),
                     client.call("usermacro.get", {
                         "hostids": all_ids,
                         "output": ["hostid", "value"],
                         "filter": {"macro": "{$COST_MONTH}"},
                     }),
-                    client.call("graph.get", {
-                        "graphids": list(all_graph_ids),
-                        "output": ["graphid"],
-                        "selectHosts": ["hostid"],
-                    }) if all_graph_ids else asyncio.coroutine(lambda: [])(),
+                    graph_task,
                 )
 
-                cpu_items, load_items, mem_items, conn_items, traffic_items, cost_macros, graphs = results
+                (cpu_items, load_items, mem_items, conn_items,
+                 in_traffic_items, out_traffic_items,
+                 version_items, service1_items, cost_macros, graphs_raw) = results
+
+                graphs = graphs_raw if isinstance(graphs_raw, list) else []
 
                 # Build metrics maps
                 def _build_map(items, transform=float):
@@ -133,22 +157,35 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()):
                             pass
                     return m
 
+                def _build_max_map(items):
+                    m: dict[str, float] = {}
+                    for i in items:
+                        try:
+                            val = float(i["lastvalue"])
+                            hid = i["hostid"]
+                            if val > m.get(hid, 0):
+                                m[hid] = val
+                        except (ValueError, TypeError):
+                            pass
+                    return m
+
                 cpu_map = _build_map(cpu_items, lambda v: round(100 - float(v), 1))
                 load_map = _build_map(load_items, lambda v: round(float(v), 2))
                 mem_map = _build_map(mem_items, lambda v: round(float(v) / 1_073_741_824, 1))
                 conn_map = _build_map(conn_items)
                 cost_map = _build_map(cost_macros, lambda v: float(v))
+                version_map = _build_map(version_items, lambda v: str(v))
+                service1_map = _build_map(service1_items, lambda v: int(float(v)))
+                in_traffic_map = _build_max_map(in_traffic_items)
+                out_traffic_map = _build_max_map(out_traffic_items)
 
-                # Traffic: max across interfaces per host
-                traffic_map: dict[str, float] = {}
-                for i in traffic_items:
-                    try:
-                        val = float(i["lastvalue"])
-                        hid = i["hostid"]
-                        if val > traffic_map.get(hid, 0):
-                            traffic_map[hid] = val
-                    except (ValueError, TypeError):
-                        pass
+                # Extract country code from hostname (e.g., srv-free-nl0105 → NL)
+                import re
+                _COUNTRY_RE = re.compile(r'[-_]([a-z]{2})\d', re.IGNORECASE)
+
+                def _extract_country(hostname: str) -> str:
+                    m = _COUNTRY_RE.search(hostname)
+                    return m.group(1).upper() if m else ""
 
                 # Build host → dashboard/tab mapping (may have multiple)
                 graph_to_hostid = {}
@@ -175,27 +212,37 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()):
                     if not on_dashboard and not include_off_dashboard:
                         continue
 
+                    hostname = h.get("host", "")
                     ip = next((i["ip"] for i in h.get("interfaces", []) if i.get("ip") != "127.0.0.1"), "")
                     provider = detect_provider(ip) if ip else ""
-                    traffic = traffic_map.get(hid)
-                    traffic_mbps = round(traffic / 1e6, 1) if traffic else None
+                    country = _extract_country(hostname)
+                    in_traffic = in_traffic_map.get(hid)
+                    out_traffic = out_traffic_map.get(hid)
+                    in_mbps = round(in_traffic / 1e6, 1) if in_traffic else None
+                    out_mbps = round(out_traffic / 1e6, 1) if out_traffic else None
+                    total_mbps = round((in_mbps or 0) + (out_mbps or 0), 1) if (in_mbps or out_mbps) else None
                     cost = cost_map.get(hid)
+                    version = version_map.get(hid)
+                    service1 = service1_map.get(hid)
+                    service1_status = ""
+                    if service1 is not None:
+                        service1_status = "OK" if service1 == 1 else "DOWN"
 
-                    # Dashboard info (first match for primary, all for list)
+                    # Dashboard info
                     tabs = host_dash_tabs.get(hid, [])
                     primary_dash = tabs[0]["dashboard"] if tabs else ""
                     primary_tab = tabs[0]["tab"] if tabs else ""
                     all_tabs = ", ".join(f"{t['dashboard']} / {t['tab']}" for t in tabs) if tabs else ""
 
-                    # Bandwidth utilization
-                    bw_util = round(traffic_mbps / BW_MAX * 100, 1) if traffic_mbps else None
+                    # Bandwidth utilization (based on incoming, the dominant direction)
+                    bw_util = round(in_mbps / BW_MAX * 100, 1) if in_mbps else None
                     bw_tier = ""
-                    if traffic_mbps is not None:
-                        if traffic_mbps >= BW_RED:
+                    if in_mbps is not None:
+                        if in_mbps >= BW_RED:
                             bw_tier = "CRITICAL"
-                        elif traffic_mbps >= BW_ORANGE:
+                        elif in_mbps >= BW_ORANGE:
                             bw_tier = "HIGH"
-                        elif traffic_mbps >= BW_GREEN:
+                        elif in_mbps >= BW_GREEN:
                             bw_tier = "NORMAL"
                         else:
                             bw_tier = "LOW"
@@ -203,8 +250,9 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()):
                     groups = ", ".join(g["name"] for g in h.get("groups", []))
 
                     rows.append({
-                        "Host": h.get("host", ""),
+                        "Host": hostname,
                         "Name": h.get("name", ""),
+                        "Country": country,
                         "Dashboard": primary_dash,
                         "Tab": primary_tab,
                         "Product": prod,
@@ -214,10 +262,14 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()):
                         "CPU %": cpu_map.get(hid),
                         "Load Avg5": load_map.get(hid),
                         "Mem Avail GB": mem_map.get(hid),
-                        "Traffic Mbps": traffic_mbps,
+                        "Traffic In Mbps": in_mbps,
+                        "Traffic Out Mbps": out_mbps,
+                        "Traffic Total Mbps": total_mbps,
                         "BW Util %": bw_util,
                         "BW Tier": bw_tier,
                         "Connections": conn_map.get(hid),
+                        "service Primary": service1_status,
+                        "Agent": version if isinstance(version, str) else "",
                         "Cost/Month ($)": cost,
                         "Cost/Year ($)": round(cost * 12, 2) if cost else None,
                         "On Dashboard": "Yes" if on_dashboard else "No",
@@ -225,7 +277,11 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()):
                         "Groups": groups,
                     })
 
-                rows.sort(key=lambda r: (r["Product"], r["Tier"], r["Host"]))
+                # Sort: dashboard servers first, then by product/tier/host
+                rows.sort(key=lambda r: (
+                    0 if r["On Dashboard"] == "Yes" else 1,
+                    r["Product"], r["Tier"], r["Host"],
+                ))
 
                 # Generate Excel
                 from openpyxl import Workbook
@@ -242,11 +298,13 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()):
                 light_green_fill = PatternFill(start_color="E2EFDA", end_color="E2EFDA", fill_type="solid")
                 thin_border = Border(bottom=Side(style="thin", color="D9D9D9"))
 
-                headers = ["#", "Host", "Name", "Dashboard", "Tab", "Product", "Tier",
-                           "Provider", "IP", "CPU %", "Load Avg5", "Mem Avail GB",
-                           "Traffic Mbps", "BW Util %", "BW Tier", "Connections",
-                           "Cost/Month ($)", "Cost/Year ($)", "On Dashboard",
-                           "All Tabs", "Groups"]
+                headers = ["#", "Host", "Name", "Country", "Dashboard", "Tab",
+                           "Product", "Tier", "Provider", "IP",
+                           "CPU %", "Load Avg5", "Mem Avail GB",
+                           "Traffic In Mbps", "Traffic Out Mbps", "Traffic Total Mbps",
+                           "BW Util %", "BW Tier", "Connections", "service Primary", "Agent",
+                           "Cost/Month ($)", "Cost/Year ($)",
+                           "On Dashboard", "All Tabs", "Groups"]
 
                 def _write_headers(ws, hdrs):
                     for col, h in enumerate(hdrs, 1):
@@ -269,9 +327,11 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()):
                 _write_headers(ws1, headers)
 
                 cpu_col = headers.index("CPU %") + 1
-                traffic_col = headers.index("Traffic Mbps") + 1
+                traffic_in_col = headers.index("Traffic In Mbps") + 1
+                traffic_total_col = headers.index("Traffic Total Mbps") + 1
                 bw_col = headers.index("BW Util %") + 1
                 tier_col = headers.index("BW Tier") + 1
+                service1_col = headers.index("service Primary") + 1
 
                 for idx, r in enumerate(rows, 2):
                     ws1.cell(row=idx, column=1, value=idx - 1)
@@ -290,31 +350,44 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()):
                         elif cpu_val < 10:
                             cpu_cell.fill = green_fill
 
-                    # Traffic coloring (the key ask)
-                    traffic_val = r.get("Traffic Mbps")
+                    # Traffic coloring (based on incoming)
+                    traffic_val = r.get("Traffic In Mbps")
                     if traffic_val is not None:
-                        t_cell = ws1.cell(row=idx, column=traffic_col)
-                        bw_cell = ws1.cell(row=idx, column=bw_col)
-                        tier_cell = ws1.cell(row=idx, column=tier_col)
+                        bw_cells = [
+                            ws1.cell(row=idx, column=traffic_in_col),
+                            ws1.cell(row=idx, column=traffic_total_col),
+                            ws1.cell(row=idx, column=bw_col),
+                            ws1.cell(row=idx, column=tier_col),
+                        ]
                         if traffic_val >= BW_MAX:
-                            for c in (t_cell, bw_cell, tier_cell):
+                            for c in bw_cells:
                                 c.fill = dark_red_fill
                                 c.font = dark_red_font
                         elif traffic_val >= BW_RED:
-                            for c in (t_cell, bw_cell, tier_cell):
+                            for c in bw_cells:
                                 c.fill = red_fill
                         elif traffic_val >= BW_ORANGE:
-                            for c in (t_cell, bw_cell, tier_cell):
+                            for c in bw_cells:
                                 c.fill = orange_fill
                         elif traffic_val >= BW_GREEN:
-                            for c in (t_cell, bw_cell, tier_cell):
+                            for c in bw_cells:
                                 c.fill = green_fill
                         else:
-                            for c in (t_cell, bw_cell, tier_cell):
+                            for c in bw_cells:
                                 c.fill = light_green_fill
 
-                last_col_letter = chr(64 + len(headers)) if len(headers) <= 26 else "U"
-                ws1.auto_filter.ref = f"A1:{last_col_letter}{len(rows) + 1}"
+                    # service Primary status coloring
+                    service1_val = r.get("service Primary")
+                    if service1_val:
+                        service1_cell = ws1.cell(row=idx, column=service1_col)
+                        if service1_val == "DOWN":
+                            service1_cell.fill = red_fill
+                        elif service1_val == "OK":
+                            service1_cell.fill = green_fill
+
+                from openpyxl.utils import get_column_letter
+                last_col = get_column_letter(len(headers))
+                ws1.auto_filter.ref = f"A1:{last_col}{len(rows) + 1}"
                 ws1.freeze_panes = "A2"
                 _auto_width(ws1, headers)
 
@@ -334,8 +407,8 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()):
                 for idx, (key, tab_rows) in enumerate(sorted(tab_data.items()), 2):
                     dash, tab = key.split("||", 1)
                     cpu_vals = [r["CPU %"] for r in tab_rows if r["CPU %"] is not None]
-                    t_vals = [r["Traffic Mbps"] for r in tab_rows if r["Traffic Mbps"] is not None]
-                    high_bw = sum(1 for r in tab_rows if (r["Traffic Mbps"] or 0) >= BW_RED)
+                    t_vals = [r["Traffic In Mbps"] for r in tab_rows if r["Traffic In Mbps"] is not None]
+                    high_bw = sum(1 for r in tab_rows if (r["Traffic In Mbps"] or 0) >= BW_RED)
                     total_conns = sum(r["Connections"] or 0 for r in tab_rows)
                     total_cost = sum(r["Cost/Month ($)"] or 0 for r in tab_rows)
 
@@ -363,8 +436,8 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()):
                     })
                     m["count"] += 1
                     m["cost"] += r["Cost/Month ($)"] or 0
-                    if r["Traffic Mbps"]:
-                        m["traffic"].append(r["Traffic Mbps"])
+                    if r["Traffic In Mbps"]:
+                        m["traffic"].append(r["Traffic In Mbps"])
 
                 products = sorted(set(
                     prod for prov_data in matrix.values() for prod in prov_data
@@ -402,14 +475,14 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()):
                     ("LOW", f"< {BW_GREEN} Mbps", lambda v: v < BW_GREEN),
                     ("NO DATA", "No traffic data", lambda v: False),
                 ]
-                servers_with_traffic = [r for r in rows if r["Traffic Mbps"] is not None]
-                servers_no_traffic = [r for r in rows if r["Traffic Mbps"] is None]
+                servers_with_traffic = [r for r in rows if r["Traffic In Mbps"] is not None]
+                servers_no_traffic = [r for r in rows if r["Traffic In Mbps"] is None]
 
                 for idx, (tier_name, label, pred) in enumerate(tiers, 2):
                     if tier_name == "NO DATA":
                         tier_rows = servers_no_traffic
                     else:
-                        tier_rows = [r for r in servers_with_traffic if pred(r["Traffic Mbps"])]
+                        tier_rows = [r for r in servers_with_traffic if pred(r["Traffic In Mbps"])]
                     cpu_vals = [r["CPU %"] for r in tier_rows if r["CPU %"] is not None]
                     total_cost = sum(r["Cost/Month ($)"] or 0 for r in tier_rows)
                     pct = len(tier_rows) / len(rows) * 100 if rows else 0
@@ -433,8 +506,8 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()):
                                 off_dash = [r for r in rows if r["On Dashboard"] == "No"]
                 if off_dash:
                     ws5 = wb.create_sheet(f"Off-Dashboard ({len(off_dash)})")
-                    off_headers = ["#", "Host", "Product", "Tier", "Provider", "IP",
-                                   "CPU %", "Traffic Mbps", "Groups"]
+                    off_headers = ["#", "Host", "Country", "Product", "Tier", "Provider", "IP",
+                                   "CPU %", "Traffic In Mbps", "service Primary", "Agent", "Groups"]
                     _write_headers(ws5, off_headers)
                     for idx, r in enumerate(off_dash, 2):
                         ws5.cell(row=idx, column=1, value=idx - 1)
