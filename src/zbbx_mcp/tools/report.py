@@ -9,7 +9,7 @@ from statistics import median
 import httpx
 
 from zbbx_mcp.resolver import InstanceResolver
-from zbbx_mcp.tools.inventory import _classify_host, detect_provider
+from zbbx_mcp.classify import classify_host as _classify_host, detect_provider
 
 
 def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()):

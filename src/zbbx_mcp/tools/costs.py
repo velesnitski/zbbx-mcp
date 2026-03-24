@@ -208,7 +208,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()):
                 instance: Zabbix instance name (optional, for multi-instance setups)
             """
             try:
-                from zbbx_mcp.tools.inventory import _classify_host, detect_provider
+                from zbbx_mcp.classify import classify_host as _classify_host, detect_provider
 
                 client = resolver.resolve(instance)
 

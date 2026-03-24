@@ -90,7 +90,11 @@ class ZabbixClient:
 
         result = await self.call(cfg["get_method"], params)
         if result and isinstance(result, list):
-            return result[0]
+            snap = result[0]
+            # Scrub secret macro values (type=1) from snapshots
+            if object_type == "usermacro" and snap.get("type") == "1":
+                snap["value"] = "[REDACTED]"
+            return snap
         return {}
 
     async def snapshot_and_record(
