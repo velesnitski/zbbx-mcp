@@ -25,7 +25,8 @@ MAIN_HEADERS = [
     "Product", "Tier", "Provider", "IP",
     "CPU %", "Load Avg5", "Mem Avail GB",
     "Traffic In Mbps", "Traffic Out Mbps", "Traffic Total Mbps",
-    "BW Util %", "BW Tier", "Connections", "service Primary", "Agent",
+    "BW Util %", "BW Tier", "Connections",
+    "service Primary", "service Secondary", "service Tertiary", "Agent", "Templates",
     "Cost/Month ($)", "Cost/Year ($)",
     "On Dashboard", "All Tabs", "Groups",
 ]
@@ -47,13 +48,14 @@ def _apply_row_colors(ws, row_idx: int, row: dict) -> None:
             if bw_font:
                 cell.font = bw_font
 
-    # service Primary
-    service1 = row.get("service Primary")
-    if service1 == "DOWN":
-        ws.cell(row=row_idx, column=MAIN_HEADERS.index("service Primary") + 1).fill = RED_FILL
-    elif service1 == "OK":
-        from zbbx_mcp.excel import GREEN_FILL
-        ws.cell(row=row_idx, column=MAIN_HEADERS.index("service Primary") + 1).fill = GREEN_FILL
+    # service health columns
+    from zbbx_mcp.excel import GREEN_FILL
+    for col_name in ("service Primary", "service Secondary", "service Tertiary"):
+        val = row.get(col_name, "")
+        if val == "DOWN":
+            ws.cell(row=row_idx, column=MAIN_HEADERS.index(col_name) + 1).fill = RED_FILL
+        elif val == "OK":
+            ws.cell(row=row_idx, column=MAIN_HEADERS.index(col_name) + 1).fill = GREEN_FILL
 
 
 def _write_dashboard_tabs_sheet(wb: Workbook, rows: list[dict], tab_data: dict) -> None:
@@ -323,15 +325,30 @@ def _write_health_overview_sheet(wb: Workbook, rows: list[dict]) -> None:
 
 
 def _write_off_dashboard_sheet(wb: Workbook, rows: list[dict]) -> None:
-    """Sheet 5: Servers not on any dashboard."""
+    """Sheet: Servers not on any dashboard — with service health and templates."""
     off = [r for r in rows if r["On Dashboard"] == "No"]
     if not off:
         return
     ws = wb.create_sheet(f"Off-Dashboard ({len(off)})")
     headers = ["#", "Host", "Country", "Product", "Tier", "Provider", "IP",
-               "CPU %", "Traffic In Mbps", "service Primary", "Agent", "Groups"]
+               "CPU %", "Traffic In Mbps", "service Primary", "service Secondary", "service Tertiary",
+               "Agent", "Templates", "Groups"]
     write_headers(ws, headers)
     write_data_rows(ws, off, headers)
+
+    # Color service status columns
+    service1_col = headers.index("service Primary") + 1
+    service2_col = headers.index("service Secondary") + 1
+    service3_col = headers.index("service Tertiary") + 1
+    for idx, r in enumerate(off, 2):
+        for col, key in ((service1_col, "service Primary"), (service2_col, "service Secondary"), (service3_col, "service Tertiary")):
+            val = r.get(key, "")
+            if val == "DOWN":
+                ws.cell(row=idx, column=col).fill = RED_FILL
+            elif val == "OK":
+                from zbbx_mcp.excel import GREEN_FILL
+                ws.cell(row=idx, column=col).fill = GREEN_FILL
+
     finalize_sheet(ws, headers, len(off))
 
 
