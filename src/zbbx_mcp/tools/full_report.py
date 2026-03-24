@@ -157,6 +157,171 @@ def _write_bandwidth_sheet(wb: Workbook, rows: list[dict]) -> None:
     auto_width(ws, headers)
 
 
+def _write_product_analytics_sheet(wb: Workbook, rows: list[dict]) -> None:
+    """Sheet: Product analytics — aggregated metrics per product/tier."""
+    from zbbx_mcp.excel import GREEN_FILL, ORANGE_FILL, LIGHT_GREEN_FILL, BOLD_FONT
+    ws = wb.create_sheet("Product Analytics")
+    headers = [
+        "Product", "Tier", "Servers", "On Dashboard",
+        "Median CPU %", "Max CPU %",
+        "Median Traffic Mbps", "Max Traffic Mbps", "Servers >= 650 Mbps",
+        "service Primary OK", "service Primary DOWN",
+        "Countries", "Providers",
+        "Cost/Month ($)",
+    ]
+    write_headers(ws, headers)
+
+    # Aggregate by product/tier
+    groups: dict[str, list[dict]] = {}
+    for r in rows:
+        key = f"{r['Product']}||{r['Tier']}"
+        groups.setdefault(key, []).append(r)
+
+    for idx, (key, g_rows) in enumerate(sorted(groups.items()), 2):
+        prod, tier = key.split("||", 1)
+        cpu_vals = [r["CPU %"] for r in g_rows if r["CPU %"] is not None]
+        t_vals = [r["Traffic In Mbps"] for r in g_rows if r["Traffic In Mbps"] is not None]
+        on_dash = sum(1 for r in g_rows if r["On Dashboard"] == "Yes")
+        high_bw = sum(1 for r in g_rows if (r["Traffic In Mbps"] or 0) >= BW_RED)
+        service_ok = sum(1 for r in g_rows if r.get("service Primary") == "OK")
+        service_down = sum(1 for r in g_rows if r.get("service Primary") == "DOWN")
+        countries = sorted(set(r["Country"] for r in g_rows if r["Country"]))
+        providers = sorted(set(r["Provider"] for r in g_rows if r["Provider"]))
+        cost = sum(r["Cost/Month ($)"] or 0 for r in g_rows)
+
+        ws.cell(row=idx, column=1, value=prod)
+        ws.cell(row=idx, column=2, value=tier)
+        ws.cell(row=idx, column=3, value=len(g_rows))
+        ws.cell(row=idx, column=4, value=on_dash)
+        ws.cell(row=idx, column=5, value=round(median(cpu_vals), 1) if cpu_vals else "")
+        ws.cell(row=idx, column=6, value=round(max(cpu_vals), 1) if cpu_vals else "")
+        ws.cell(row=idx, column=7, value=round(median(t_vals), 1) if t_vals else "")
+        ws.cell(row=idx, column=8, value=round(max(t_vals), 1) if t_vals else "")
+        cell_bw = ws.cell(row=idx, column=9, value=high_bw)
+        if high_bw:
+            cell_bw.fill = RED_FILL
+        ws.cell(row=idx, column=10, value=service_ok if service_ok else "")
+        cell_xd = ws.cell(row=idx, column=11, value=service_down if service_down else "")
+        if service_down:
+            cell_xd.fill = RED_FILL
+        ws.cell(row=idx, column=12, value=", ".join(countries))
+        ws.cell(row=idx, column=13, value=", ".join(providers))
+        ws.cell(row=idx, column=14, value=round(cost, 2) if cost else "")
+
+    # Totals
+    total_row = len(groups) + 2
+    ws.cell(row=total_row, column=1, value="TOTAL").font = BOLD_FONT
+    ws.cell(row=total_row, column=3, value=len(rows)).font = BOLD_FONT
+    ws.cell(row=total_row, column=4, value=sum(1 for r in rows if r["On Dashboard"] == "Yes")).font = BOLD_FONT
+    ws.cell(row=total_row, column=9, value=sum(1 for r in rows if (r["Traffic In Mbps"] or 0) >= BW_RED)).font = BOLD_FONT
+
+    ws.freeze_panes = "A2"
+    auto_width(ws, headers)
+
+
+def _write_country_analytics_sheet(wb: Workbook, rows: list[dict]) -> None:
+    """Sheet: Country analytics — servers and traffic per country."""
+    from zbbx_mcp.excel import BOLD_FONT
+    ws = wb.create_sheet("Country Analytics")
+    headers = [
+        "Country", "Servers", "Products", "Providers",
+        "Median CPU %", "Median Traffic Mbps", "Total Traffic Gbps",
+        "Servers >= 650 Mbps", "service Primary DOWN",
+    ]
+    write_headers(ws, headers)
+
+    countries: dict[str, list[dict]] = {}
+    for r in rows:
+        c = r.get("Country") or "Unknown"
+        countries.setdefault(c, []).append(r)
+
+    sorted_countries = sorted(countries.items(), key=lambda x: -len(x[1]))
+    for idx, (country, c_rows) in enumerate(sorted_countries, 2):
+        cpu_vals = [r["CPU %"] for r in c_rows if r["CPU %"] is not None]
+        t_vals = [r["Traffic In Mbps"] for r in c_rows if r["Traffic In Mbps"] is not None]
+        total_gbps = sum(t_vals) / 1000 if t_vals else 0
+        high_bw = sum(1 for r in c_rows if (r["Traffic In Mbps"] or 0) >= BW_RED)
+        service_down = sum(1 for r in c_rows if r.get("service Primary") == "DOWN")
+        products = sorted(set(r["Product"] for r in c_rows))
+        providers = sorted(set(r["Provider"] for r in c_rows if r["Provider"]))
+
+        ws.cell(row=idx, column=1, value=country)
+        ws.cell(row=idx, column=2, value=len(c_rows))
+        ws.cell(row=idx, column=3, value=", ".join(products))
+        ws.cell(row=idx, column=4, value=", ".join(providers))
+        ws.cell(row=idx, column=5, value=round(median(cpu_vals), 1) if cpu_vals else "")
+        ws.cell(row=idx, column=6, value=round(median(t_vals), 1) if t_vals else "")
+        ws.cell(row=idx, column=7, value=round(total_gbps, 1) if total_gbps else "")
+        cell_bw = ws.cell(row=idx, column=8, value=high_bw if high_bw else "")
+        if high_bw:
+            cell_bw.fill = RED_FILL
+        cell_xd = ws.cell(row=idx, column=9, value=service_down if service_down else "")
+        if service_down:
+            cell_xd.fill = RED_FILL
+
+    # Totals
+    total_row = len(sorted_countries) + 2
+    ws.cell(row=total_row, column=1, value="TOTAL").font = BOLD_FONT
+    ws.cell(row=total_row, column=2, value=len(rows)).font = BOLD_FONT
+
+    ws.freeze_panes = "A2"
+    auto_width(ws, headers)
+
+
+def _write_health_overview_sheet(wb: Workbook, rows: list[dict]) -> None:
+    """Sheet: Health overview — problems summary."""
+    from zbbx_mcp.excel import GREEN_FILL, ORANGE_FILL, BOLD_FONT
+    ws = wb.create_sheet("Health Overview")
+    headers = [
+        "Metric", "Count", "% of Total", "Details",
+    ]
+    write_headers(ws, headers)
+
+    total = len(rows)
+    with_cpu = [r for r in rows if r["CPU %"] is not None]
+    with_traffic = [r for r in rows if r["Traffic In Mbps"] is not None]
+
+    metrics = [
+        ("Total Servers", total, "", ""),
+        ("On Dashboard", sum(1 for r in rows if r["On Dashboard"] == "Yes"), "", ""),
+        ("Off Dashboard", sum(1 for r in rows if r["On Dashboard"] == "No"), "", "Review for dashboard coverage"),
+        ("", "", "", ""),
+        ("CPU >= 80%", sum(1 for r in with_cpu if r["CPU %"] >= 80), f"{sum(1 for r in with_cpu if r['CPU %'] >= 80)/total*100:.1f}%", "Overloaded"),
+        ("CPU < 10%", sum(1 for r in with_cpu if r["CPU %"] < 10), f"{sum(1 for r in with_cpu if r['CPU %'] < 10)/total*100:.1f}%", "Potentially idle"),
+        ("No CPU Data", total - len(with_cpu), f"{(total - len(with_cpu))/total*100:.1f}%", "Agent may be down"),
+        ("", "", "", ""),
+        ("Traffic >= 650 Mbps", sum(1 for r in with_traffic if r["Traffic In Mbps"] >= BW_RED), "", "Near saturation"),
+        ("Traffic >= 500 Mbps", sum(1 for r in with_traffic if r["Traffic In Mbps"] >= BW_ORANGE), "", "High utilization"),
+        ("No Traffic Data", total - len(with_traffic), f"{(total - len(with_traffic))/total*100:.1f}%", ""),
+        ("", "", "", ""),
+        ("service Primary OK", sum(1 for r in rows if r.get("service Primary") == "OK"), "", "service healthy"),
+        ("service Primary DOWN", sum(1 for r in rows if r.get("service Primary") == "DOWN"), "", "service broken — investigate"),
+        ("No service Primary Data", sum(1 for r in rows if not r.get("service Primary")), "", "Non-service server or no check"),
+        ("", "", "", ""),
+        ("Unique Countries", len(set(r["Country"] for r in rows if r["Country"])), "", ""),
+        ("Unique Providers", len(set(r["Provider"] for r in rows if r["Provider"])), "", ""),
+        ("Unique Products", len(set(r["Product"] for r in rows)), "", ""),
+    ]
+
+    for idx, (metric, count, pct, detail) in enumerate(metrics, 2):
+        ws.cell(row=idx, column=1, value=metric)
+        if metric:
+            ws.cell(row=idx, column=1).font = BOLD_FONT if not detail else None
+        ws.cell(row=idx, column=2, value=count if count != "" else "")
+        ws.cell(row=idx, column=3, value=pct)
+        ws.cell(row=idx, column=4, value=detail)
+
+        # Color problem rows
+        if "DOWN" in str(metric) or "Overloaded" in detail:
+            ws.cell(row=idx, column=2).fill = RED_FILL
+        elif "idle" in detail.lower():
+            ws.cell(row=idx, column=2).fill = ORANGE_FILL
+        elif "healthy" in detail.lower():
+            ws.cell(row=idx, column=2).fill = GREEN_FILL
+
+    auto_width(ws, headers)
+
+
 def _write_off_dashboard_sheet(wb: Workbook, rows: list[dict]) -> None:
     """Sheet 5: Servers not on any dashboard."""
     off = [r for r in rows if r["On Dashboard"] == "No"]
@@ -217,7 +382,10 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()):
                     _apply_row_colors(ws1, idx, r)
                 finalize_sheet(ws1, MAIN_HEADERS, len(rows))
 
-                # Sheet 2–5
+                # Sheet 2–8
+                _write_health_overview_sheet(wb, rows)
+                _write_product_analytics_sheet(wb, rows)
+                _write_country_analytics_sheet(wb, rows)
                 _write_dashboard_tabs_sheet(wb, rows, result.tab_data)
                 _write_provider_product_sheet(wb, rows)
                 _write_bandwidth_sheet(wb, rows)
@@ -246,14 +414,24 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()):
                 ]
                 if cost:
                     parts.append(f"**Total cost:** ${cost:,.2f}/month")
+                service_down = sum(1 for r in rows if r.get("service Primary") == "DOWN")
+                countries = len(set(r["Country"] for r in rows if r["Country"]))
+                products = len(set(r["Product"] for r in rows))
+
+                if service_down:
+                    parts.append(f"**service Primary DOWN:** {service_down} servers")
                 parts.extend([
+                    f"**Countries:** {countries} | **Products:** {products}",
                     f"",
                     f"### Sheets",
                     f"1. **All Servers** — {len(rows)} × {len(MAIN_HEADERS)} columns",
-                    f"2. **Dashboard Tabs** — {len(result.tab_data)} tabs",
-                    f"3. **Provider × Product** — matrix with costs",
-                    f"4. **Bandwidth Analysis** — utilization tiers",
-                    f"5. **Off-Dashboard** — {off} unmonitored servers",
+                    f"2. **Health Overview** — infrastructure health summary",
+                    f"3. **Product Analytics** — {products} products with metrics",
+                    f"4. **Country Analytics** — {countries} countries",
+                    f"5. **Dashboard Tabs** — {len(result.tab_data)} tabs",
+                    f"6. **Provider × Product** — matrix with costs",
+                    f"7. **Bandwidth Analysis** — utilization tiers",
+                    f"8. **Off-Dashboard** — {off} unmonitored servers",
                 ])
 
                 return "\n".join(parts)
