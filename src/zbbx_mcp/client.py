@@ -1,0 +1,124 @@
+import asyncio
+import json
+from itertools import count
+
+import httpx
+from zbbx_mcp.config import ZabbixConfig
+from zbbx_mcp.rollback import RollbackLog, Action, SNAPSHOT_CONFIG
+
+
+class ZabbixClient:
+    """Async client for Zabbix JSON-RPC API (6.0+).
+
+    Performance notes:
+    - httpx.AsyncClient keeps a connection pool with keepalive by default
+    - HTTP/2 enabled for multiplexed requests over a single TCP connection
+    - Connection limits tuned for typical Zabbix API usage patterns
+    """
+
+    def __init__(self, config: ZabbixConfig):
+        self._config = config
+        self._client = httpx.AsyncClient(
+            http2=True,
+            timeout=httpx.Timeout(30, connect=10),
+            limits=httpx.Limits(
+                max_connections=20,
+                max_keepalive_connections=10,
+                keepalive_expiry=30,
+            ),
+            headers={"Content-Type": "application/json"},
+            base_url=config.url,
+        )
+        self._request_id = count(1)
+        self.rollback_log = RollbackLog()
+
+    async def close(self):
+        """Close the underlying HTTP client and release connections."""
+        await self._client.aclose()
+
+    async def call(self, method: str, params: dict | None = None) -> dict | list:
+        """Execute a Zabbix JSON-RPC API call.
+
+        Args:
+            method: Zabbix API method (e.g., 'host.get', 'problem.get')
+            params: Method parameters
+
+        Returns:
+            The 'result' field from the JSON-RPC response.
+        """
+        # Methods that must be called without auth (Zabbix requirement)
+        no_auth = method in ("apiinfo.version", "user.login")
+
+        request_id = next(self._request_id)
+        payload = {
+            "jsonrpc": "2.0",
+            "method": method,
+            "params": params or {},
+            "id": request_id,
+        }
+        if not no_auth:
+            payload["auth"] = self._config.token
+
+        resp = await self._client.post("/api_jsonrpc.php", json=payload)
+        resp.raise_for_status()
+        body = resp.json()
+
+        if "error" in body:
+            err = body["error"]
+            msg = err.get("data", err.get("message", "Unknown error"))
+            if isinstance(msg, str) and len(msg) > 200:
+                msg = msg[:200] + "..."
+            raise ValueError(f"Zabbix API error ({err.get('code', '?')}): {msg}")
+
+        return body.get("result", {})
+
+    async def snapshot(self, object_type: str, object_id: str) -> dict:
+        """Fetch the current state of an object for rollback purposes."""
+        cfg = SNAPSHOT_CONFIG.get(object_type)
+        if not cfg:
+            return {}
+
+        id_field = cfg["id_field"]
+        params = {
+            f"{id_field}s": [object_id],
+            "output": "extend",
+        }
+        # Add extra select params if configured
+        extra = cfg.get("get_params_extra")
+        if extra:
+            params.update(json.loads(extra))
+
+        result = await self.call(cfg["get_method"], params)
+        if result and isinstance(result, list):
+            return result[0]
+        return {}
+
+    async def snapshot_and_record(
+        self,
+        action: Action,
+        object_type: str,
+        object_id: str,
+        description: str = "",
+    ) -> None:
+        """Take a snapshot of an object and record it in the rollback log."""
+        snap = {}
+        if action in (Action.UPDATE, Action.DELETE):
+            snap = await self.snapshot(object_type, object_id)
+        self.rollback_log.record(action, object_type, object_id, snap, description)
+
+    def record_create(self, object_type: str, object_id: str, description: str = "") -> None:
+        """Record a create operation (no snapshot needed, just the ID for undo)."""
+        self.rollback_log.record(Action.CREATE, object_type, object_id, {}, description)
+
+    async def call_many(self, calls: list[tuple[str, dict | None]]) -> list:
+        """Execute multiple Zabbix API calls in parallel.
+
+        Args:
+            calls: List of (method, params) tuples
+
+        Returns:
+            List of results in the same order as the input calls.
+        """
+        return await asyncio.gather(
+            *(self.call(method, params) for method, params in calls)
+        )
