@@ -3,6 +3,10 @@ from zbbx_mcp.config import load_all_configs, load_global_policy
 from zbbx_mcp.client import ZabbixClient
 from zbbx_mcp.resolver import InstanceResolver
 from zbbx_mcp.tools import register_all
+from zbbx_mcp.logging import setup_logging, setup_sentry, INSTANCE_ID, logged
+
+_logger = setup_logging()
+setup_sentry()
 
 
 def create_server() -> tuple[FastMCP, dict[str, ZabbixClient]]:
@@ -11,6 +15,8 @@ def create_server() -> tuple[FastMCP, dict[str, ZabbixClient]]:
     Returns:
         Tuple of (mcp server, clients dict) so callers can manage lifecycle.
     """
+    _logger.info("Starting zbbx-mcp", extra={"instance": INSTANCE_ID})
+
     mcp = FastMCP("zabbix")
 
     configs = load_all_configs()
@@ -19,6 +25,12 @@ def create_server() -> tuple[FastMCP, dict[str, ZabbixClient]]:
 
     read_only, disabled_tools = load_global_policy()
     register_all(mcp, resolver, read_only=read_only, disabled_tools=disabled_tools)
+
+    # Wrap all tool functions with analytics logging
+    if hasattr(mcp, "_tool_manager") and hasattr(mcp._tool_manager, "_tools"):
+        for tool in mcp._tool_manager._tools.values():
+            if hasattr(tool, "fn"):
+                tool.fn = logged(tool.fn)
 
     return mcp, clients
 

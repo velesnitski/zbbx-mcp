@@ -60,7 +60,7 @@ You should see `zabbix` listed when Claude starts. Try asking: *"Show current pr
 
 ## What it does
 
-**62 tools** across 24 modules:
+**63 tools** across 24 modules:
 
 | Category | Tools |
 |----------|-------|
@@ -100,6 +100,9 @@ You should see `zabbix` listed when Claude starts. Try asking: *"Show current pr
 | `ZABBIX_ALLOW_HTTP` | No | Set to `1` to allow non-HTTPS connections |
 | `ZABBIX_PRODUCT_MAP` | No | JSON file path or inline JSON mapping host groups to products |
 | `SLACK_WEBHOOK_URL` | No | Slack webhook URL for `send_slack_message` / `send_slack_report` |
+| `SENTRY_DSN` | No | Sentry DSN for error tracking — just set the env var, SDK is included |
+| `ZABBIX_LOG_FILE` | No | Error log path (default: `~/.zbbx-mcp/zbbx-mcp.log`) |
+| `ZABBIX_ANALYTICS_FILE` | No | Analytics log path (default: `~/.zbbx-mcp/analytics.log`) |
 
 ## Multi-instance setup
 
@@ -336,6 +339,15 @@ pytest
 - Error messages truncated to 200 chars to prevent leaking internal API details
 - Optional read-only mode via `ZABBIX_READ_ONLY=true`
 - Individual tools can be disabled via `DISABLED_TOOLS`
+
+### Logging and privacy
+
+All logs are stored **locally** on your machine at `~/.zbbx-mcp/`:
+
+- `zbbx-mcp.log` — errors and warnings (JSON)
+- `analytics.log` — tool call names, timing, and parameters (JSON)
+
+**No data is sent externally** unless you explicitly set `SENTRY_DSN`. Logs never contain tokens, passwords, or sensitive content — only tool names, safe parameters, and error messages (truncated to 200 chars).
 
 ### Read-only mode
 
