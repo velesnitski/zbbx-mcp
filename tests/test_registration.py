@@ -91,6 +91,8 @@ EXPECTED_TOOLS = {
     "get_provider_summary",
     # report.py
     "generate_server_report",
+    # infra_report.py
+    "generate_infra_report",
     # alerts.py
     "get_alerts",
     "get_alert_summary",
