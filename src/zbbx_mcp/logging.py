@@ -151,13 +151,36 @@ def setup_sentry() -> None:
     sentry_sdk.set_tag("instance_id", INSTANCE_ID)
 
 
+_SENSITIVE_PATTERNS = ("token", "secret", "password", "dsn", "key", "auth", "credential")
+
+
+def _scrub_value(val: str) -> str:
+    """Redact sensitive patterns from a string value."""
+    lower = val.lower()
+    for pat in _SENSITIVE_PATTERNS:
+        if pat in lower:
+            return "[REDACTED]"
+    return val
+
+
 def _scrub_event(event: dict, hint: dict) -> dict:
     """Remove sensitive data before sending to Sentry."""
+    # Scrub extra fields
     if "extra" in event:
         for key in list(event["extra"].keys()):
-            key_lower = key.lower()
-            if any(s in key_lower for s in ("token", "secret", "password", "dsn")):
+            if any(s in key.lower() for s in _SENSITIVE_PATTERNS):
                 event["extra"][key] = "[REDACTED]"
+    # Scrub exception messages
+    if "exception" in event:
+        for exc in event.get("exception", {}).get("values", []):
+            val = exc.get("value", "")
+            if isinstance(val, str):
+                exc["value"] = _scrub_value(val)
+    # Scrub breadcrumbs
+    for bc in event.get("breadcrumbs", {}).get("values", []):
+        data = bc.get("data", {})
+        if "error" in data and isinstance(data["error"], str):
+            data["error"] = _scrub_value(data["error"])
     return event
 
 
