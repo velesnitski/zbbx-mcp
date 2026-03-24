@@ -1,0 +1,46 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "zbbx-mcp"
+version = "0.1.0"
+description = "Zabbix MCP server for Claude Code, n8n, and any MCP-compatible client"
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.10"
+authors = [
+    { name = "Alex Velesnitski" },
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development :: Libraries",
+]
+dependencies = [
+    "mcp>=1.0.0,<1.26.0",
+    "httpx[http2]>=0.27.0",
+    "openpyxl>=3.1.0",
+]
+
+[project.optional-dependencies]
+test = ["pytest>=8.0", "pytest-asyncio>=0.24"]
+
+[project.urls]
+Homepage = "https://github.com/velesnitski/zbbx-mcp"
+Repository = "https://github.com/velesnitski/zbbx-mcp"
+Issues = "https://github.com/velesnitski/zbbx-mcp/issues"
+Changelog = "https://github.com/velesnitski/zbbx-mcp/blob/main/CHANGELOG.md"
+
+[project.scripts]
+zbbx-mcp = "zbbx_mcp.server:main"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"

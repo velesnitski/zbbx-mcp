@@ -1,0 +1,8 @@
+{
+  "free_servers": ["MyProduct", "Free"],
+  "premium_servers": ["MyProduct", "Premium"],
+  "lite_servers": ["MyProduct", "Lite"],
+  "infrastructure": ["Infrastructure", "Core"],
+  "templates": ["skip"],
+  "discovered_hosts": ["skip"]
+}
