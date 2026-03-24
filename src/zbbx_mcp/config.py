@@ -13,11 +13,10 @@ class ZabbixConfig:
 def _validate_url(url: str) -> str:
     """Validate URL scheme. Returns empty string if blocked."""
     if url and not url.startswith(("https://", "http://localhost", "http://127.0.0.1")):
-        import sys
-        print(
-            f"WARNING: ZABBIX_URL ({url}) does not use HTTPS. "
-            "Set ZABBIX_ALLOW_HTTP=1 to allow insecure connections.",
-            file=sys.stderr,
+        import logging
+        logging.getLogger("zbbx_mcp").warning(
+            "ZABBIX_URL does not use HTTPS. "
+            "Set ZABBIX_ALLOW_HTTP=1 to allow insecure connections."
         )
         if not os.environ.get("ZABBIX_ALLOW_HTTP"):
             return ""

@@ -32,6 +32,21 @@ def create_server() -> tuple[FastMCP, dict[str, ZabbixClient]]:
             if hasattr(tool, "fn"):
                 tool.fn = logged(tool.fn)
 
+    # Register cleanup for connection pools
+    import atexit
+    import asyncio as _asyncio
+
+    def _cleanup():
+        try:
+            loop = _asyncio.get_event_loop()
+            if not loop.is_closed():
+                for c in clients.values():
+                    loop.run_until_complete(c.close())
+        except Exception:
+            pass
+
+    atexit.register(_cleanup)
+
     return mcp, clients
 
 

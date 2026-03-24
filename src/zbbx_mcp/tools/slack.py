@@ -17,7 +17,6 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()):
         async def send_slack_message(
             text: str,
             channel: str = "",
-            webhook_url: str = "",
             blocks: str = "",
         ) -> str:
             """Send an ad-hoc message to Slack via webhook.
@@ -25,18 +24,16 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()):
             Use for sending reports, summaries, or alerts to a Slack channel.
             Supports plain text and Block Kit JSON.
 
+            Webhook URL is read from SLACK_WEBHOOK_URL environment variable.
+
             Args:
                 text: Message text (markdown supported)
                 channel: Override channel (optional, uses webhook default)
-                webhook_url: Slack webhook URL (optional, falls back to SLACK_WEBHOOK_URL env var)
                 blocks: Slack Block Kit JSON string for rich formatting (optional)
             """
-            url = webhook_url or os.environ.get(SLACK_WEBHOOK_ENV, "")
+            url = os.environ.get(SLACK_WEBHOOK_ENV, "")
             if not url:
-                return (
-                    f"No Slack webhook URL. Set {SLACK_WEBHOOK_ENV} environment variable "
-                    "or pass webhook_url parameter."
-                )
+                return f"No Slack webhook URL. Set {SLACK_WEBHOOK_ENV} environment variable."
 
             payload: dict = {"text": text}
             if channel:
@@ -66,7 +63,6 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()):
             include_problems: bool = True,
             include_high_cpu: bool = True,
             cpu_threshold: float = 80.0,
-            webhook_url: str = "",
             instance: str = "",
         ) -> str:
             """Generate and send a Zabbix infrastructure summary to Slack.
@@ -74,24 +70,22 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()):
             Builds a formatted report with product summary, active problems,
             and high CPU servers, then posts it to Slack.
 
+            Webhook URL is read from SLACK_WEBHOOK_URL environment variable.
+
             Args:
                 title: Report title (default: 'Zabbix Server Report')
                 product: Filter by product name (optional)
                 include_problems: Include active problems section (default: True)
                 include_high_cpu: Include high CPU servers section (default: True)
                 cpu_threshold: CPU threshold for high CPU section (default: 80%)
-                webhook_url: Slack webhook URL (optional, falls back to SLACK_WEBHOOK_URL env var)
                 instance: Zabbix instance name (optional, for multi-instance setups)
             """
             import asyncio
-            from zbbx_mcp.tools.inventory import _classify_host, detect_provider
+            from zbbx_mcp.classify import classify_host as _classify_host, detect_provider
 
-            url = webhook_url or os.environ.get(SLACK_WEBHOOK_ENV, "")
+            url = os.environ.get(SLACK_WEBHOOK_ENV, "")
             if not url:
-                return (
-                    f"No Slack webhook URL. Set {SLACK_WEBHOOK_ENV} environment variable "
-                    "or pass webhook_url parameter."
-                )
+                return f"No Slack webhook URL. Set {SLACK_WEBHOOK_ENV} environment variable."
 
             try:
                 client = resolver.resolve(instance)

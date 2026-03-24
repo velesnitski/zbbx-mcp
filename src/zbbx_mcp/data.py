@@ -12,7 +12,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from zbbx_mcp.client import ZabbixClient
-from zbbx_mcp.tools.inventory import _classify_host, detect_provider
+from zbbx_mcp.classify import classify_host as _classify_host, detect_provider
 from zbbx_mcp.excel import classify_bandwidth, BW_MAX
 
 _COUNTRY_RE = re.compile(r"[-_]([a-z]{2})\d", re.IGNORECASE)
@@ -212,12 +212,21 @@ async def fetch_all_data(
         client.call("host.get", {"hostids": all_ids, "output": ["hostid"],
                                   "selectParentTemplates": ["name"]}),
         graph_task,
+        return_exceptions=True,
     )
+
+    # Gracefully handle failed API calls (return empty list instead of crashing)
+    def _safe(r, idx: int) -> list:
+        if isinstance(r, BaseException):
+            return []
+        return r if isinstance(r, list) else []
 
     (cpu_items, load_items, mem_items, conn_items,
      in_traffic_items, out_traffic_items,
      version_items, vpn1_items, vpn2_items, vpn3_items,
-     cost_macros, problems, template_hosts, graphs_raw) = results
+     cost_macros, problems, template_hosts, graphs_raw) = (
+        _safe(results[i], i) for i in range(14)
+    )
 
     graphs = graphs_raw if isinstance(graphs_raw, list) else []
 
