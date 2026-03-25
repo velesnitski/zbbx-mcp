@@ -130,6 +130,10 @@ EXPECTED_TOOLS = {
     "get_capacity_planning",
     # html_report.py
     "generate_html_report",
+    # geo.py
+    "detect_geo_blocks",
+    "get_geo_traffic_trends",
+    "get_server_availability_report",
 }
 
 
