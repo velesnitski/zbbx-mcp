@@ -134,6 +134,8 @@ EXPECTED_TOOLS = {
     "detect_regional_anomalies",
     "get_geo_traffic_trends",
     "get_service_uptime_report",
+    "get_service_health_matrix",
+    "get_traffic_drop_timeline",
 }
 
 
