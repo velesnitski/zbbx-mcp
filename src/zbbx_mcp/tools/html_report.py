@@ -35,7 +35,17 @@ td{padding:10px 12px;border-bottom:1px solid var(--border)}tr:hover td{backgroun
 .section{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:24px;margin:16px 0}
 .bar{height:8px;border-radius:4px;background:var(--border);overflow:hidden}.bar-fill{height:100%;border-radius:4px}
 @media(max-width:768px){.grid-4,.grid-3{grid-template-columns:1fr 1fr}.card-value{font-size:1.5rem}}
-@media print{body{background:#fff;color:#000}th{background:#f0f0f0;color:#333}td{border-color:#ddd}.card{border-color:#ddd;background:#f8f8f8}.badge-red{color:#c00}.badge-green{color:#060}}
+@media print{body{background:#fff;color:#000;padding:12px}
+.card{background:#f8f8f8;border:1px solid #ddd}.card-header{color:#666}.card-value{color:#000}
+th{background:#f0f0f0;color:#333;border-color:#ccc}td{border-color:#ddd;color:#000}
+.badge-red{background:#fee;color:#c00;border:1px solid #c00}.badge-green{background:#efe;color:#060;border:1px solid #060}
+.badge-orange{background:#ffd;color:#960;border:1px solid #960}.badge-blue{background:#eef;color:#009;border:1px solid #009}
+.cpu-critical{color:#c00}.cpu-warn{color:#960}.cpu-ok{color:#060}
+.trend-drop{color:#c00}.trend-rise{color:#060}.trend-stable{color:#666}
+.bar{border:1px solid #ccc}.bar-fill{print-color-adjust:exact;-webkit-print-color-adjust:exact}
+a{color:#00c;text-decoration:underline}.subtitle{color:#666}
+code{background:#f0f0f0;padding:1px 4px;border-radius:2px}
+table{font-size:.8rem;page-break-inside:auto}tr{page-break-inside:avoid}}
 """
 
 
@@ -78,6 +88,8 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
         async def generate_html_report(
             country: str = "",
             product: str = "",
+            products: str = "",
+            exclude_product: str = "",
             period: str = "7d",
             output_dir: str = "",
             instance: str = "",
@@ -86,31 +98,47 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
 
             Includes KPI cards, server table with color-coded metrics,
             traffic bars, trend analysis, and health overview.
-            Printable to PDF via browser.
+            Printable to PDF via browser (light theme auto-applied).
 
             Args:
                 country: Filter by country code (optional)
-                product: Filter by product name (optional)
+                product: Filter by single product name (optional)
+                products: Comma-separated product names to include (optional)
+                exclude_product: Comma-separated product names to exclude (optional)
                 period: Trend period for avg/peak columns (default: 7d)
                 output_dir: Directory for the HTML file (default: ~/Downloads)
                 instance: Zabbix instance name (optional)
             """
             try:
                 client = resolver.resolve(instance)
-                zabbix_base_url = client._config.url.replace("/api_jsonrpc.php", "")
+                zabbix_base_url = client.frontend_url
 
                 # Fetch current data
                 result = await fetch_all_data(client)
                 rows = result.rows
 
                 # Filter
-                if country or product:
-                    rows = [
-                        r for r in rows
-                        if (not country or country.lower() in r.get("Country", "").lower()
-                            or country.lower() in r.get("Host", "").lower())
-                        and (not product or product.lower() in r.get("Product", "").lower())
-                    ]
+                include_set = set()
+                if products:
+                    include_set = {p.strip().lower() for p in products.split(",")}
+                exclude_set = set()
+                if exclude_product:
+                    exclude_set = {p.strip().lower() for p in exclude_product.split(",")}
+
+                if country or product or include_set or exclude_set:
+                    filtered = []
+                    for r in rows:
+                        rp = r.get("Product", "").lower()
+                        if country and country.lower() not in r.get("Country", "").lower() and country.lower() not in r.get("Host", "").lower():
+                            continue
+                        if product and product.lower() not in rp:
+                            continue
+                        if include_set and not any(p in rp for p in include_set):
+                            continue
+                        if exclude_set and any(p in rp for p in exclude_set):
+                            continue
+                        filtered.append(r)
+                    rows = filtered
 
                 if not rows:
                     return "No servers match the filters."

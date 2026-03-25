@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.0.8] - 2026-03-25
+
+### Added
+- Multi-product and exclude filters on `generate_html_report` and `generate_full_report`
+  `products="ProductA,ProductB"` or `exclude_product="Infrastructure,Monitoring"`
+- `ZabbixClient.frontend_url` property for reliable Zabbix UI link construction
+
+### Fixed
+- HTML report: Zabbix links now work (used `frontend_url` instead of raw API URL)
+- Print/PDF: comprehensive `@media print` CSS — light background, readable text, colored badges with borders, proper page breaks
+
 ## [1.0.7] - 2026-03-25
 
 ### Changed
