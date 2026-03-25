@@ -354,6 +354,8 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()):
         @mcp.tool()
         async def generate_full_report(
             include_off_dashboard: bool = True,
+            country: str = "",
+            product: str = "",
             output_dir: str = "",
             instance: str = "",
         ) -> str:
@@ -365,13 +367,18 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()):
 
             Sheets:
             1. All Servers — distinct, deduplicated, with all metrics
-            2. Per-dashboard tabs summary
-            3. Provider × Product matrix with costs
-            4. Bandwidth analysis (utilization tiers)
-            5. Off-Dashboard servers (not monitored on any board)
+            2. Health Overview
+            3. Product Analytics
+            4. Country Analytics
+            5. Per-dashboard tabs summary
+            6. Provider × Product matrix with costs
+            7. Bandwidth analysis (utilization tiers)
+            8. Off-Dashboard servers
 
             Args:
                 include_off_dashboard: Include servers not on any dashboard (default: True)
+                country: Filter by country code in hostname (e.g., 'in', 'de', 'nl') (optional)
+                product: Filter by product name (optional)
                 output_dir: Directory for the Excel file (default: ~/Downloads)
                 instance: Zabbix instance name (optional, for multi-instance setups)
             """
@@ -379,6 +386,21 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()):
                 client = resolver.resolve(instance)
                 result = await fetch_all_data(client, include_off_dashboard)
                 rows = result.rows
+
+                # Apply country/product filter
+                if country or product:
+                    rows = [
+                        r for r in rows
+                        if (not country or country.lower() in r.get("Country", "").lower()
+                            or country.lower() in r.get("Host", "").lower())
+                        and (not product or product.lower() in r.get("Product", "").lower())
+                    ]
+                    # Rebuild tab_data for filtered rows
+                    result.tab_data = {}
+                    for r in rows:
+                        if r["Dashboard"]:
+                            key = f"{r['Dashboard']}||{r['Tab']}"
+                            result.tab_data.setdefault(key, []).append(r)
 
                 if not rows:
                     return "No servers found."
