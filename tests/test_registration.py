@@ -125,6 +125,7 @@ EXPECTED_TOOLS = {
     "get_trends_batch",
     "get_server_dashboard",
     "compare_servers",
+    "get_health_assessment",
 }
 
 
