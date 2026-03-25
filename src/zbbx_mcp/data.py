@@ -15,6 +15,8 @@ from zbbx_mcp.client import ZabbixClient
 from zbbx_mcp.classify import classify_host as _classify_host, detect_provider
 from zbbx_mcp.excel import classify_bandwidth, BW_MAX
 
+from datetime import datetime, timezone
+
 _COUNTRY_RE = re.compile(r"[-_]([a-z]{2})\d", re.IGNORECASE)
 GB_BYTES = 1_073_741_824  # 1 GB in bytes
 
@@ -33,6 +35,14 @@ TRAFFIC_IN_KEYS = [
     "net.if.in[ppp0]", "net.if.in[ppp1]", "net.if.in[bond0]",
 ]
 TRAFFIC_OUT_KEYS = [k.replace("net.if.in[", "net.if.out[") for k in TRAFFIC_IN_KEYS]
+
+# Metric key groups for batch trend fetching
+METRIC_KEYS: dict[str, list[str]] = {
+    "cpu": ["system.cpu.util[,idle]"],
+    "load": ["system.cpu.load[percpu,avg5]"],
+    "memory": ["vm.memory.size[available]"],
+    "traffic": TRAFFIC_IN_KEYS,
+}
 
 
 def extract_country(hostname: str) -> str:
@@ -435,3 +445,207 @@ async def fetch_all_data(
         total_on_dashboard=on_count,
         total_off_dashboard=off_count,
     )
+
+
+
+@dataclass(slots=True)
+class TrendRow:
+    """One metric trend for one host."""
+    hostid: str
+    hostname: str
+    metric: str
+    avg: float
+    peak: float
+    min_val: float
+    current: float
+    trend_dir: str = ""  # ↗ ↘ →
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "Host": self.hostname,
+            "Metric": self.metric,
+            "Avg": self.avg,
+            "Peak": self.peak,
+            "Min": self.min_val,
+            "Current": self.current,
+            "Trend": self.trend_dir,
+        }
+
+
+def _parse_period(period: str) -> int:
+    """Parse '1d', '7d', '30d' to seconds."""
+    period = period.strip().lower()
+    if period.endswith("d"):
+        return int(period[:-1]) * 86400
+    if period.endswith("h"):
+        return int(period[:-1]) * 3600
+    return int(period) * 86400  # default to days
+
+
+async def fetch_trends_batch(
+    client: ZabbixClient,
+    hostids: list[str],
+    metrics: list[str] | None = None,
+    period: str = "7d",
+) -> tuple[list[TrendRow], dict[str, dict]]:
+    """Fetch trend data for multiple hosts and metrics in 3 API calls.
+
+    Args:
+        client: ZabbixClient instance
+        hostids: List of host IDs
+        metrics: List of metric names ('cpu', 'load', 'memory', 'traffic')
+        period: Time period ('1d', '7d', '30d')
+
+    Returns:
+        Tuple of (trend_rows, host_map) where host_map is {hostid: host_dict}
+    """
+    import time as _time
+    if metrics is None:
+        metrics = ["cpu", "traffic", "load"]
+
+    # Build key list from metric names
+    all_keys: list[str] = []
+    metric_key_map: dict[str, str] = {}  # item_key -> metric_name
+    for m in metrics:
+        keys = METRIC_KEYS.get(m, [])
+        all_keys.extend(keys)
+        for k in keys:
+            metric_key_map[k] = m
+
+    if not all_keys:
+        return [], {}
+
+    # Get host details + items in parallel
+    host_data, items = await asyncio.gather(
+        client.call("host.get", {
+            "hostids": hostids,
+            "output": ["hostid", "host"],
+        }),
+        client.call("item.get", {
+            "hostids": hostids,
+            "output": ["itemid", "hostid", "key_", "lastvalue", "value_type"],
+            "filter": {"key_": all_keys, "status": "0"},
+        }),
+    )
+
+    host_map = {h["hostid"]: h for h in host_data}
+
+    # Pick best item per host per metric (max lastvalue for traffic, first for others)
+    host_metric_item: dict[str, dict[str, dict]] = {}  # hostid -> metric -> item
+    for item in items:
+        hid = item["hostid"]
+        metric_name = metric_key_map.get(item["key_"])
+        if not metric_name:
+            continue
+        existing = host_metric_item.setdefault(hid, {}).get(metric_name)
+        if existing is None:
+            host_metric_item[hid][metric_name] = item
+        elif metric_name == "traffic":
+            try:
+                if float(item.get("lastvalue", "0")) > float(existing.get("lastvalue", "0")):
+                    host_metric_item[hid][metric_name] = item
+            except (ValueError, TypeError):
+                pass
+
+    # Collect all item IDs for trend fetch
+    item_ids = []
+    item_to_host_metric: dict[str, tuple[str, str]] = {}  # itemid -> (hostid, metric)
+    for hid, metric_items in host_metric_item.items():
+        for metric_name, item in metric_items.items():
+            item_ids.append(item["itemid"])
+            item_to_host_metric[item["itemid"]] = (hid, metric_name)
+
+    if not item_ids:
+        return [], host_map
+
+    # Fetch trends
+    now = int(_time.time())
+    time_from = now - _parse_period(period)
+
+    trends = await client.call("trend.get", {
+        "itemids": item_ids,
+        "time_from": time_from,
+        "output": ["itemid", "clock", "value_avg", "value_max", "value_min"],
+        "limit": len(item_ids) * 24 * 30,  # max hourly records
+    })
+
+    # Group trends by item
+    item_trends: dict[str, list] = {}
+    for t in trends:
+        item_trends.setdefault(t["itemid"], []).append(t)
+
+    # Build TrendRows
+    rows: list[TrendRow] = []
+    for itemid, (hid, metric_name) in item_to_host_metric.items():
+        t_data = item_trends.get(itemid, [])
+        if not t_data:
+            continue
+
+        hostname = host_map.get(hid, {}).get("host", "?")
+        item = host_metric_item.get(hid, {}).get(metric_name, {})
+        try:
+            current = float(item.get("lastvalue", "0"))
+        except (ValueError, TypeError):
+            current = 0
+
+        avgs = [float(t["value_avg"]) for t in t_data]
+        peaks = [float(t["value_max"]) for t in t_data]
+        mins = [float(t["value_min"]) for t in t_data]
+
+        avg_val = sum(avgs) / len(avgs) if avgs else 0
+        peak_val = max(peaks) if peaks else 0
+        min_val = min(mins) if mins else 0
+
+        # For CPU: invert (idle → used)
+        if metric_name == "cpu":
+            current = round(100 - current, 1)
+            avg_val = round(100 - avg_val, 1)
+            peak_val = round(100 - min_val, 1)  # min idle = max used
+            min_val = round(100 - max(avgs), 1) if avgs else 0
+
+        # For traffic: convert to Mbps
+        if metric_name == "traffic":
+            current = round(current / 1e6, 1)
+            avg_val = round(avg_val / 1e6, 1)
+            peak_val = round(peak_val / 1e6, 1)
+            min_val = round(min_val / 1e6, 1)
+
+        # For memory: convert to GB
+        if metric_name == "memory":
+            current = round(current / GB_BYTES, 1)
+            avg_val = round(avg_val / GB_BYTES, 1)
+            peak_val = round(peak_val / GB_BYTES, 1)
+            min_val = round(min_val / GB_BYTES, 1)
+
+        # Determine trend direction
+        if len(avgs) >= 2:
+            recent = sum(avgs[-len(avgs)//4:]) / max(1, len(avgs)//4) if avgs else 0
+            older = sum(avgs[:len(avgs)//4]) / max(1, len(avgs)//4) if avgs else 0
+            if metric_name == "cpu":
+                recent, older = 100 - recent, 100 - older
+            if metric_name in ("traffic", "memory"):
+                recent /= 1e6 if metric_name == "traffic" else GB_BYTES
+                older /= 1e6 if metric_name == "traffic" else GB_BYTES
+            pct_change = ((recent - older) / older * 100) if older > 0 else 0
+            if pct_change > 15:
+                trend_dir = "rising"
+            elif pct_change < -15:
+                trend_dir = "dropping"
+            else:
+                trend_dir = "stable"
+        else:
+            trend_dir = ""
+
+        rows.append(TrendRow(
+            hostid=hid,
+            hostname=hostname,
+            metric=metric_name,
+            avg=round(avg_val, 1),
+            peak=round(peak_val, 1),
+            min_val=round(min_val, 1),
+            current=round(current, 1),
+            trend_dir=trend_dir,
+        ))
+
+    rows.sort(key=lambda r: (r.hostname, r.metric))
+    return rows, host_map
