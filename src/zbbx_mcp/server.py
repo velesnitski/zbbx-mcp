@@ -1,3 +1,6 @@
+import atexit
+import asyncio as _asyncio
+
 from mcp.server.fastmcp import FastMCP
 from zbbx_mcp.config import load_all_configs, load_global_policy
 from zbbx_mcp.client import ZabbixClient
@@ -33,17 +36,14 @@ def create_server() -> tuple[FastMCP, dict[str, ZabbixClient]]:
                 tool.fn = logged(tool.fn)
 
     # Register cleanup for connection pools
-    import atexit
-    import asyncio as _asyncio
-
-    def _cleanup():
+    def _cleanup() -> None:
         try:
             loop = _asyncio.get_event_loop()
             if not loop.is_closed():
                 for c in clients.values():
                     loop.run_until_complete(c.close())
-        except Exception:
-            pass
+        except (RuntimeError, OSError):
+            pass  # Event loop closed or OS error during shutdown
 
     atexit.register(_cleanup)
 

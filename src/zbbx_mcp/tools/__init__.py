@@ -1,3 +1,5 @@
+__all__ = ["WRITE_TOOLS", "register_all"]
+
 from zbbx_mcp.resolver import InstanceResolver
 from zbbx_mcp.tools import (
     hosts, problems, hostgroups, health, dashboards, items,
