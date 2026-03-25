@@ -127,6 +127,7 @@ EXPECTED_TOOLS = {
     "compare_servers",
     "get_health_assessment",
     "get_shutdown_candidates",
+    "get_capacity_planning",
 }
 
 
