@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.0.2] - 2026-03-25
+
+### Added
+- `country` and `product` filters on `generate_full_report` — generate India-only, Germany-only, or Premium-only reports
+- `country` filter on `detect_traffic_drops`, `detect_traffic_anomalies`, `get_traffic_report`
+- `{$BW_LIMIT}` host macro support — per-server bandwidth limit for accurate BW Util % (falls back to 800 Mbps)
+- `hostid` now shown in `search_hosts` output — enables `get_host_items` → `get_trends` chain
+- `TRAFFIC_IN_KEYS` / `TRAFFIC_OUT_KEYS` constants shared across all traffic tools (DRY)
+
+### Fixed
+- Traffic tools now use fast NIC filter instead of slow name search (consistent with reports)
+- All 3 traffic tools accept `country` parameter for per-region analysis
+
 ## [1.0.1] - 2026-03-25
 
 ### Changed
@@ -14,6 +27,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ### Added
 - 46 new tests (78 → 124): excel.py, logging.py, utils.py, data helpers
 - Full physical NIC coverage (28 interface key patterns)
+
+### Security
+- Slack webhook URL only from env var (removed `webhook_url` parameter)
+- `asyncio.gather(return_exceptions=True)` for graceful partial failures
+- Secret macros (type=1) scrubbed from rollback snapshots
+- PRODUCT_MAP restricted to .json files only
+- Enhanced Sentry scrubbing (exceptions, breadcrumbs, expanded patterns)
+- Connection cleanup via atexit handler
+- `classify.py` extracted to eliminate circular import
 
 ### Fixed
 - Consolidated 6 duplicate late imports in full_report.py
