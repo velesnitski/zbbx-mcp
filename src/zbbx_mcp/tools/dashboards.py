@@ -38,7 +38,7 @@ FIELD_TYPES = {
 }
 
 
-def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()):
+def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> None:
 
     if "get_dashboards" not in skip:
 

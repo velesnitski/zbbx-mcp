@@ -10,7 +10,7 @@ SERVICE_STATUS = {
 }
 
 
-def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()):
+def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> None:
 
     if "get_services" not in skip:
 

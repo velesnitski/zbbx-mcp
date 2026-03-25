@@ -1,3 +1,4 @@
+import logging
 import os
 from dataclasses import dataclass, field
 
@@ -13,7 +14,6 @@ class ZabbixConfig:
 def _validate_url(url: str) -> str:
     """Validate URL scheme. Returns empty string if blocked."""
     if url and not url.startswith(("https://", "http://localhost", "http://127.0.0.1")):
-        import logging
         logging.getLogger("zbbx_mcp").warning(
             "ZABBIX_URL does not use HTTPS. "
             "Set ZABBIX_ALLOW_HTTP=1 to allow insecure connections."

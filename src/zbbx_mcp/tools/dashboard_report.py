@@ -11,7 +11,7 @@ from zbbx_mcp.resolver import InstanceResolver
 from zbbx_mcp.classify import classify_host as _classify_host, detect_provider
 
 
-def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()):
+def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> None:
 
     if "export_dashboard" not in skip:
 

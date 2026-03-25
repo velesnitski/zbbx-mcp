@@ -6,7 +6,7 @@ from zbbx_mcp.formatters import _ts
 from zbbx_mcp.utils import ROLLBACK_STRIP_FIELDS
 
 
-def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()):
+def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> None:
 
     if "get_rollback_history" not in skip:
 
