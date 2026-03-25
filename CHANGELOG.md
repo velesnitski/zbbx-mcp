@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.0.7] - 2026-03-25
+
+### Changed
+- HTML report: server names link to Zabbix latest data page, added IP and Groups columns
+- Health assessment and shutdown candidates now show IP address per server
+- `ServerRow` includes `hostid` for Zabbix deep linking
+
 ## [1.0.6] - 2026-03-25
 
 ### Added

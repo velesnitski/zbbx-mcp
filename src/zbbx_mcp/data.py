@@ -94,6 +94,7 @@ def build_max_map(items: list[dict]) -> dict[str, float]:
 @dataclass(slots=True)
 class ServerRow:
     """One row in a server report."""
+    hostid: str = ""
     host: str = ""
     name: str = ""
     country: str = ""
@@ -127,6 +128,7 @@ class ServerRow:
     def to_dict(self) -> dict[str, Any]:
         """Convert to dict matching Excel column names."""
         return {
+            "Host ID": self.hostid,
             "Host": self.host,
             "Name": self.name,
             "Country": self.country,
@@ -411,6 +413,7 @@ async def fetch_all_data(
         tabs = host_dash_tabs.get(hid, [])
 
         row = ServerRow(
+            hostid=hid,
             host=hostname,
             name=h.get("name", ""),
             country=extract_country(hostname),
