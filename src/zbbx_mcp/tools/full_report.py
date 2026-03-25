@@ -432,9 +432,9 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()):
                 filepath = os.path.join(output_dir, f"zabbix_full_report_{ts}.xlsx")
                 wb.save(filepath)
 
-                # Summary
-                on = result.total_on_dashboard
-                off = result.total_off_dashboard
+                # Recalculate stats for filtered rows
+                on = sum(1 for r in rows if r["On Dashboard"] == "Yes")
+                off = sum(1 for r in rows if r["On Dashboard"] == "No")
                 critical = sum(1 for r in rows if r["BW Tier"] == "CRITICAL")
                 high = sum(1 for r in rows if r["BW Tier"] == "HIGH")
                 cost = sum(r["Cost/Month ($)"] or 0 for r in rows)

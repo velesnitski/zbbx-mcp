@@ -121,6 +121,9 @@ EXPECTED_TOOLS = {
     "export_dashboard",
     # full_report.py
     "generate_full_report",
+    # trends.py
+    "get_trends_batch",
+    "get_server_dashboard",
 }
 
 
