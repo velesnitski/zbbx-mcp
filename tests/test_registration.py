@@ -134,6 +134,8 @@ EXPECTED_TOOLS = {
     "detect_geo_blocks",
     "get_geo_traffic_trends",
     "get_server_availability_report",
+    "get_protocol_failure_matrix",
+    "get_block_timeline",
 }
 
 

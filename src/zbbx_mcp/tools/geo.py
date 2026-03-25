@@ -407,3 +407,224 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 return "\n".join(parts)
             except (httpx.HTTPError, ValueError) as e:
                 return f"Error: {e}"
+
+    if "get_protocol_failure_matrix" not in skip:
+
+        @mcp.tool()
+        async def get_protocol_failure_matrix(
+            min_servers: int = 2,
+            instance: str = "",
+        ) -> str:
+            """Show which VPN protocol works in which country.
+
+            Aggregates VPN Primary, VPN Secondary, and VPN Tertiary check status per country.
+            Helps determine: "user in country X should use protocol Y."
+
+            Args:
+                min_servers: Minimum servers per country to include (default: 2)
+                instance: Zabbix instance name (optional)
+            """
+            try:
+                client = resolver.resolve(instance)
+
+                hosts = await client.call("host.get", {
+                    "output": ["hostid", "host"],
+                    "filter": {"status": "0"},
+                })
+
+                countries: dict[str, list[dict]] = {}
+                for h in hosts:
+                    ctry = extract_country(h["host"])
+                    if ctry:
+                        countries.setdefault(ctry, []).append(h)
+                countries = {c: hs for c, hs in countries.items() if len(hs) >= min_servers}
+
+                if not countries:
+                    return "No countries with enough servers."
+
+                all_ids = [h["hostid"] for hs in countries.values() for h in hs]
+
+                vpn1_items, vpn2_items, vpn3_items = await asyncio.gather(
+                    client.call("item.get", {
+                        "hostids": all_ids, "output": ["hostid", "lastvalue"],
+                        "filter": {"key_": "vpn_primary_check[{HOST.IP}]", "status": "0"},
+                    }),
+                    client.call("item.get", {
+                        "hostids": all_ids, "output": ["hostid", "lastvalue"],
+                        "filter": {"key_": "vpn_secondary_check[{HOST.IP}]", "status": "0"},
+                    }),
+                    client.call("item.get", {
+                        "hostids": all_ids, "output": ["hostid", "lastvalue"],
+                        "search": {"key_": "vpn3"}, "searchWildcardsEnabled": True,
+                        "filter": {"status": "0"},
+                    }),
+                )
+
+                vpn1_map = build_value_map(vpn1_items, lambda v: int(float(v)))
+                vpn2_map = build_value_map(vpn2_items, lambda v: int(float(v)))
+                vpn3_map: dict[str, int] = {}
+                for i in vpn3_items:
+                    try:
+                        val = int(float(i["lastvalue"]))
+                        hid = i["hostid"]
+                        if val > vpn3_map.get(hid, 0):
+                            vpn3_map[hid] = val
+                    except (ValueError, TypeError, KeyError):
+                        pass
+
+                parts = [
+                    "**Protocol Failure Matrix**\n",
+                    "| Country | Servers | VPN Primary | VPN Secondary | VPN Tertiary | Recommendation |",
+                    "|---------|---------|------|-------|---------|----------------|",
+                ]
+
+                for ctry in sorted(countries):
+                    hs = countries[ctry]
+                    hids = [h["hostid"] for h in hs]
+                    total = len(hids)
+
+                    vpn1_up = sum(1 for hid in hids if vpn1_map.get(hid) == 1)
+                    vpn2_up = sum(1 for hid in hids if vpn2_map.get(hid) == 1)
+                    vpn3_up = sum(1 for hid in hids if vpn3_map.get(hid, 0) >= 1)
+
+                    vpn_primary_checked = sum(1 for hid in hids if hid in vpn1_map)
+                    vpn_secondary_checked = sum(1 for hid in hids if hid in vpn2_map)
+                    vpn3_checked = sum(1 for hid in hids if hid in vpn3_map)
+
+                    def _status(up: int, checked: int) -> str:
+                        if checked == 0:
+                            return "N/A"
+                        pct = up / checked * 100
+                        if pct >= 80:
+                            return f"OK ({up}/{checked})"
+                        if pct >= 30:
+                            return f"PARTIAL ({up}/{checked})"
+                        return f"DOWN ({up}/{checked})"
+
+                    x_s = _status(vpn1_up, vpn_primary_checked)
+                    k_s = _status(vpn2_up, vpn_secondary_checked)
+                    o_s = _status(vpn3_up, vpn3_checked)
+
+                    # Recommendation
+                    working = []
+                    if "OK" in x_s or "PARTIAL" in x_s:
+                        working.append("VPN Primary")
+                    if "OK" in k_s or "PARTIAL" in k_s:
+                        working.append("VPN Secondary")
+                    if "OK" in o_s or "PARTIAL" in o_s:
+                        working.append("VPN Tertiary")
+
+                    if not working:
+                        rec = "ALL BLOCKED"
+                    elif len(working) == 3:
+                        rec = "All protocols OK"
+                    else:
+                        rec = " / ".join(working) + " only"
+
+                    parts.append(f"| {ctry} | {total} | {x_s} | {k_s} | {o_s} | {rec} |")
+
+                return "\n".join(parts)
+            except (httpx.HTTPError, ValueError) as e:
+                return f"Error: {e}"
+
+    if "get_block_timeline" not in skip:
+
+        @mcp.tool()
+        async def get_block_timeline(
+            period: str = "30d",
+            min_servers: int = 2,
+            instance: str = "",
+        ) -> str:
+            """Show when VPN blocks started per country, using daily trend data.
+
+            Finds the day traffic dropped to near-zero for each blocked country.
+
+            Args:
+                period: How far back to look (default: 30d)
+                min_servers: Minimum servers per country (default: 2)
+                instance: Zabbix instance name (optional)
+            """
+            try:
+                from datetime import datetime, timezone
+
+                client = resolver.resolve(instance)
+
+                hosts = await client.call("host.get", {
+                    "output": ["hostid", "host"],
+                    "filter": {"status": "0"},
+                })
+
+                countries: dict[str, list[str]] = {}
+                for h in hosts:
+                    ctry = extract_country(h["host"])
+                    if ctry:
+                        countries.setdefault(ctry, []).append(h["hostid"])
+                countries = {c: ids for c, ids in countries.items() if len(ids) >= min_servers}
+
+                if not countries:
+                    return "No countries with enough servers."
+
+                all_ids = [hid for ids in countries.values() for hid in ids]
+                trend_rows, _ = await fetch_trends_batch(client, all_ids, ["traffic"], period)
+
+                # Aggregate daily traffic per country
+                country_daily: dict[str, dict[str, float]] = {}
+                for r in trend_rows:
+                    for ctry, ids in countries.items():
+                        if r.hostid in ids:
+                            cd = country_daily.setdefault(ctry, {})
+                            for day, val in r.daily.items():
+                                cd[day] = cd.get(day, 0) + val
+                            break
+
+                # Find block start date for each country
+                blocks = []
+                for ctry, daily in country_daily.items():
+                    days = sorted(daily.keys())
+                    if not days:
+                        continue
+
+                    vals = [daily[d] for d in days]
+                    peak = max(vals) if vals else 0
+                    current = vals[-1] if vals else 0
+
+                    if peak < 10 or current > peak * 0.3:
+                        continue  # Not blocked
+
+                    # Find the day traffic dropped
+                    block_day = None
+                    for i, d in enumerate(days):
+                        if daily[d] < peak * 0.2 and (i == 0 or daily[days[i-1]] >= peak * 0.2):
+                            block_day = d
+                            break
+
+                    if block_day:
+                        duration_days = len(days) - days.index(block_day)
+                        blocks.append({
+                            "country": ctry,
+                            "servers": len(countries[ctry]),
+                            "block_start": block_day,
+                            "duration": duration_days,
+                            "pre_block_gbps": round(peak / 1000, 2),
+                            "current_gbps": round(current / 1000, 2),
+                        })
+
+                if not blocks:
+                    return f"No VPN blocks detected in {period} across {len(countries)} countries."
+
+                blocks.sort(key=lambda b: -b["duration"])
+
+                parts = [
+                    f"**Block Timeline ({period})**\n",
+                    "| Country | Servers | Block Started | Duration | Pre-block Traffic | Current |",
+                    "|---------|---------|--------------|----------|-------------------|---------|",
+                ]
+                for b in blocks:
+                    parts.append(
+                        f"| {b['country']} | {b['servers']} | {b['block_start']} | "
+                        f"{b['duration']}d | {b['pre_block_gbps']} Gbps | {b['current_gbps']} Gbps |"
+                    )
+
+                return "\n".join(parts)
+            except (httpx.HTTPError, ValueError) as e:
+                return f"Error: {e}"
