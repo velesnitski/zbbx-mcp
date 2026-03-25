@@ -1,4 +1,4 @@
-"""Batch trend tools: historical metrics, dashboards, comparison, health."""
+"""Batch trend tools: historical metrics, dashboards, comparison, health, capacity."""
 
 from typing import Any
 
@@ -7,6 +7,7 @@ import httpx
 from zbbx_mcp.resolver import InstanceResolver
 from zbbx_mcp.data import fetch_trends_batch, extract_country, METRIC_KEYS
 from zbbx_mcp.classify import classify_host as _classify_host, detect_provider
+from zbbx_mcp.excel import BW_MAX
 
 
 def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()):
@@ -657,3 +658,167 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()):
                 return "\n".join(parts)
             except (httpx.HTTPError, ValueError) as e:
                 return f"Error: {e}"
+
+    if "get_capacity_planning" not in skip:
+
+        @mcp.tool()
+        async def get_capacity_planning(
+            product: str = "",
+            tier: str = "",
+            country: str = "",
+            period: str = "7d",
+            cpu_threshold: float = 70.0,
+            traffic_threshold: float = 600.0,
+            instance: str = "",
+        ) -> str:
+            """Find overloaded servers that need capacity increase or hardware upgrade.
+
+            Detects:
+            - OVERLOADED: sustained high CPU (avg > threshold, never drops below 50%)
+            - SATURATED: traffic approaching NIC limit
+            - INEFFICIENT: high CPU per traffic ratio vs peers (needs upgrade)
+            - GROWING: traffic trend rising >20% (will hit limit soon)
+
+            Args:
+                product: Filter by product name (optional)
+                tier: Filter by tier name (optional)
+                country: Filter by country code (optional)
+                period: Analysis period (default: 7d)
+                cpu_threshold: CPU avg % above which = overloaded (default: 70%)
+                traffic_threshold: Traffic avg Mbps above which = saturated (default: 600)
+                instance: Zabbix instance name (optional)
+            """
+            try:
+                client = resolver.resolve(instance)
+                hosts = await client.call("host.get", {
+                    "output": ["hostid", "host"],
+                    "selectGroups": ["name"],
+                    "selectInterfaces": ["ip"],
+                    "filter": {"status": "0"},
+                })
+                filtered = []
+                for h in hosts:
+                    prod, t = _classify_host(h.get("groups", []))
+                    if product and product.lower() not in (prod or "").lower():
+                        continue
+                    if tier and tier.lower() not in (t or "").lower():
+                        continue
+                    if country and country.lower() not in h.get("host", "").lower():
+                        continue
+                    h["_prod"] = prod
+                    h["_tier"] = t
+                    filtered.append(h)
+
+                if not filtered:
+                    return "No servers match the filters."
+
+                hostids = [h["hostid"] for h in filtered]
+                trend_rows, _ = await fetch_trends_batch(
+                    client, hostids, ["cpu", "traffic", "load"], period,
+                )
+                host_metrics: dict[str, dict] = {}
+                for r in trend_rows:
+                    host_metrics.setdefault(r.hostid, {})[r.metric] = r
+
+                from statistics import median as _median
+                efficiencies = []
+                for hm in host_metrics.values():
+                    cpu = hm.get("cpu")
+                    traffic = hm.get("traffic")
+                    if cpu and traffic and traffic.avg > 10:
+                        efficiencies.append(cpu.avg / (traffic.avg / 100))
+                eff_median = _median(efficiencies) if efficiencies else 0
+
+                candidates = []
+                for h in filtered:
+                    hid = h["hostid"]
+                    hm = host_metrics.get(hid, {})
+                    cpu = hm.get("cpu")
+                    traffic = hm.get("traffic")
+                    load = hm.get("load")
+                    ip = next((i["ip"] for i in h.get("interfaces", []) if i.get("ip") != "127.0.0.1"), "")
+                    signals = []
+                    severity = 0
+
+                    if cpu and cpu.avg > cpu_threshold:
+                        kind = "chronic" if cpu.min_val > 50 else "frequent"
+                        signals.append(f"CPU {kind}: avg {cpu.avg}%, min {cpu.min_val}%")
+                        severity += 3 if kind == "chronic" else 2
+
+                    if traffic and traffic.avg > traffic_threshold:
+                        headroom = BW_MAX - traffic.peak
+                        signals.append(f"BW saturated: avg {traffic.avg}, peak {traffic.peak} Mbps (headroom: {headroom:.0f})")
+                        severity += 3 if headroom < 100 else 2
+
+                    if cpu and traffic and traffic.avg > 10 and eff_median > 0:
+                        eff = cpu.avg / (traffic.avg / 100)
+                        if eff > eff_median * 2:
+                            signals.append(f"Inefficient: {eff:.1f}% CPU/100Mbps (peer: {eff_median:.1f}%)")
+                            severity += 2
+
+                    if traffic and traffic.trend_dir == "rising":
+                        signals.append(f"Traffic rising: {traffic.current} vs avg {traffic.avg} Mbps")
+                        severity += 1
+
+                    if load and load.avg > 3:
+                        signals.append(f"High load: avg {load.avg}")
+                        severity += 1
+
+                    if signals:
+                        cat = "CRITICAL" if severity >= 5 else "HIGH" if severity >= 3 else "MEDIUM"
+                        if severity >= 5:
+                            action = "Add replicas or upgrade hardware"
+                        elif "Inefficient" in " ".join(signals):
+                            action = "Upgrade to faster hardware"
+                        elif "rising" in " ".join(signals):
+                            action = "Plan capacity increase"
+                        elif "saturated" in " ".join(signals).lower():
+                            action = "Upgrade NIC or add load balancer"
+                        else:
+                            action = "Monitor closely"
+
+                        candidates.append({
+                            "host": h["host"], "category": cat,
+                            "product": h.get("_prod", ""), "tier": h.get("_tier", ""),
+                            "provider": detect_provider(ip) if ip else "",
+                            "country": extract_country(h["host"]),
+                            "cpu_avg": cpu.avg if cpu else None,
+                            "traffic_avg": traffic.avg if traffic else None,
+                            "traffic_peak": traffic.peak if traffic else None,
+                            "trend": traffic.trend_dir if traffic else "",
+                            "signals": signals, "action": action, "severity": severity,
+                        })
+
+                if not candidates:
+                    return f"No overloaded servers among {len(filtered)}."
+
+                candidates.sort(key=lambda c: -c["severity"])
+                critical = sum(1 for c in candidates if c["category"] == "CRITICAL")
+                high = sum(1 for c in candidates if c["category"] == "HIGH")
+                medium = sum(1 for c in candidates if c["category"] == "MEDIUM")
+
+                parts = [
+                    f"**Capacity Planning ({period}): {len(candidates)} servers need attention**\n",
+                    f"CRITICAL: {critical} | HIGH: {high} | MEDIUM: {medium}\n",
+                    "| Priority | Server | Country | Product | CPU Avg | Traffic Avg | Peak | Trend | Action |",
+                    "|----------|--------|---------|---------|---------|-------------|------|-------|--------|",
+                ]
+                for c in candidates:
+                    cpu_a = f"{c['cpu_avg']:.1f}%" if c["cpu_avg"] else "N/A"
+                    t_a = f"{c['traffic_avg']:.0f}" if c["traffic_avg"] else "N/A"
+                    t_p = f"{c['traffic_peak']:.0f}" if c["traffic_peak"] else "N/A"
+                    parts.append(
+                        f"| {c['category']} | {c['host']} | {c['country']} | "
+                        f"{c['product']}/{c['tier']} | {cpu_a} | "
+                        f"{t_a} Mbps | {t_p} Mbps | {c['trend']} | {c['action']} |"
+                    )
+
+                parts.append(f"\n### Top Issues\n")
+                for c in candidates[:5]:
+                    parts.append(f"**{c['host']}** ({c['provider']}):")
+                    for s in c["signals"]:
+                        parts.append(f"  - {s}")
+
+                return "\n".join(parts)
+            except (httpx.HTTPError, ValueError) as e:
+                return f"Error in capacity planning: {e}"
