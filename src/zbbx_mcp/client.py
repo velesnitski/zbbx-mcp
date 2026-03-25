@@ -46,6 +46,15 @@ class ZabbixClient:
         """Cache a result."""
         self._cache[key] = (time.monotonic(), data)
 
+    @property
+    def frontend_url(self) -> str:
+        """Return the Zabbix frontend URL (strip API path)."""
+        url = self._config.url.rstrip("/")
+        for suffix in ("/api_jsonrpc.php", "/api"):
+            if url.endswith(suffix):
+                url = url[:-len(suffix)]
+        return url
+
     async def close(self):
         """Close the underlying HTTP client and release connections."""
         await self._client.aclose()

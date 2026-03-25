@@ -356,14 +356,12 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
             include_off_dashboard: bool = True,
             country: str = "",
             product: str = "",
+            products: str = "",
+            exclude_product: str = "",
             output_dir: str = "",
             instance: str = "",
         ) -> str:
             """Generate comprehensive report of ALL distinct servers across ALL dashboards.
-
-            For each server: dashboard tab, product, provider, IP, CPU, load,
-            memory, traffic (color-coded: red >= 650 Mbps, orange >= 500 Mbps),
-            connections, cost, bandwidth utilization %, service1 status, agent version.
 
             Sheets:
             1. All Servers — distinct, deduplicated, with all metrics
@@ -377,24 +375,36 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
 
             Args:
                 include_off_dashboard: Include servers not on any dashboard (default: True)
-                country: Filter by country code in hostname (e.g., 'in', 'de', 'nl') (optional)
-                product: Filter by product name (optional)
+                country: Filter by country code in hostname (optional)
+                product: Filter by single product name (optional)
+                products: Comma-separated product names to include (optional)
+                exclude_product: Comma-separated product names to exclude (optional)
                 output_dir: Directory for the Excel file (default: ~/Downloads)
-                instance: Zabbix instance name (optional, for multi-instance setups)
+                instance: Zabbix instance name (optional)
             """
             try:
                 client = resolver.resolve(instance)
                 result = await fetch_all_data(client, include_off_dashboard)
                 rows = result.rows
 
-                # Apply country/product filter
-                if country or product:
-                    rows = [
-                        r for r in rows
-                        if (not country or country.lower() in r.get("Country", "").lower()
-                            or country.lower() in r.get("Host", "").lower())
-                        and (not product or product.lower() in r.get("Product", "").lower())
-                    ]
+                # Apply filters
+                include_set = {p.strip().lower() for p in products.split(",") if p.strip()} if products else set()
+                exclude_set = {p.strip().lower() for p in exclude_product.split(",") if p.strip()} if exclude_product else set()
+
+                if country or product or include_set or exclude_set:
+                    filtered = []
+                    for r in rows:
+                        rp = r.get("Product", "").lower()
+                        if country and country.lower() not in r.get("Country", "").lower() and country.lower() not in r.get("Host", "").lower():
+                            continue
+                        if product and product.lower() not in rp:
+                            continue
+                        if include_set and not any(p in rp for p in include_set):
+                            continue
+                        if exclude_set and any(p in rp for p in exclude_set):
+                            continue
+                        filtered.append(r)
+                    rows = filtered
                     # Rebuild tab_data for filtered rows
                     result.tab_data = {}
                     for r in rows:
