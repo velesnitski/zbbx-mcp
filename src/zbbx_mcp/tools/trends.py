@@ -375,9 +375,32 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()):
                     return "No servers match the filters."
 
                 hostids = [h["hostid"] for h in filtered]
-                trend_rows, _ = await fetch_trends_batch(
+
+                import asyncio
+                trend_rows_task = fetch_trends_batch(
                     client, hostids, ["cpu", "traffic", "load"], period,
                 )
+                # Task 36: Fetch VPN health alongside trends
+                vpn1_task = client.call("item.get", {
+                    "hostids": hostids,
+                    "output": ["hostid", "lastvalue"],
+                    "filter": {"key_": "vpn_primary_check[{HOST.IP}]", "status": "0"},
+                })
+
+                (trend_rows, _), vpn1_items = await asyncio.gather(
+                    trend_rows_task, vpn1_task,
+                    return_exceptions=True,
+                )
+                if isinstance(trend_rows, BaseException):
+                    trend_rows = []
+                vpn1_items = vpn1_items if isinstance(vpn1_items, list) else []
+
+                vpn1_map: dict[str, int] = {}
+                for item in vpn1_items:
+                    try:
+                        vpn1_map[item["hostid"]] = int(float(item["lastvalue"]))
+                    except (ValueError, TypeError, KeyError):
+                        pass
 
                 # Build per-host metrics
                 host_metrics: dict[str, dict] = {}
@@ -428,12 +451,34 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()):
                         server_issues.append(f"Near BW limit: peak {traffic.peak} Mbps")
                         score -= 10
 
+                    # Task 34: Idle/dead server detection
+                    if traffic and traffic.avg < 1.0 and cpu and cpu.avg < 5.0:
+                        server_issues.append(f"Idle: traffic {traffic.avg} Mbps, CPU {cpu.avg}%")
+                        score -= 30
+
+                    # Task 34: Zombie detection (high CPU, no traffic)
+                    if cpu and cpu.avg > 50 and traffic and traffic.avg < 1.0:
+                        server_issues.append(f"Zombie: CPU {cpu.avg}% but traffic {traffic.avg} Mbps")
+                        score -= 40
+
+                    # Task 36: VPN health
+                    vpn1_val = vpn1_map.get(hid)
+                    vpn_status = ""
+                    if vpn1_val is not None:
+                        if vpn1_val == 0:
+                            server_issues.append("VPN Primary DOWN")
+                            score -= 20
+                            vpn_status = "DOWN"
+                        else:
+                            vpn_status = "OK"
+
                     if server_issues:
                         ip = next((i["ip"] for i in h.get("interfaces", []) if i.get("ip") != "127.0.0.1"), "")
                         issues.append({
                             "host": hostname, "score": max(0, score),
                             "product": h.get("_prod", ""),
                             "provider": detect_provider(ip) if ip else "",
+                            "vpn": vpn_status,
                             "issues": server_issues,
                             "cpu_avg": cpu.avg if cpu else None,
                             "traffic_avg": traffic.avg if traffic else None,
@@ -454,11 +499,160 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()):
                 ]
                 for i in issues:
                     sev = "CRITICAL" if i["score"] < 30 else "WARNING" if i["score"] < 70 else "INFO"
+                    vpn = f" | VPN: {i.get('vpn', 'N/A')}" if i.get("vpn") else ""
                     parts.append(f"### {i['host']} — {i['score']}/100 [{sev}]")
-                    parts.append(f"{i['product']} | {i['provider']} | CPU: {i['cpu_avg'] or 'N/A'}% | Traffic: {i['traffic_avg'] or 'N/A'} Mbps")
+                    parts.append(f"{i['product']} | {i['provider']} | CPU: {i['cpu_avg'] or 'N/A'}% | Traffic: {i['traffic_avg'] or 'N/A'} Mbps{vpn}")
                     for issue in i["issues"]:
                         parts.append(f"- {issue}")
                     parts.append("")
+
+                return "\n".join(parts)
+            except (httpx.HTTPError, ValueError) as e:
+                return f"Error in health assessment: {e}"
+
+    if "get_shutdown_candidates" not in skip:
+
+        @mcp.tool()
+        async def get_shutdown_candidates(
+            product: str = "",
+            tier: str = "",
+            country: str = "",
+            period: str = "7d",
+            traffic_threshold: float = 5.0,
+            cpu_threshold: float = 5.0,
+            instance: str = "",
+        ) -> str:
+            """Find servers that can be safely shut down or need investigation.
+
+            Categories:
+            - DEAD: traffic < 1 Mbps AND CPU < 5% — shutdown immediately
+            - BROKEN: VPN Primary DOWN AND traffic near zero — fix or shutdown
+            - ZOMBIE: CPU > 50% but traffic < 1 Mbps — stuck process
+            - IDLE: traffic < threshold AND CPU < threshold — review
+
+            Args:
+                product: Filter by product name (optional)
+                tier: Filter by tier name (optional)
+                country: Filter by country code (optional)
+                period: Analysis period (default: 7d)
+                traffic_threshold: Mbps below which = idle (default: 5.0)
+                cpu_threshold: CPU % below which = idle (default: 5.0)
+                instance: Zabbix instance name (optional)
+            """
+            try:
+                import asyncio as _aio
+                client = resolver.resolve(instance)
+
+                hosts = await client.call("host.get", {
+                    "output": ["hostid", "host"],
+                    "selectGroups": ["name"],
+                    "selectInterfaces": ["ip"],
+                    "filter": {"status": "0"},
+                })
+
+                filtered = []
+                for h in hosts:
+                    prod, t = _classify_host(h.get("groups", []))
+                    if product and product.lower() not in (prod or "").lower():
+                        continue
+                    if tier and tier.lower() not in (t or "").lower():
+                        continue
+                    if country and country.lower() not in h.get("host", "").lower():
+                        continue
+                    h["_prod"] = prod
+                    h["_tier"] = t
+                    filtered.append(h)
+
+                if not filtered:
+                    return "No servers match the filters."
+
+                hostids = [h["hostid"] for h in filtered]
+                (trend_rows, _), vpn1_items = await _aio.gather(
+                    fetch_trends_batch(client, hostids, ["cpu", "traffic"], period),
+                    client.call("item.get", {
+                        "hostids": hostids,
+                        "output": ["hostid", "lastvalue"],
+                        "filter": {"key_": "vpn_primary_check[{HOST.IP}]", "status": "0"},
+                    }),
+                    return_exceptions=True,
+                )
+                if isinstance(trend_rows, BaseException):
+                    trend_rows = []
+                vpn1_items = vpn1_items if isinstance(vpn1_items, list) else []
+
+                vpn1_map: dict[str, int] = {}
+                for item in vpn1_items:
+                    try:
+                        vpn1_map[item["hostid"]] = int(float(item["lastvalue"]))
+                    except (ValueError, TypeError, KeyError):
+                        pass
+
+                host_metrics: dict[str, dict] = {}
+                for r in trend_rows:
+                    host_metrics.setdefault(r.hostid, {})[r.metric] = r
+
+                candidates = []
+                for h in filtered:
+                    hid = h["hostid"]
+                    hm = host_metrics.get(hid, {})
+                    cpu = hm.get("cpu")
+                    traffic = hm.get("traffic")
+                    vpn1_val = vpn1_map.get(hid)
+                    ip = next((i["ip"] for i in h.get("interfaces", []) if i.get("ip") != "127.0.0.1"), "")
+
+                    cpu_avg = cpu.avg if cpu else None
+                    traffic_avg = traffic.avg if traffic else None
+                    vpn = "DOWN" if vpn1_val == 0 else ("OK" if vpn1_val == 1 else "")
+
+                    category = None
+                    reason = ""
+
+                    if traffic_avg is not None and traffic_avg < 1.0 and cpu_avg is not None and cpu_avg < 5.0:
+                        category = "DEAD"
+                        reason = f"Traffic {traffic_avg} Mbps, CPU {cpu_avg}%"
+                    elif cpu_avg is not None and cpu_avg > 50 and traffic_avg is not None and traffic_avg < 1.0:
+                        category = "ZOMBIE"
+                        reason = f"CPU {cpu_avg}% but traffic {traffic_avg} Mbps"
+                    elif vpn == "DOWN" and traffic_avg is not None and traffic_avg < 5.0:
+                        category = "BROKEN"
+                        reason = f"VPN Primary DOWN, traffic {traffic_avg} Mbps"
+                    elif (traffic_avg is not None and traffic_avg < traffic_threshold
+                          and cpu_avg is not None and cpu_avg < cpu_threshold):
+                        category = "IDLE"
+                        reason = f"Traffic {traffic_avg} Mbps, CPU {cpu_avg}%"
+
+                    if category:
+                        candidates.append({
+                            "host": h["host"], "category": category, "reason": reason,
+                            "product": h.get("_prod", ""), "tier": h.get("_tier", ""),
+                            "provider": detect_provider(ip) if ip else "",
+                            "cpu_avg": cpu_avg, "traffic_avg": traffic_avg, "vpn": vpn,
+                        })
+
+                if not candidates:
+                    return f"No shutdown candidates among {len(filtered)} servers."
+
+                order = {"DEAD": 0, "ZOMBIE": 1, "BROKEN": 2, "IDLE": 3}
+                candidates.sort(key=lambda c: (order.get(c["category"], 9), c.get("traffic_avg") or 0))
+
+                counts = {}
+                for c in candidates:
+                    counts[c["category"]] = counts.get(c["category"], 0) + 1
+
+                parts = [
+                    f"**Shutdown Candidates ({period}): {len(candidates)} of {len(filtered)} servers**\n",
+                    " | ".join(f"{k}: {v}" for k, v in sorted(counts.items(), key=lambda x: order.get(x[0], 9))),
+                    "",
+                    "| Category | Server | Product | Provider | CPU% | Traffic | VPN | Reason |",
+                    "|----------|--------|---------|----------|------|---------|-----|--------|",
+                ]
+                for c in candidates:
+                    cpu_s = f"{c['cpu_avg']:.1f}" if c["cpu_avg"] is not None else "N/A"
+                    t_s = f"{c['traffic_avg']:.1f}" if c["traffic_avg"] is not None else "N/A"
+                    parts.append(
+                        f"| {c['category']} | {c['host']} | {c['product']}/{c['tier']} | "
+                        f"{c['provider']} | {cpu_s}% | {t_s} Mbps | {c['vpn']} | {c['reason']} |"
+                    )
 
                 return "\n".join(parts)
             except (httpx.HTTPError, ValueError) as e:
