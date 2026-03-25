@@ -96,17 +96,17 @@ You should see `zabbix` listed when Claude starts. Try asking: *"Show current pr
 The `generate_full_report` tool supports filtering by country and product:
 
 ```
-generate_full_report(country="in")                    # India servers only
-generate_full_report(product="Premium")               # Premium tier only
-generate_full_report(country="de", product="Free")    # German free servers
+generate_full_report(country="de")                    # single country
+generate_full_report(product="Premium")               # single product
+generate_full_report(country="nl", product="Free")    # combined filters
 ```
 
 Traffic tools also support country filtering:
 
 ```
-detect_traffic_drops(country="in")                    # India traffic drops
-detect_traffic_anomalies(country="nl")                # Netherlands anomalies
-get_traffic_report(country="us")                      # US traffic sorted
+detect_traffic_drops(country="de")
+detect_traffic_anomalies(country="nl")
+get_traffic_report(country="us")
 ```
 
 ## Environment variables
