@@ -34,6 +34,18 @@ class TestExtractCountry:
     def test_us(self):
         assert extract_country("srv-c-us0999") == "US"
 
+    def test_in_lite(self):
+        assert extract_country("srv-nl03") == "IN"
+
+    def test_in_lite_mu(self):
+        assert extract_country("srv-us03") == "IN"
+
+    def test_us_lite(self):
+        assert extract_country("srv-us03") == "US"
+
+    def test_tr_lite(self):
+        assert extract_country("srv-tr03") == "TR"
+
     def test_no_country(self):
         assert extract_country("Zabbix server") == ""
 

@@ -246,6 +246,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()):
         async def get_traffic_report(
             group: str = "",
             product: str = "",
+            tier: str = "",
             country: str = "",
             sort_by: str = "traffic",
             max_results: int = 50,
@@ -258,7 +259,8 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()):
             Args:
                 group: Filter by Zabbix host group (optional)
                 product: Filter by product name (optional)
-                country: Filter by country code in hostname (e.g., 'in', 'de', 'nl') (optional)
+                tier: Filter by tier name (optional)
+                country: Filter by country code in hostname (optional)
                 sort_by: Sort by 'traffic' (desc), 'bw_per_client', or 'connections' (default: traffic)
                 max_results: Maximum results (default: 50)
                 instance: Zabbix instance name (optional, for multi-instance setups)
@@ -310,8 +312,10 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()):
                     h = host_map.get(hid)
                     if not h:
                         continue
-                    prod, tier = _classify_host(h.get("groups", []))
+                    prod, host_tier = _classify_host(h.get("groups", []))
                     if product and product.lower() not in (prod or "").lower():
+                        continue
+                    if tier and tier.lower() not in (host_tier or "").lower():
                         continue
                     if group:
                         if not any(g["name"].lower() == group.lower() for g in h.get("groups", [])):
@@ -328,7 +332,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()):
                         "ip": ip,
                         "provider": detect_provider(ip) if ip else "",
                         "product": prod or "",
-                        "tier": tier or "",
+                        "tier": host_tier or "",
                         "traffic": traffic,
                         "connections": conns,
                         "bw_per_client": bw_per_client,
