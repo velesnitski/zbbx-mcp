@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.0.3] - 2026-03-25
+
+### Added
+- `get_host` accepts hostname (auto-resolves to hostid)
+- `get_problems` falls back to visible name search when exact match fails
+- `country` filter on `get_high_cpu_servers` and `get_underloaded_servers`
+- `get_server_load` traffic fetch parallelized with CPU/load/memory (2x faster)
+- `__all__` exports, `__slots__` on `ServerRow`, `GB_BYTES` constant
+
+### Fixed
+- `get_server_load` used hardcoded `eno` search; now uses `TRAFFIC_IN_KEYS` (all NIC patterns)
+- Narrowed bare `except Exception` to specific types across codebase
+- Module-level imports in `server.py` and `slack.py` (were late imports inside functions)
+- Removed dead `PRODUCT_MAP = None` from `inventory.py`
+
 ## [1.0.2] - 2026-03-25
 
 ### Added
