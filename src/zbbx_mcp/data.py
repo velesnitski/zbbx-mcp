@@ -16,6 +16,7 @@ from zbbx_mcp.classify import classify_host as _classify_host, detect_provider
 from zbbx_mcp.excel import classify_bandwidth, BW_MAX
 
 _COUNTRY_RE = re.compile(r"[-_]([a-z]{2})\d", re.IGNORECASE)
+GB_BYTES = 1_073_741_824  # 1 GB in bytes
 
 # All known physical network interface keys (discovered from infrastructure)
 TRAFFIC_IN_KEYS = [
@@ -65,7 +66,7 @@ def build_max_map(items: list[dict]) -> dict[str, float]:
     return m
 
 
-@dataclass
+@dataclass(slots=True)
 class ServerRow:
     """One row in a server report."""
     host: str = ""
@@ -254,7 +255,7 @@ async def fetch_all_data(
     # Build metric maps
     cpu_map = build_value_map(cpu_items, lambda v: round(100 - float(v), 1))
     load_map = build_value_map(load_items, lambda v: round(float(v), 2))
-    mem_map = build_value_map(mem_items, lambda v: round(float(v) / 1_073_741_824, 1))
+    mem_map = build_value_map(mem_items, lambda v: round(float(v) / GB_BYTES, 1))
     conn_map = build_value_map(conn_items)
     # Split cost and BW limit macros
     cost_map: dict[str, float] = {}
@@ -311,7 +312,7 @@ async def fetch_all_data(
                             out_traffic_map[hid] = val
                     except (ValueError, TypeError, KeyError):
                         pass
-        except Exception:
+        except (ValueError, KeyError, OSError):
             pass  # Fallback is best-effort
 
     # service Tertiary: any check item with value 1 = OK
