@@ -9,19 +9,21 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()):
     if "search_hosts" not in skip:
 
         @mcp.tool()
-        async def search_hosts(query: str = "", group: str = "", max_results: int = 50, instance: str = "") -> str:
+        async def search_hosts(query: str = "", group: str = "", max_results: int = 50, format: str = "table", instance: str = "") -> str:
             """Search Zabbix hosts by name pattern or host group.
 
             Args:
                 query: Host name search pattern (wildcards supported, e.g., 'web*')
                 group: Filter by host group name
                 max_results: Maximum number of results (default: 50)
+                format: Output format: 'table' (default) or 'list'
                 instance: Zabbix instance name (optional, for multi-instance setups)
             """
             try:
                 client = resolver.resolve(instance)
                 params = {
                     "output": ["hostid", "host", "name", "status", "available"],
+                    "selectInterfaces": ["ip"],
                     "limit": max_results,
                     "sortfield": "host",
                 }
@@ -41,14 +43,25 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()):
 
                 data = await client.call("host.get", params)
 
-                result = format_host_list(data)
+                if not data:
+                    return "No hosts found."
+
                 count = len(data)
-                if count == 0:
-                    return result
                 header = f"**Found: {count} hosts**"
                 if count >= max_results:
                     header += f" (showing first {max_results}, more may exist)"
-                return f"{header}\n\n{result}"
+
+                if format == "table":
+                    lines = ["| Host | Name | Host ID | Status | IP |",
+                             "|------|------|---------|--------|----|"]
+                    for h in data:
+                        status = "Enabled" if h.get("status") == "0" else "Disabled"
+                        ip = next((i["ip"] for i in h.get("interfaces", []) if i.get("ip") != "127.0.0.1"), "")
+                        lines.append(f"| {h.get('host', '?')} | {h.get('name', '')} | {h.get('hostid', '?')} | {status} | {ip} |")
+                    return f"{header}\n\n" + "\n".join(lines)
+                else:
+                    result = format_host_list(data)
+                    return f"{header}\n\n{result}"
             except (httpx.HTTPError, ValueError) as e:
                 return f"Error querying Zabbix: {e}"
 
