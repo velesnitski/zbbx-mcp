@@ -17,6 +17,22 @@ from zbbx_mcp.excel import classify_bandwidth, BW_MAX
 
 _COUNTRY_RE = re.compile(r"[-_]([a-z]{2})\d", re.IGNORECASE)
 
+# All known physical network interface keys (discovered from infrastructure)
+TRAFFIC_IN_KEYS = [
+    "net.if.in[eno1]", "net.if.in[eno2]", "net.if.in[eno4]",
+    "net.if.in[eth0]", "net.if.in[eth1]",
+    "net.if.in[enp1s0f0]", "net.if.in[enp1s0f1]",
+    "net.if.in[enp2s0]", "net.if.in[enp2s0f0]", "net.if.in[enp2s0f1]",
+    "net.if.in[enp3s0]", "net.if.in[enp3s0f0]", "net.if.in[enp3s0f1]",
+    "net.if.in[enp4s0]", "net.if.in[enp5s0f0]", "net.if.in[enp6s0]",
+    "net.if.in[enp8s0f0]", "net.if.in[enp10s0]", "net.if.in[enp11s0]",
+    "net.if.in[enp45s0f1]",
+    "net.if.in[ens3]", "net.if.in[ens5]", "net.if.in[ens192]",
+    "net.if.in[ens6f0]", "net.if.in[ens7f0]", "net.if.in[ens7f0np0]",
+    "net.if.in[ppp0]", "net.if.in[ppp1]", "net.if.in[bond0]",
+]
+TRAFFIC_OUT_KEYS = [k.replace("net.if.in[", "net.if.out[") for k in TRAFFIC_IN_KEYS]
+
 
 def extract_country(hostname: str) -> str:
     """Extract 2-letter country code from hostname (e.g., srv-free-nl0105 → NL)."""
@@ -198,37 +214,11 @@ async def fetch_all_data(
                                   "filter": {"key_": "vm.memory.size[available]", "status": "0"}}),
         client.call("item.get", {"hostids": all_ids, "output": ["hostid", "lastvalue"],
                                   "filter": {"key_": "vpn_connections", "status": "0"}}),
-        # Traffic: filter by known physical interface keys (all discovered patterns)
+        # Traffic: filter by known physical interface keys
         client.call("item.get", {"hostids": all_ids, "output": ["hostid", "lastvalue"],
-                                  "filter": {"key_": [
-                                      "net.if.in[eno1]", "net.if.in[eno2]",
-                                      "net.if.in[eth0]", "net.if.in[eth1]",
-                                      "net.if.in[enp1s0f0]", "net.if.in[enp2s0]", "net.if.in[enp2s0f0]",
-                                      "net.if.in[enp3s0]", "net.if.in[enp3s0f0]", "net.if.in[enp3s0f1]",
-                                      "net.if.in[enp4s0]", "net.if.in[enp6s0]",
-                                      "net.if.in[enp8s0f0]", "net.if.in[enp10s0]", "net.if.in[enp11s0]",
-                                      "net.if.in[enp45s0f1]",
-                                      "net.if.in[ens3]", "net.if.in[ens5]", "net.if.in[ens192]",
-                                      "net.if.in[ens6f0]", "net.if.in[ens7f0]", "net.if.in[ens7f0np0]",
-                                      "net.if.in[enp1s0f1]", "net.if.in[enp2s0f1]",
-                                      "net.if.in[enp5s0f0]", "net.if.in[eno4]",
-                                      "net.if.in[ppp0]", "net.if.in[ppp1]", "net.if.in[bond0]",
-                                  ], "status": "0"}}),
+                                  "filter": {"key_": TRAFFIC_IN_KEYS, "status": "0"}}),
         client.call("item.get", {"hostids": all_ids, "output": ["hostid", "lastvalue"],
-                                  "filter": {"key_": [
-                                      "net.if.out[eno1]", "net.if.out[eno2]",
-                                      "net.if.out[eth0]", "net.if.out[eth1]",
-                                      "net.if.out[enp1s0f0]", "net.if.out[enp2s0]", "net.if.out[enp2s0f0]",
-                                      "net.if.out[enp3s0]", "net.if.out[enp3s0f0]", "net.if.out[enp3s0f1]",
-                                      "net.if.out[enp4s0]", "net.if.out[enp6s0]",
-                                      "net.if.out[enp8s0f0]", "net.if.out[enp10s0]", "net.if.out[enp11s0]",
-                                      "net.if.out[enp45s0f1]",
-                                      "net.if.out[ens3]", "net.if.out[ens5]", "net.if.out[ens192]",
-                                      "net.if.out[ens6f0]", "net.if.out[ens7f0]", "net.if.out[ens7f0np0]",
-                                      "net.if.out[enp1s0f1]", "net.if.out[enp2s0f1]",
-                                      "net.if.out[enp5s0f0]", "net.if.out[eno4]",
-                                      "net.if.out[ppp0]", "net.if.out[ppp1]", "net.if.out[bond0]",
-                                  ], "status": "0"}}),
+                                  "filter": {"key_": TRAFFIC_OUT_KEYS, "status": "0"}}),
         client.call("item.get", {"hostids": all_ids, "output": ["hostid", "lastvalue"],
                                   "filter": {"key_": "agent.version", "status": "0"}}),
         client.call("item.get", {"hostids": all_ids, "output": ["hostid", "lastvalue"],

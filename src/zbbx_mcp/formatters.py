@@ -44,7 +44,8 @@ def format_host_list(hosts: list) -> str:
             avail = " [available]"
         elif h.get("available") == "2":
             avail = " [unavailable]"
-        lines.append(f"- **{h.get('host', '?')}** ({h.get('name', '')}) [{status}]{avail}")
+        hid = f" (hostid: {h['hostid']})" if "hostid" in h else ""
+        lines.append(f"- **{h.get('host', '?')}** ({h.get('name', '')}){hid} [{status}]{avail}")
     return "\n".join(lines)
 
 
