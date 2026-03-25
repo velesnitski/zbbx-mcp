@@ -17,7 +17,11 @@ from zbbx_mcp.excel import classify_bandwidth, BW_MAX
 
 from datetime import datetime, timezone
 
-_COUNTRY_RE = re.compile(r"[-_]([a-z]{2})\d", re.IGNORECASE)
+_COUNTRY_RE = re.compile(
+    r"(?:[-_]([a-z]{2})\d)"       # nl0105, de0267
+    r"|(?:[-_]([a-z]{2})[-_])",   # -in-lite, -us-lite
+    re.IGNORECASE,
+)
 GB_BYTES = 1_073_741_824  # 1 GB in bytes
 
 # All known physical network interface keys (discovered from infrastructure)
@@ -42,13 +46,19 @@ METRIC_KEYS: dict[str, list[str]] = {
     "load": ["system.cpu.load[percpu,avg5]"],
     "memory": ["vm.memory.size[available]"],
     "traffic": TRAFFIC_IN_KEYS,
+    "traffic_out": TRAFFIC_OUT_KEYS,
 }
 
 
 def extract_country(hostname: str) -> str:
-    """Extract 2-letter country code from hostname (e.g., srv-free-nl0105 → NL)."""
+    """Extract 2-letter country code from hostname.
+
+    Handles: srv-free-nl0105 → NL, srv-nl01-lite → IN, srv-us01-lite → IN
+    """
     m = _COUNTRY_RE.search(hostname)
-    return m.group(1).upper() if m else ""
+    if not m:
+        return ""
+    return (m.group(1) or m.group(2) or "").upper()
 
 
 def build_value_map(items: list[dict], transform=float) -> dict[str, Any]:
@@ -448,7 +458,7 @@ async def fetch_all_data(
 
 
 
-@dataclass(slots=True)
+@dataclass
 class TrendRow:
     """One metric trend for one host."""
     hostid: str
@@ -458,7 +468,8 @@ class TrendRow:
     peak: float
     min_val: float
     current: float
-    trend_dir: str = ""  # ↗ ↘ →
+    trend_dir: str = ""
+    daily: dict = field(default_factory=dict)  # date_str -> avg value
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -636,6 +647,26 @@ async def fetch_trends_batch(
         else:
             trend_dir = ""
 
+        # Build daily breakdown
+        daily: dict[str, float] = {}
+        for t in t_data:
+            dt = datetime.fromtimestamp(int(t["clock"]), tz=timezone.utc)
+            day_key = dt.strftime("%b %d")
+            day_val = float(t["value_avg"])
+            if metric_name == "cpu":
+                day_val = round(100 - day_val, 1)
+            elif metric_name == "traffic":
+                day_val = round(day_val / 1e6, 1)
+            elif metric_name == "memory":
+                day_val = round(day_val / GB_BYTES, 1)
+            else:
+                day_val = round(day_val, 2)
+            # Average per day (multiple hourly records)
+            if day_key in daily:
+                daily[day_key] = round((daily[day_key] + day_val) / 2, 1)
+            else:
+                daily[day_key] = day_val
+
         rows.append(TrendRow(
             hostid=hid,
             hostname=hostname,
@@ -645,6 +676,7 @@ async def fetch_trends_batch(
             min_val=round(min_val, 1),
             current=round(current, 1),
             trend_dir=trend_dir,
+            daily=daily,
         ))
 
     rows.sort(key=lambda r: (r.hostname, r.metric))

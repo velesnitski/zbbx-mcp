@@ -3,7 +3,7 @@
 import httpx
 
 from zbbx_mcp.resolver import InstanceResolver
-from zbbx_mcp.data import fetch_trends_batch, extract_country
+from zbbx_mcp.data import fetch_trends_batch, extract_country, METRIC_KEYS
 from zbbx_mcp.classify import classify_host as _classify_host, detect_provider
 
 
@@ -15,9 +15,11 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()):
         async def get_trends_batch(
             country: str = "",
             product: str = "",
+            tier: str = "",
             group: str = "",
             metrics: str = "cpu,traffic,load",
             period: str = "7d",
+            aggregation: str = "summary",
             max_results: int = 50,
             instance: str = "",
         ) -> str:
@@ -29,9 +31,11 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()):
             Args:
                 country: Filter by country code in hostname (optional)
                 product: Filter by product name (optional)
+                tier: Filter by tier name (optional)
                 group: Filter by Zabbix host group (optional)
-                metrics: Comma-separated metrics: cpu, traffic, load, memory (default: cpu,traffic,load)
+                metrics: Comma-separated: cpu, traffic, load, memory (default: cpu,traffic,load)
                 period: Time period: 1d, 7d, 30d (default: 7d)
+                aggregation: 'summary' (default) or 'daily' for per-day breakdown
                 max_results: Maximum servers (default: 50)
                 instance: Zabbix instance name (optional, for multi-instance setups)
             """
@@ -57,8 +61,10 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()):
 
                 filtered_ids = []
                 for h in hosts:
-                    prod, _ = _classify_host(h.get("groups", []))
+                    prod, t = _classify_host(h.get("groups", []))
                     if product and product.lower() not in (prod or "").lower():
+                        continue
+                    if tier and tier.lower() not in (t or "").lower():
                         continue
                     if country and country.lower() not in h.get("host", "").lower():
                         continue
@@ -77,23 +83,47 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()):
                 if not trend_rows:
                     return f"No trend data for the last {period}."
 
-                # Format units by metric
                 units = {"cpu": "%", "traffic": "Mbps", "load": "", "memory": "GB"}
+                server_count = len(set(r.hostid for r in trend_rows))
 
-                parts = [
-                    f"**Trends ({period}) for {len(set(r.hostid for r in trend_rows))} servers**\n",
-                    "| Server | Metric | Avg | Peak | Min | Current | Trend |",
-                    "|--------|--------|-----|------|-----|---------|-------|",
-                ]
-                for r in trend_rows:
-                    u = units.get(r.metric, "")
-                    parts.append(
-                        f"| {r.hostname} | {r.metric} | "
-                        f"{r.avg} {u} | {r.peak} {u} | {r.min_val} {u} | "
-                        f"{r.current} {u} | {r.trend_dir} |"
-                    )
+                if aggregation == "daily":
+                    # Collect all unique days across all rows
+                    all_days = sorted(set(
+                        d for r in trend_rows for d in r.daily.keys()
+                    ))
+                    if not all_days:
+                        return "No daily data available."
 
-                return "\n".join(parts)
+                    day_cols = " | ".join(all_days)
+                    parts = [
+                        f"**Daily Trends ({period}) for {server_count} servers**\n",
+                        f"| Server | Metric | {day_cols} |",
+                        f"|--------|--------|{'---|' * len(all_days)}",
+                    ]
+                    for r in trend_rows:
+                        u = units.get(r.metric, "")
+                        vals = " | ".join(
+                            f"{r.daily.get(d, '')} {u}".strip() if d in r.daily else ""
+                            for d in all_days
+                        )
+                        parts.append(f"| {r.hostname} | {r.metric} | {vals} |")
+
+                    return "\n".join(parts)
+                else:
+                    parts = [
+                        f"**Trends ({period}) for {server_count} servers**\n",
+                        "| Server | Metric | Avg | Peak | Min | Current | Trend |",
+                        "|--------|--------|-----|------|-----|---------|-------|",
+                    ]
+                    for r in trend_rows:
+                        u = units.get(r.metric, "")
+                        parts.append(
+                            f"| {r.hostname} | {r.metric} | "
+                            f"{r.avg} {u} | {r.peak} {u} | {r.min_val} {u} | "
+                            f"{r.current} {u} | {r.trend_dir} |"
+                        )
+
+                    return "\n".join(parts)
             except (httpx.HTTPError, ValueError) as e:
                 return f"Error: {e}"
 
@@ -161,6 +191,85 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()):
                         f"min {r.min_val} {u} | current {r.current} {u} | "
                         f"trend: {r.trend_dir}"
                     )
+
+                return "\n".join(parts)
+            except (httpx.HTTPError, ValueError) as e:
+                return f"Error: {e}"
+
+    if "compare_servers" not in skip:
+
+        @mcp.tool()
+        async def compare_servers(
+            hosts: str,
+            metrics: str = "cpu,traffic,load",
+            period: str = "7d",
+            instance: str = "",
+        ) -> str:
+            """Compare multiple servers side-by-side with trend data.
+
+            Args:
+                hosts: Comma-separated hostnames (e.g., 'srv-nl01,srv-de01')
+                metrics: Comma-separated: cpu, traffic, traffic_out, load, memory
+                period: Time period: 1d, 7d, 30d (default: 7d)
+                instance: Zabbix instance name (optional, for multi-instance setups)
+            """
+            try:
+                from typing import Any
+                client = resolver.resolve(instance)
+                host_names = [h.strip() for h in hosts.split(",") if h.strip()]
+
+                if len(host_names) < 2:
+                    return "Need at least 2 hostnames to compare."
+
+                lookup = await client.call("host.get", {
+                    "output": ["hostid", "host"],
+                    "selectInterfaces": ["ip"],
+                    "filter": {"host": host_names},
+                })
+                if len(lookup) < 2:
+                    return f"Found only {len(lookup)} hosts. Need at least 2."
+
+                hostids = [h["hostid"] for h in lookup]
+                metric_list = [m.strip() for m in metrics.split(",") if m.strip()]
+                trend_rows, _ = await fetch_trends_batch(client, hostids, metric_list, period)
+
+                if not trend_rows:
+                    return f"No trend data for the last {period}."
+
+                by_metric: dict[str, dict[str, Any]] = {}
+                for r in trend_rows:
+                    by_metric.setdefault(r.metric, {})[r.hostname] = r
+
+                units = {"cpu": "%", "traffic": "Mbps", "traffic_out": "Mbps", "load": "", "memory": "GB"}
+                server_names = [h["host"] for h in lookup]
+                cols = " | ".join(server_names)
+
+                parts = [
+                    f"**Server Comparison ({period})**\n",
+                    f"| Metric | {cols} |",
+                    f"|--------|{'---|' * len(server_names)}",
+                ]
+                for mn in metric_list:
+                    if mn not in by_metric:
+                        continue
+                    u = units.get(mn, "")
+                    data = by_metric[mn]
+                    vals_avg = [f"{data[n].avg} {u}" if n in data else "N/A" for n in server_names]
+                    vals_peak = [f"{data[n].peak} {u}" if n in data else "N/A" for n in server_names]
+                    vals_now = [f"{data[n].current} {u}" if n in data else "N/A" for n in server_names]
+                    parts.append(f"| {mn} avg | {' | '.join(vals_avg)} |")
+                    parts.append(f"| {mn} peak | {' | '.join(vals_peak)} |")
+                    parts.append(f"| {mn} now | {' | '.join(vals_now)} |")
+
+                # Provider/country info
+                parts.append(f"\n| Info | {cols} |")
+                parts.append(f"|------|{'---|' * len(server_names)}")
+                provs = []
+                for h in lookup:
+                    ip = next((i["ip"] for i in h.get("interfaces", []) if i.get("ip") != "127.0.0.1"), "")
+                    provs.append(detect_provider(ip) if ip else "?")
+                parts.append(f"| Provider | {' | '.join(provs)} |")
+                parts.append(f"| Country | {' | '.join(extract_country(h['host']) for h in lookup)} |")
 
                 return "\n".join(parts)
             except (httpx.HTTPError, ValueError) as e:
