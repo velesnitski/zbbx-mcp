@@ -1,0 +1,409 @@
+"""Geo-level monitoring: traffic analysis, traffic trends, availability."""
+
+from __future__ import annotations
+
+import asyncio
+import time as _time
+from statistics import median
+
+import httpx
+
+from zbbx_mcp.resolver import InstanceResolver
+from zbbx_mcp.data import (
+    fetch_trends_batch, extract_country, build_value_map, build_max_map,
+    TRAFFIC_IN_KEYS, GB_BYTES,
+)
+from zbbx_mcp.classify import classify_host as _classify_host, detect_provider
+
+
+def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> None:
+
+    if "detect_regional_anomalies" not in skip:
+
+        @mcp.tool()
+        async def detect_regional_anomalies(
+            period: str = "1d",
+            baseline_days: int = 7,
+            drop_threshold: float = 50.0,
+            country_threshold: float = 50.0,
+            min_servers: int = 2,
+            instance: str = "",
+        ) -> str:
+            """Detect country-level traffic disruptions by analyzing traffic drops across all servers in each country.
+
+            When >50% of servers in a country show >50% traffic drop vs baseline,
+            flags it as a potential regional anomaly (ISP-level traffic disruptioning).
+
+            Args:
+                period: Current period to analyze (default: 1d)
+                baseline_days: Days for baseline comparison (default: 7)
+                drop_threshold: % traffic drop per server to flag (default: 50%)
+                country_threshold: % of servers in country affected (default: 50%)
+                min_servers: Minimum servers in country to analyze (default: 2)
+                instance: Zabbix instance name (optional)
+            """
+            try:
+                client = resolver.resolve(instance)
+
+                hosts = await client.call("host.get", {
+                    "output": ["hostid", "host"],
+                    "selectGroups": ["name"],
+                    "selectInterfaces": ["ip"],
+                    "filter": {"status": "0"},
+                })
+
+                # Group by country
+                countries: dict[str, list[dict]] = {}
+                for h in hosts:
+                    ctry = extract_country(h["host"])
+                    if ctry:
+                        countries.setdefault(ctry, []).append(h)
+
+                # Filter to countries with enough servers
+                countries = {c: hs for c, hs in countries.items() if len(hs) >= min_servers}
+                if not countries:
+                    return "No countries with enough servers for analysis."
+
+                # Get trends for all hosts
+                all_ids = [h["hostid"] for c_hosts in countries.values() for h in c_hosts]
+                trend_rows, _ = await fetch_trends_batch(client, all_ids, ["cpu", "traffic"], f"{baseline_days}d")
+
+                # Also get service1 status
+                service1_items = await client.call("item.get", {
+                    "hostids": all_ids,
+                    "output": ["hostid", "lastvalue"],
+                    "filter": {"key_": "service_primary_check[{HOST.IP}]", "status": "0"},
+                })
+                service1_map = build_value_map(service1_items, lambda v: int(float(v)))
+
+                # Build per-host metrics
+                host_metrics: dict[str, dict] = {}
+                for r in trend_rows:
+                    host_metrics.setdefault(r.hostid, {})[r.metric] = r
+
+                # Analyze each country
+                blocked = []
+                healthy = []
+
+                for ctry, c_hosts in sorted(countries.items()):
+                    affected = 0
+                    total = len(c_hosts)
+                    drops = []
+                    service_down = 0
+
+                    for h in c_hosts:
+                        hm = host_metrics.get(h["hostid"], {})
+                        traffic = hm.get("traffic")
+                        service1 = service1_map.get(h["hostid"])
+
+                        if service1 == 0:
+                            service_down += 1
+
+                        if traffic and traffic.avg > 1:
+                            drop_pct = ((traffic.avg - traffic.current) / traffic.avg * 100) if traffic.avg > 0 else 0
+                            if drop_pct >= drop_threshold:
+                                affected += 1
+                                drops.append(drop_pct)
+                        elif traffic and traffic.avg < 1 and traffic.peak > 10:
+                            # Was active, now dead
+                            affected += 1
+                            drops.append(100.0)
+
+                    pct_affected = (affected / total * 100) if total > 0 else 0
+
+                    if pct_affected >= country_threshold:
+                        avg_drop = sum(drops) / len(drops) if drops else 0
+                        severity = "CRITICAL" if pct_affected >= 80 else "WARNING"
+                        blocked.append({
+                            "country": ctry,
+                            "total": total,
+                            "affected": affected,
+                            "pct": pct_affected,
+                            "avg_drop": avg_drop,
+                            "service_down": service_down,
+                            "severity": severity,
+                            "hosts": c_hosts,
+                        })
+                    else:
+                        healthy.append(ctry)
+
+                if not blocked:
+                    return f"No regional anomalys detected across {len(countries)} countries ({sum(len(v) for v in countries.values())} servers)."
+
+                parts = [
+                    f"**Geo-Block Detection: {len(blocked)} countries affected**\n",
+                    "| Country | Servers | Affected | Drop Avg | service DOWN | Severity |",
+                    "|---------|---------|----------|----------|----------|----------|",
+                ]
+                for b in sorted(blocked, key=lambda x: -x["pct"]):
+                    parts.append(
+                        f"| {b['country']} | {b['total']} | "
+                        f"{b['affected']}/{b['total']} ({b['pct']:.0f}%) | "
+                        f"-{b['avg_drop']:.0f}% | {b['service_down']} | {b['severity']} |"
+                    )
+
+                # Detail per affected country
+                for b in blocked:
+                    parts.append(f"\n### {b['country']} — {b['severity']}")
+                    for h in b["hosts"]:
+                        hm = host_metrics.get(h["hostid"], {})
+                        traffic = hm.get("traffic")
+                        service1 = service1_map.get(h["hostid"])
+                        t_now = f"{traffic.current:.1f}" if traffic else "N/A"
+                        t_avg = f"{traffic.avg:.1f}" if traffic else "N/A"
+                        service = "DOWN" if service1 == 0 else ("OK" if service1 == 1 else "?")
+                        parts.append(f"- {h['host']}: {t_now} Mbps (was {t_avg}) | service: {service}")
+
+                if healthy:
+                    parts.append(f"\n**Healthy countries:** {', '.join(sorted(healthy))}")
+
+                return "\n".join(parts)
+            except (httpx.HTTPError, ValueError) as e:
+                return f"Error: {e}"
+
+    if "get_geo_traffic_trends" not in skip:
+
+        @mcp.tool()
+        async def get_geo_traffic_trends(
+            period: str = "30d",
+            aggregation: str = "daily",
+            min_servers: int = 2,
+            instance: str = "",
+        ) -> str:
+            """Per-country traffic trends over time — detect usage growth or decline per region.
+
+            Args:
+                period: Time period (default: 30d)
+                aggregation: 'summary' or 'daily' (default: daily)
+                min_servers: Minimum servers per country (default: 2)
+                instance: Zabbix instance name (optional)
+            """
+            try:
+                client = resolver.resolve(instance)
+
+                hosts = await client.call("host.get", {
+                    "output": ["hostid", "host"],
+                    "filter": {"status": "0"},
+                })
+
+                countries: dict[str, list[str]] = {}
+                host_map: dict[str, str] = {}
+                for h in hosts:
+                    ctry = extract_country(h["host"])
+                    if ctry:
+                        countries.setdefault(ctry, []).append(h["hostid"])
+                        host_map[h["hostid"]] = h["host"]
+
+                countries = {c: ids for c, ids in countries.items() if len(ids) >= min_servers}
+                if not countries:
+                    return "No countries with enough servers."
+
+                all_ids = [hid for ids in countries.values() for hid in ids]
+                trend_rows, _ = await fetch_trends_batch(client, all_ids, ["traffic"], period)
+
+                # Aggregate by country
+                country_data: dict[str, dict] = {}
+                for r in trend_rows:
+                    for ctry, ids in countries.items():
+                        if r.hostid in ids:
+                            cd = country_data.setdefault(ctry, {
+                                "servers": len(ids), "avg": 0, "current": 0,
+                                "trend": "", "daily": {},
+                            })
+                            cd["avg"] += r.avg
+                            cd["current"] += r.current
+                            cd["trend"] = r.trend_dir
+                            # Sum daily values
+                            for day, val in r.daily.items():
+                                cd["daily"][day] = cd["daily"].get(day, 0) + val
+                            break
+
+                if not country_data:
+                    return f"No traffic trend data for {period}."
+
+                parts = [
+                    f"**Geo Traffic Trends ({period})**\n",
+                    "| Country | Servers | Traffic Avg | Traffic Now | Trend | Change |",
+                    "|---------|---------|-------------|-------------|-------|--------|",
+                ]
+
+                for ctry in sorted(country_data, key=lambda c: -country_data[c]["avg"]):
+                    cd = country_data[ctry]
+                    avg_gbps = cd["avg"] / 1000
+                    now_gbps = cd["current"] / 1000
+                    change = ((cd["current"] - cd["avg"]) / cd["avg"] * 100) if cd["avg"] > 0 else 0
+                    trend = "dead" if cd["current"] < 1 and cd["avg"] > 10 else cd["trend"]
+                    parts.append(
+                        f"| {ctry} | {cd['servers']} | {avg_gbps:.1f} Gbps | "
+                        f"{now_gbps:.1f} Gbps | {trend} | {change:+.0f}% |"
+                    )
+
+                if aggregation == "daily" and country_data:
+                    # Show daily for top 5 countries
+                    parts.append(f"\n### Daily Breakdown (top countries)\n")
+                    top = sorted(country_data.items(), key=lambda x: -x[1]["avg"])[:5]
+                    all_days = sorted(set(
+                        d for _, cd in top for d in cd["daily"].keys()
+                    ))
+                    if all_days:
+                        day_cols = " | ".join(all_days)
+                        parts.append(f"| Country | {day_cols} |")
+                        parts.append(f"|---------|{'---|' * len(all_days)}")
+                        for ctry, cd in top:
+                            vals = " | ".join(
+                                f"{cd['daily'].get(d, 0)/1000:.1f}" for d in all_days
+                            )
+                            parts.append(f"| {ctry} (Gbps) | {vals} |")
+
+                return "\n".join(parts)
+            except (httpx.HTTPError, ValueError) as e:
+                return f"Error: {e}"
+
+    if "get_service_uptime_report" not in skip:
+
+        @mcp.tool()
+        async def get_service_uptime_report(
+            country: str = "",
+            product: str = "",
+            period: str = "30d",
+            instance: str = "",
+        ) -> str:
+            """service protocol availability per server — uptime % for service Primary, service Secondary, service Tertiary.
+
+            Uses Zabbix trend data to calculate hours UP vs DOWN for each protocol.
+
+            Args:
+                country: Filter by country code (optional)
+                product: Filter by product name (optional)
+                period: Analysis period (default: 30d)
+                instance: Zabbix instance name (optional)
+            """
+            try:
+                client = resolver.resolve(instance)
+
+                hosts = await client.call("host.get", {
+                    "output": ["hostid", "host"],
+                    "selectGroups": ["name"],
+                    "filter": {"status": "0"},
+                })
+
+                filtered = []
+                for h in hosts:
+                    prod, _ = _classify_host(h.get("groups", []))
+                    if product and product.lower() not in (prod or "").lower():
+                        continue
+                    if country and country.lower() not in h["host"].lower():
+                        continue
+                    filtered.append(h)
+
+                if not filtered:
+                    return "No servers match the filters."
+
+                hostids = [h["hostid"] for h in filtered]
+
+                # Fetch trend data for service check items
+                now = int(_time.time())
+                from zbbx_mcp.data import _parse_period
+                time_from = now - _parse_period(period)
+
+                # Get items for service1, service2, service_tertiary checks
+                service_items = await client.call("item.get", {
+                    "hostids": hostids,
+                    "output": ["itemid", "hostid", "key_"],
+                    "filter": {"key_": [
+                        "service_primary_check[{HOST.IP}]",
+                        "service_secondary_check[{HOST.IP}]",
+                    ], "status": "0"},
+                })
+
+                if not service_items:
+                    return "No service check items found."
+
+                # Fetch trends for service items
+                item_ids = [i["itemid"] for i in service_items]
+                trends = await client.call("trend.get", {
+                    "itemids": item_ids,
+                    "time_from": time_from,
+                    "output": ["itemid", "value_avg", "num"],
+                    "limit": len(item_ids) * 24 * 31,
+                })
+
+                # Map itemid -> (hostid, protocol)
+                item_info: dict[str, tuple[str, str]] = {}
+                for i in service_items:
+                    proto = "service1" if "service1" in i["key_"] else "service2"
+                    item_info[i["itemid"]] = (i["hostid"], proto)
+
+                # Calculate uptime per host per protocol
+                host_uptime: dict[str, dict[str, dict]] = {}  # hostid -> proto -> {up, total}
+                for t in trends:
+                    info = item_info.get(t["itemid"])
+                    if not info:
+                        continue
+                    hid, proto = info
+                    entry = host_uptime.setdefault(hid, {}).setdefault(proto, {"up": 0, "total": 0})
+                    entry["total"] += 1
+                    try:
+                        if float(t["value_avg"]) >= 0.5:
+                            entry["up"] += 1
+                    except (ValueError, TypeError):
+                        pass
+
+                host_map = {h["hostid"]: h["host"] for h in filtered}
+
+                rows = []
+                for hid in hostids:
+                    hostname = host_map.get(hid, "?")
+                    ctry = extract_country(hostname)
+                    hu = host_uptime.get(hid, {})
+
+                    service1 = hu.get("service1", {"up": 0, "total": 0})
+                    service2 = hu.get("service2", {"up": 0, "total": 0})
+
+                    service1_pct = (service1["up"] / service1["total"] * 100) if service1["total"] > 0 else None
+                    service2_pct = (service2["up"] / service2["total"] * 100) if service2["total"] > 0 else None
+
+                    overall = "HEALTHY"
+                    if service1_pct is not None and service1_pct < 50:
+                        overall = "DOWN"
+                    elif service1_pct is not None and service1_pct < 90:
+                        overall = "DEGRADED"
+
+                    rows.append({
+                        "host": hostname, "country": ctry,
+                        "service1": service1_pct, "service2": service2_pct,
+                        "overall": overall, "hours": service1["total"],
+                    })
+
+                rows.sort(key=lambda r: (r["service1"] or 100))
+
+                parts = [
+                    f"**service Availability ({period}): {len(rows)} servers**\n",
+                    "| Server | Country | service Primary Uptime | service Secondary Uptime | Status |",
+                    "|--------|---------|-------------|-------------|--------|",
+                ]
+                for r in rows:
+                    x = f"{r['service1']:.1f}%" if r["service1"] is not None else "N/A"
+                    k = f"{r['service2']:.1f}%" if r["service2"] is not None else "N/A"
+                    parts.append(f"| {r['host']} | {r['country']} | {x} | {k} | {r['overall']} |")
+
+                # Country summary
+                country_stats: dict[str, list] = {}
+                for r in rows:
+                    if r["country"]:
+                        country_stats.setdefault(r["country"], []).append(r)
+
+                if country_stats:
+                    parts.append(f"\n### Country Summary\n")
+                    parts.append("| Country | Servers | Avg service Primary Uptime | DOWN |")
+                    parts.append("|---------|---------|-----------------|------|")
+                    for ctry in sorted(country_stats):
+                        cs = country_stats[ctry]
+                        service1_vals = [r["service1"] for r in cs if r["service1"] is not None]
+                        avg_x = f"{median(service1_vals):.1f}%" if service1_vals else "N/A"
+                        down = sum(1 for r in cs if r["overall"] == "DOWN")
+                        parts.append(f"| {ctry} | {len(cs)} | {avg_x} | {down} |")
+
+                return "\n".join(parts)
+            except (httpx.HTTPError, ValueError) as e:
+                return f"Error: {e}"
