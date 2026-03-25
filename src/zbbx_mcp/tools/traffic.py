@@ -19,6 +19,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()):
         async def detect_traffic_anomalies(
             group: str = "",
             product: str = "",
+            country: str = "",
             threshold_pct: float = 20.0,
             min_peers: int = 3,
             instance: str = "",
@@ -34,6 +35,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()):
             Args:
                 group: Analyze a specific Zabbix host group (optional, default: all groups)
                 product: Filter by product name (optional)
+                country: Filter by country code in hostname (e.g., 'in', 'de', 'nl') (optional)
                 threshold_pct: Flag servers below this % of group median (default: 20%)
                 min_peers: Minimum peers needed for comparison (default: 3)
                 instance: Zabbix instance name (optional, for multi-instance setups)
@@ -102,6 +104,8 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()):
                 for h in hosts:
                     prod, tier = _classify_host(h.get("groups", []))
                     if product and product.lower() not in (prod or "").lower():
+                        continue
+                    if country and country.lower() not in h.get("host", "").lower():
                         continue
                     for g in h.get("groups", []):
                         gname = g["name"]
@@ -367,6 +371,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()):
         async def detect_traffic_drops(
             group: str = "",
             product: str = "",
+            country: str = "",
             drop_pct: float = 50.0,
             baseline_days: int = 7,
             max_results: int = 50,
@@ -383,6 +388,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()):
             Args:
                 group: Filter by Zabbix host group (optional)
                 product: Filter by product name (optional)
+                country: Filter by country code in hostname (e.g., 'in', 'de', 'nl') (optional)
                 drop_pct: Minimum drop percentage to flag (default: 50% = traffic halved)
                 baseline_days: Days of trend data for baseline (default: 7)
                 max_results: Maximum results (default: 50)
@@ -407,6 +413,8 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()):
                     if product and product.lower() not in (prod or "").lower():
                         continue
                     if group and not any(g["name"].lower() == group.lower() for g in h.get("groups", [])):
+                        continue
+                    if country and country.lower() not in h.get("host", "").lower():
                         continue
                     filtered_ids.append(h["hostid"])
 
