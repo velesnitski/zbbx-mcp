@@ -203,63 +203,91 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
 </div>
 """]
 
-                # Server table
-                html.append('<h2>Server Overview</h2>')
-                html.append('<table><thead><tr>')
-                html.append('<th>Server</th><th>IP</th><th>Country</th><th>Product</th><th>Provider</th>')
-                html.append(f'<th>CPU Now</th><th>CPU Avg {period}</th>')
-                html.append(f'<th>Traffic Now</th><th>Traffic Avg {period}</th>')
-                html.append('<th>BW Util</th><th>VPN Primary</th><th>Trend</th><th>Groups</th>')
-                html.append('</tr></thead><tbody>')
-
-                rows.sort(key=lambda r: -(r.get("Traffic In Mbps") or 0))
-
-                for r in rows:
+                # Group rows by Product → Dashboard → Tab
+                def _render_server_row(r: dict) -> str:
                     hostname = r["Host"]
                     cpu_now = r.get("CPU %")
                     traffic_now = r.get("Traffic In Mbps")
-
-                    # Trend data
                     ht = host_trends.get(hostname, {})
                     cpu_trend = ht.get("cpu")
                     traffic_trend = ht.get("traffic")
-
                     cpu_avg = f'{cpu_trend.avg:.1f}%' if cpu_trend else "N/A"
                     traffic_avg = f'{traffic_trend.avg:.0f}' if traffic_trend else "N/A"
                     trend_dir = traffic_trend.trend_dir if traffic_trend else ""
                     trend_class = {"rising": "trend-rise", "dropping": "trend-drop", "stable": "trend-stable"}.get(trend_dir, "")
-
                     cpu_cls = _cpu_class(cpu_now)
                     cpu_str = f'{cpu_now:.1f}%' if cpu_now is not None else "N/A"
                     traffic_str = f'{traffic_now:.0f}' if traffic_now is not None else "N/A"
-
                     vpn1 = r.get("VPN Primary", "")
                     vpn_html = _badge("DOWN", "red") if vpn1 == "DOWN" else (_badge("OK", "green") if vpn1 == "OK" else "")
-
                     hostid = r.get("Host ID", "")
                     ip = r.get("IP", "")
-                    groups = r.get("Groups", "")
-                    zabbix_link = f'{zabbix_base_url}/zabbix.php?action=latest.view&hostids%5B%5D={hostid}' if hostid else ""
-                    host_cell = f'<a href="{zabbix_link}" target="_blank" style="color:var(--accent);text-decoration:none"><strong>{hostname}</strong></a>' if zabbix_link else f'<strong>{hostname}</strong>'
+                    dashid = r.get("Dashboard ID", "")
+                    pidx = r.get("Page Index", 0)
+                    if dashid:
+                        zlink = f'{zabbix_base_url}/zabbix.php?action=dashboard.view&dashboardid={dashid}&page={pidx}'
+                    elif hostid:
+                        zlink = f'{zabbix_base_url}/zabbix.php?action=latest.view&hostids%5B%5D={hostid}'
+                    else:
+                        zlink = ""
+                    host_cell = f'<a href="{zlink}" target="_blank" style="color:var(--accent);text-decoration:none"><strong>{hostname}</strong></a>' if zlink else f'<strong>{hostname}</strong>'
                     ip_cell = f'<code style="font-size:.8rem;color:var(--muted)">{ip}</code>' if ip else ""
+                    return (
+                        f'<tr><td>{host_cell}</td><td>{ip_cell}</td>'
+                        f'<td>{r.get("Country", "")}</td><td>{r.get("Provider", "")}</td>'
+                        f'<td class="{cpu_cls}">{cpu_str}</td><td>{cpu_avg}</td>'
+                        f'<td>{traffic_str} Mbps</td><td>{traffic_avg} Mbps</td>'
+                        f'<td>{_bw_bar(traffic_now)}</td><td>{vpn_html}</td>'
+                        f'<td class="{trend_class}">{trend_dir}</td></tr>'
+                    )
 
-                    html.append(f'<tr>')
-                    html.append(f'<td>{host_cell}</td>')
-                    html.append(f'<td>{ip_cell}</td>')
-                    html.append(f'<td>{r.get("Country", "")}</td>')
-                    html.append(f'<td>{r.get("Product", "")}/{r.get("Tier", "")}</td>')
-                    html.append(f'<td>{r.get("Provider", "")}</td>')
-                    html.append(f'<td class="{cpu_cls}">{cpu_str}</td>')
-                    html.append(f'<td>{cpu_avg}</td>')
-                    html.append(f'<td>{traffic_str} Mbps</td>')
-                    html.append(f'<td>{traffic_avg} Mbps</td>')
-                    html.append(f'<td>{_bw_bar(traffic_now)}</td>')
-                    html.append(f'<td>{vpn_html}</td>')
-                    html.append(f'<td class="{trend_class}">{trend_dir}</td>')
-                    html.append(f'<td style="font-size:.75rem;color:var(--muted)">{groups}</td>')
-                    html.append('</tr>')
+                table_header = (
+                    '<table><thead><tr>'
+                    '<th>Server</th><th>IP</th><th>Country</th><th>Provider</th>'
+                    f'<th>CPU Now</th><th>CPU Avg {period}</th>'
+                    f'<th>Traffic Now</th><th>Traffic Avg {period}</th>'
+                    '<th>BW Util</th><th>VPN Primary</th><th>Trend</th>'
+                    '</tr></thead><tbody>'
+                )
 
-                html.append('</tbody></table>')
+                # Build hierarchy: Product → Dashboard → Tab → [rows]
+                from collections import defaultdict
+                grouped: dict[str, dict[str, dict[str, list]]] = defaultdict(lambda: defaultdict(lambda: defaultdict(list)))
+                off_dashboard = []
+                for r in rows:
+                    if r.get("Dashboard"):
+                        prod_key = f"{r.get('Product', 'Unknown')}/{r.get('Tier', '')}"
+                        grouped[prod_key][r["Dashboard"]][r.get("Tab", "")].append(r)
+                    else:
+                        off_dashboard.append(r)
+
+                for prod_key in sorted(grouped):
+                    html.append(f'<h2>{prod_key}</h2>')
+                    for dash_name in sorted(grouped[prod_key]):
+                        # Dashboard link
+                        sample = next(iter(next(iter(grouped[prod_key][dash_name].values()))), None)
+                        dashid = sample.get("Dashboard ID", "") if sample else ""
+                        dash_link = f'{zabbix_base_url}/zabbix.php?action=dashboard.view&dashboardid={dashid}' if dashid else ""
+                        dash_html = f'<a href="{dash_link}" target="_blank" style="color:var(--accent);text-decoration:none">{dash_name}</a>' if dash_link else dash_name
+                        html.append(f'<h3>{dash_html}</h3>')
+
+                        for tab_name in sorted(grouped[prod_key][dash_name]):
+                            tab_rows = grouped[prod_key][dash_name][tab_name]
+                            tab_rows.sort(key=lambda r: -(r.get("Traffic In Mbps") or 0))
+                            tab_traffic = sum(r.get("Traffic In Mbps") or 0 for r in tab_rows)
+                            html.append(f'<h4 style="color:var(--muted);margin:12px 0 6px">{tab_name} ({len(tab_rows)} servers, {tab_traffic:.0f} Mbps total)</h4>')
+                            html.append(table_header)
+                            for r in tab_rows:
+                                html.append(_render_server_row(r))
+                            html.append('</tbody></table>')
+
+                if off_dashboard:
+                    off_dashboard.sort(key=lambda r: -(r.get("Traffic In Mbps") or 0))
+                    html.append(f'<h2>Off-Dashboard ({len(off_dashboard)} servers)</h2>')
+                    html.append(table_header)
+                    for r in off_dashboard:
+                        html.append(_render_server_row(r))
+                    html.append('</tbody></table>')
 
                 # Provider summary
                 prov_counts: dict[str, int] = {}

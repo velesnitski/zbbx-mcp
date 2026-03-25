@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.1.0] - 2026-03-25
+
+### Added
+- `get_protocol_failure_matrix`: per-country VPN protocol status matrix with recommendations
+- `get_block_timeline`: when blocks started per country from daily trend data
+- HTML report grouped by Product → Dashboard → Tab (task 61)
+- Dashboard tab links: server names link to Zabbix dashboard page+tab (task 62)
+- `dashboardid` and `page_index` in `ServerRow` and `graph_context`
+- Multi-product include/exclude filters on `generate_html_report` and `generate_full_report`
+- `ZabbixClient.frontend_url` property for Zabbix UI link construction
+- Print/PDF CSS: light theme, readable badges, page breaks
+
 ## [1.0.9] - 2026-03-25
 
 ### Added
