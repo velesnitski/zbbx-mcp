@@ -170,11 +170,29 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()):
             """Get full details of a specific Zabbix host.
 
             Args:
-                host_id: Zabbix host ID
+                host_id: Zabbix host ID or hostname (auto-resolved)
                 instance: Zabbix instance name (optional, for multi-instance setups)
             """
             try:
                 client = resolver.resolve(instance)
+
+                # Resolve hostname to ID if not numeric
+                if not host_id.isdigit():
+                    lookup = await client.call("host.get", {
+                        "output": ["hostid"],
+                        "filter": {"host": [host_id]},
+                    })
+                    if not lookup:
+                        lookup = await client.call("host.get", {
+                            "output": ["hostid"],
+                            "search": {"host": host_id, "name": host_id},
+                            "searchByAny": True, "searchWildcardsEnabled": True,
+                            "limit": 1,
+                        })
+                    if not lookup:
+                        return f"Host '{host_id}' not found."
+                    host_id = lookup[0]["hostid"]
+
                 data = await client.call("host.get", {
                     "hostids": [host_id],
                     "output": "extend",

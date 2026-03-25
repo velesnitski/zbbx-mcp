@@ -67,6 +67,12 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()):
                         "filter": {"host": [host]},
                     })
                     if not hosts:
+                        hosts = await client.call("host.get", {
+                            "output": ["hostid"],
+                            "search": {"host": host, "name": host},
+                            "searchByAny": True, "searchWildcardsEnabled": True,
+                        })
+                    if not hosts:
                         return f"Host '{host}' not found."
                     params["hostids"] = [h["hostid"] for h in hosts]
                 elif group:
