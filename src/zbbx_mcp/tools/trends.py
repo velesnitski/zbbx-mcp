@@ -348,7 +348,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()):
                 client = resolver.resolve(instance)
 
                 params: dict = {
-                    "output": ["hostid", "host"],
+                    "output": ["hostid", "host", "available"],
                     "selectGroups": ["name"],
                     "selectInterfaces": ["ip"],
                     "filter": {"status": "0"},
@@ -477,6 +477,12 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()):
                         else:
                             vpn_status = "OK"
 
+                    # Task 41: Agent availability
+                    agent_avail = h.get("available", "0")
+                    if agent_avail == "2":
+                        server_issues.append("Zabbix agent unavailable")
+                        score -= 30
+
                     if server_issues:
                         ip = next((i["ip"] for i in h.get("interfaces", []) if i.get("ip") != "127.0.0.1"), "")
                         issues.append({
@@ -484,6 +490,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()):
                             "product": h.get("_prod", ""),
                             "provider": detect_provider(ip) if ip else "",
                             "vpn": vpn_status,
+                            "agent": "down" if agent_avail == "2" else "up",
                             "issues": server_issues,
                             "cpu_avg": cpu.avg if cpu else None,
                             "traffic_avg": traffic.avg if traffic else None,
@@ -498,15 +505,44 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()):
                 critical = sum(1 for i in issues if i["score"] < 30)
                 warning = sum(1 for i in issues if 30 <= i["score"] < 70)
 
+                # Task 39: Cluster/location pattern detection
+                clusters: dict[str, list[dict]] = {}
+                for i in issues:
+                    ctry = extract_country(i["host"])
+                    if ctry:
+                        clusters.setdefault(ctry, []).append(i)
+
+                cluster_alerts = []
+                for ctry, members in clusters.items():
+                    if len(members) >= 3:
+                        dead = sum(1 for m in members if m["score"] < 30)
+                        if dead == len(members):
+                            cluster_alerts.append(f"**CLUSTER DEAD: {ctry}** — all {len(members)} servers critical")
+                        elif dead / len(members) > 0.5:
+                            cluster_alerts.append(f"**CLUSTER DEGRADED: {ctry}** — {dead}/{len(members)} servers critical")
+
+                agents_down = sum(1 for i in issues if i.get("agent") == "down")
+
                 parts = [
                     f"**Health Assessment ({period}): {len(filtered)} servers**\n",
-                    f"Healthy: {healthy} | Warning: {warning} | Critical: {critical}\n",
+                    f"Healthy: {healthy} | Warning: {warning} | Critical: {critical}",
                 ]
+                if agents_down:
+                    parts.append(f"Agent unavailable: {agents_down}")
+                parts.append("")
+
+                if cluster_alerts:
+                    parts.append("## Cluster Alerts\n")
+                    for alert in cluster_alerts:
+                        parts.append(alert)
+                    parts.append("")
+
                 for i in issues:
                     sev = "CRITICAL" if i["score"] < 30 else "WARNING" if i["score"] < 70 else "INFO"
                     vpn = f" | VPN: {i.get('vpn', 'N/A')}" if i.get("vpn") else ""
+                    agent = " | Agent: DOWN" if i.get("agent") == "down" else ""
                     parts.append(f"### {i['host']} — {i['score']}/100 [{sev}]")
-                    parts.append(f"{i['product']} | {i['provider']} | CPU: {i['cpu_avg'] or 'N/A'}% | Traffic: {i['traffic_avg'] or 'N/A'} Mbps{vpn}")
+                    parts.append(f"{i['product']} | {i['provider']} | CPU: {i['cpu_avg'] or 'N/A'}% | Traffic: {i['traffic_avg'] or 'N/A'} Mbps{vpn}{agent}")
                     for issue in i["issues"]:
                         parts.append(f"- {issue}")
                     parts.append("")
