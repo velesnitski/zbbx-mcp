@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.0.9] - 2026-03-25
+
+### Added
+- `get_service_health_matrix`: per-country service protocol status (service Primary/service Secondary/service Tertiary OK/DOWN/PARTIAL) with recommendations
+- `get_traffic_drop_timeline`: when blocks started per country, duration, pre-block traffic vs current
+
 ## [1.0.8] - 2026-03-25
 
 ### Added
