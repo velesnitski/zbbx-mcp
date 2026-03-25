@@ -8,7 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ## [1.0.2] - 2026-03-25
 
 ### Added
-- `country` and `product` filters on `generate_full_report` — generate India-only, Germany-only, or Premium-only reports
+- `country` and `product` filters on `generate_full_report` — generate per-country or per-product reports
 - `country` filter on `detect_traffic_drops`, `detect_traffic_anomalies`, `get_traffic_report`
 - `{$BW_LIMIT}` host macro support — per-server bandwidth limit for accurate BW Util % (falls back to 800 Mbps)
 - `hostid` now shown in `search_hosts` output — enables `get_host_items` → `get_trends` chain
