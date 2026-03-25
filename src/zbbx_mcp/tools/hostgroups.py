@@ -4,7 +4,7 @@ from zbbx_mcp.resolver import InstanceResolver
 from zbbx_mcp.formatters import format_hostgroup_list
 
 
-def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()):
+def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> None:
 
     if "get_hostgroups" not in skip:
 

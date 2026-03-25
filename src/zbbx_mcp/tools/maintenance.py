@@ -8,7 +8,7 @@ from zbbx_mcp.formatters import _ts
 MAINTENANCE_TYPES = {"0": "With data collection", "1": "Without data collection"}
 
 
-def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()):
+def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> None:
 
     if "get_maintenance" not in skip:
 

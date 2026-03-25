@@ -12,7 +12,7 @@ from zbbx_mcp.resolver import InstanceResolver
 SLACK_WEBHOOK_ENV = "SLACK_WEBHOOK_URL"
 
 
-def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()):
+def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> None:
 
     if "send_slack_message" not in skip:
 

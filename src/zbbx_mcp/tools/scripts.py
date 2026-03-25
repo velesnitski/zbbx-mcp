@@ -6,7 +6,7 @@ SCRIPT_TYPES = {"0": "Script", "1": "IPMI", "5": "Webhook"}
 EXECUTE_ON = {"0": "Zabbix agent", "1": "Zabbix server", "2": "Zabbix server (proxy)"}
 
 
-def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()):
+def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> None:
 
     if "get_scripts" not in skip:
 

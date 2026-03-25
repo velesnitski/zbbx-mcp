@@ -63,7 +63,7 @@ def _format_value(value: str, units: str) -> str:
         return f"{value} {units}".strip()
 
 
-def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()):
+def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> None:
 
     if "create_item" not in skip:
 

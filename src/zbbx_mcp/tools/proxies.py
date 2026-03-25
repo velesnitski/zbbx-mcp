@@ -9,7 +9,7 @@ from zbbx_mcp.formatters import _ts
 PROXY_MODE = {"5": "Active", "6": "Passive"}
 
 
-def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()):
+def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> None:
 
     if "get_proxies" not in skip:
 

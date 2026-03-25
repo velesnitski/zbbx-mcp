@@ -347,7 +347,7 @@ def _write_off_dashboard_sheet(wb: Workbook, rows: list[dict]) -> None:
     finalize_sheet(ws, headers, len(off))
 
 
-def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()):
+def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> None:
 
     if "generate_full_report" not in skip:
 
