@@ -126,7 +126,7 @@ class ZabbixClient:
         if action in (Action.UPDATE, Action.DELETE):
             try:
                 snap = await self.snapshot(object_type, object_id)
-            except (ValueError, Exception):
+            except (ValueError, httpx.HTTPError, KeyError):
                 snap = {}  # Record without snapshot rather than fail the operation
         self.rollback_log.record(action, object_type, object_id, snap, description)
 
