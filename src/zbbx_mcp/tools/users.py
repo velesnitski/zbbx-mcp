@@ -7,7 +7,7 @@ from zbbx_mcp.resolver import InstanceResolver
 USER_TYPES = {"1": "User", "2": "Admin", "3": "Super admin"}
 
 
-def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()):
+def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> None:
 
     if "get_users" not in skip:
 

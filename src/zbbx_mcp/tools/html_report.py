@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import os
 from datetime import datetime, timezone
 from statistics import median
@@ -69,7 +70,7 @@ def _bw_bar(mbps: float | None) -> str:
     return f'<div class="bar"><div class="bar-fill" style="width:{pct:.0f}%;background:{color}"></div></div>'
 
 
-def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()):
+def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> None:
 
     if "generate_html_report" not in skip:
 
@@ -114,7 +115,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()):
                     return "No servers match the filters."
 
                 # Fetch trends for filtered hosts
-                import asyncio
+
                 hostids = []
                 host_id_map = {}
                 all_hosts = await client.call("host.get", {

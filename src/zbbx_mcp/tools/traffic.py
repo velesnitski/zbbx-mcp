@@ -11,7 +11,7 @@ from zbbx_mcp.classify import classify_host as _classify_host, detect_provider
 from zbbx_mcp.data import TRAFFIC_IN_KEYS
 
 
-def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()):
+def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> None:
 
     if "detect_traffic_anomalies" not in skip:
 
