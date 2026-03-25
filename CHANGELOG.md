@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.0.4] - 2026-03-25
+
+### Added
+- **79 tools** across 31 modules
+- `generate_html_report`: dark-themed responsive HTML with KPI cards, color-coded server table, traffic bars, 7d trend data, provider distribution. Printable to PDF via browser.
+- `get_capacity_planning`: find overloaded servers needing upgrade. Detects sustained CPU overload, BW saturation, hardware inefficiency (CPU/traffic ratio vs peers), rising traffic trends. Multi-signal scoring with recommended actions.
+- `get_shutdown_candidates`: find servers to decommission. Categories: DEAD (traffic+CPU near zero), ZOMBIE (high CPU, no traffic), BROKEN (service Primary DOWN + low traffic), IDLE (below thresholds). Includes service health per candidate.
+- `get_health_assessment` enhanced: idle/zombie detection (task 34), service service Primary health check (task 36), "recently died" vs "always idle" distinction (task 40)
+- `get_underloaded_servers` now shows traffic column alongside CPU
+- `get_trends_batch`: daily breakdown via `aggregation="daily"`, tier filter, iowait/softirq metrics
+- `get_server_dashboard`: daily breakdown table by default
+- `compare_servers`: CPU/100Mbps efficiency metric, BW headroom calculation
+- `extract_country` regex fixed for Lite hostnames (`srv-nl01-lite` → IN)
+- `generate_full_report`: country/product filters, recalculated summary stats
+
 ## [1.0.3] - 2026-03-25
 
 ### Added
