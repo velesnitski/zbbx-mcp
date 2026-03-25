@@ -47,6 +47,8 @@ METRIC_KEYS: dict[str, list[str]] = {
     "memory": ["vm.memory.size[available]"],
     "traffic": TRAFFIC_IN_KEYS,
     "traffic_out": TRAFFIC_OUT_KEYS,
+    "iowait": ["system.cpu.util[,iowait]"],
+    "softirq": ["system.cpu.util[,softirq]"],
 }
 
 
