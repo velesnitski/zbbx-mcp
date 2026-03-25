@@ -452,10 +452,14 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()):
                         server_issues.append(f"Near BW limit: peak {traffic.peak} Mbps")
                         score -= 10
 
-                    # Task 34: Idle/dead server detection
+                    # Task 34+40: Idle/dead with recency detection
                     if traffic and traffic.avg < 1.0 and cpu and cpu.avg < 5.0:
-                        server_issues.append(f"Idle: traffic {traffic.avg} Mbps, CPU {cpu.avg}%")
-                        score -= 30
+                        if traffic.peak > 10:
+                            server_issues.append(f"Recently died: peak was {traffic.peak} Mbps, now avg {traffic.avg}")
+                            score -= 35
+                        else:
+                            server_issues.append(f"Always idle: traffic {traffic.avg} Mbps, CPU {cpu.avg}%")
+                            score -= 25
 
                     # Task 34: Zombie detection (high CPU, no traffic)
                     if cpu and cpu.avg > 50 and traffic and traffic.avg < 1.0:

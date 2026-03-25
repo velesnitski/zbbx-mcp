@@ -128,6 +128,8 @@ EXPECTED_TOOLS = {
     "get_health_assessment",
     "get_shutdown_candidates",
     "get_capacity_planning",
+    # html_report.py
+    "generate_html_report",
 }
 
 
