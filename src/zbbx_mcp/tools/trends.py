@@ -486,7 +486,8 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()):
                     if server_issues:
                         ip = next((i["ip"] for i in h.get("interfaces", []) if i.get("ip") != "127.0.0.1"), "")
                         issues.append({
-                            "host": hostname, "score": max(0, score),
+                            "host": hostname, "hostid": hid, "ip": ip,
+                            "score": max(0, score),
                             "product": h.get("_prod", ""),
                             "provider": detect_provider(ip) if ip else "",
                             "vpn": vpn_status,
@@ -541,8 +542,9 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()):
                     sev = "CRITICAL" if i["score"] < 30 else "WARNING" if i["score"] < 70 else "INFO"
                     vpn = f" | VPN: {i.get('vpn', 'N/A')}" if i.get("vpn") else ""
                     agent = " | Agent: DOWN" if i.get("agent") == "down" else ""
+                    ip_str = f" | IP: {i['ip']}" if i.get("ip") else ""
                     parts.append(f"### {i['host']} — {i['score']}/100 [{sev}]")
-                    parts.append(f"{i['product']} | {i['provider']} | CPU: {i['cpu_avg'] or 'N/A'}% | Traffic: {i['traffic_avg'] or 'N/A'} Mbps{vpn}{agent}")
+                    parts.append(f"{i['product']} | {i['provider']}{ip_str} | CPU: {i['cpu_avg'] or 'N/A'}% | Traffic: {i['traffic_avg'] or 'N/A'} Mbps{vpn}{agent}")
                     for issue in i["issues"]:
                         parts.append(f"- {issue}")
                     parts.append("")
@@ -664,7 +666,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()):
 
                     if category:
                         candidates.append({
-                            "host": h["host"], "category": category, "reason": reason,
+                            "host": h["host"], "ip": ip, "category": category, "reason": reason,
                             "product": h.get("_prod", ""), "tier": h.get("_tier", ""),
                             "provider": detect_provider(ip) if ip else "",
                             "cpu_avg": cpu_avg, "traffic_avg": traffic_avg, "vpn": vpn,
@@ -684,14 +686,14 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()):
                     f"**Shutdown Candidates ({period}): {len(candidates)} of {len(filtered)} servers**\n",
                     " | ".join(f"{k}: {v}" for k, v in sorted(counts.items(), key=lambda x: order.get(x[0], 9))),
                     "",
-                    "| Category | Server | Product | Provider | CPU% | Traffic | VPN | Reason |",
-                    "|----------|--------|---------|----------|------|---------|-----|--------|",
+                    "| Category | Server | IP | Product | Provider | CPU% | Traffic | VPN | Reason |",
+                    "|----------|--------|----|---------|----------|------|---------|-----|--------|",
                 ]
                 for c in candidates:
                     cpu_s = f"{c['cpu_avg']:.1f}" if c["cpu_avg"] is not None else "N/A"
                     t_s = f"{c['traffic_avg']:.1f}" if c["traffic_avg"] is not None else "N/A"
                     parts.append(
-                        f"| {c['category']} | {c['host']} | {c['product']}/{c['tier']} | "
+                        f"| {c['category']} | {c['host']} | {c.get('ip', '')} | {c['product']}/{c['tier']} | "
                         f"{c['provider']} | {cpu_s}% | {t_s} Mbps | {c['vpn']} | {c['reason']} |"
                     )
 
