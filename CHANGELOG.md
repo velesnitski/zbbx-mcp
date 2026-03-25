@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.0.5] - 2026-03-25
+
+### Added
+- Cluster/location pattern detection in `get_health_assessment` (task 39)
+  Automatically groups issues by country and flags "CLUSTER DEAD" (all servers
+  critical) or "CLUSTER DEGRADED" (>50% critical) — catches regional outages,
+  datacenter outages affecting entire locations
+- Zabbix agent availability in `get_health_assessment` (task 41)
+  Shows "Agent unavailable" with score -30. Distinguishes offline servers
+  from servers with working agent but broken service/traffic
+
+All open tasks in tasks.md are now either implemented, already covered by
+existing tools, or require Zabbix-side investigation (not MCP code changes).
+
 ## [1.0.4] - 2026-03-25
 
 ### Added
