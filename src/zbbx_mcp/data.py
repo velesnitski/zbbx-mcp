@@ -99,7 +99,9 @@ class ServerRow:
     name: str = ""
     country: str = ""
     dashboard: str = ""
+    dashboardid: str = ""
     tab: str = ""
+    page_index: int = 0
     all_tabs: str = ""
     product: str = ""
     tier: str = ""
@@ -133,6 +135,8 @@ class ServerRow:
             "Name": self.name,
             "Country": self.country,
             "Dashboard": self.dashboard,
+            "Dashboard ID": self.dashboardid,
+            "Page Index": self.page_index,
             "Tab": self.tab,
             "Product": self.product,
             "Tier": self.tier,
@@ -219,7 +223,12 @@ async def fetch_all_data(
                     if f.get("type") == "6":
                         gid = f["value"]
                         all_graph_ids.add(gid)
-                        graph_context[gid] = {"dashboard": dname, "tab": tab}
+                        graph_context[gid] = {
+                            "dashboard": dname,
+                            "dashboardid": d.get("dashboardid", ""),
+                            "tab": tab,
+                            "page_index": pi,
+                        }
 
     host_map = {h["hostid"]: h for h in hosts}
     all_ids = list(host_map.keys())
@@ -418,7 +427,9 @@ async def fetch_all_data(
             name=h.get("name", ""),
             country=extract_country(hostname),
             dashboard=tabs[0]["dashboard"] if tabs else "",
+            dashboardid=tabs[0].get("dashboardid", "") if tabs else "",
             tab=tabs[0]["tab"] if tabs else "",
+            page_index=tabs[0].get("page_index", 0) if tabs else 0,
             all_tabs=", ".join(f"{t['dashboard']} / {t['tab']}" for t in tabs) if tabs else "",
             product=prod,
             tier=tier,
