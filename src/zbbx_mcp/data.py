@@ -50,6 +50,8 @@ METRIC_KEYS: dict[str, list[str]] = {
     "traffic_out": TRAFFIC_OUT_KEYS,
     "iowait": ["system.cpu.util[,iowait]"],
     "softirq": ["system.cpu.util[,softirq]"],
+    "disk_read": ["vfs.dev.read.rate[sda]", "vfs.dev.read.rate[vda]", "vfs.dev.read.rate[nvme0n1]"],
+    "disk_write": ["vfs.dev.write.rate[sda]", "vfs.dev.write.rate[vda]", "vfs.dev.write.rate[nvme0n1]"],
 }
 
 

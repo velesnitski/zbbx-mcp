@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.0.6] - 2026-03-25
+
+### Added
+- **3 new geo monitoring tools** (82 total):
+  - `detect_regional_anomalies`: country-level traffic disruption detection. Groups servers by country, compares current traffic to baseline, flags countries where >50% of servers show >50% traffic drop. Cross-references with service Primary status.
+  - `get_geo_traffic_trends`: per-country traffic over time (30d daily). Shows total Gbps per country, trend direction, growth/decline percentage.
+  - `get_service_uptime_report`: service uptime per server (service Primary, service Secondary). Calculates hours UP vs DOWN from trend data. Country-level summary.
+- `disk_read` and `disk_write` added to `METRIC_KEYS` (sda, vda, nvme0n1)
+
 ## [1.0.5] - 2026-03-25
 
 ### Added
