@@ -9,7 +9,7 @@ import httpx
 from zbbx_mcp.resolver import InstanceResolver
 
 
-def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()):
+def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> None:
 
     if "import_server_costs" not in skip:
 

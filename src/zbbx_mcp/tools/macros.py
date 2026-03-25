@@ -5,7 +5,7 @@ from zbbx_mcp.resolver import InstanceResolver
 MACRO_TYPES = {"0": "Text", "1": "Secret", "2": "Vault"}
 
 
-def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()):
+def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> None:
 
     if "get_host_macros" not in skip:
 

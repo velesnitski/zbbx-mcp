@@ -3,7 +3,7 @@ import httpx
 from zbbx_mcp.resolver import InstanceResolver
 
 
-def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()):
+def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> None:
 
     if "check_connection" not in skip:
 

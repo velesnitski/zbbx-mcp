@@ -4,7 +4,7 @@ from zbbx_mcp.resolver import InstanceResolver
 from zbbx_mcp.formatters import format_host_list, format_host_detail
 
 
-def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()):
+def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> None:
 
     if "search_hosts" not in skip:
 

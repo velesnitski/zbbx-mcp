@@ -6,7 +6,7 @@ from zbbx_mcp.resolver import InstanceResolver
 from zbbx_mcp.formatters import format_problem_list, format_severity, _ts
 
 
-def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()):
+def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> None:
 
     if "get_problems" not in skip:
 

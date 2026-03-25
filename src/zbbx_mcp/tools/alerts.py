@@ -11,7 +11,7 @@ ALERT_STATUS = {"0": "Not sent", "1": "Sent", "2": "Failed", "3": "New"}
 ALERT_TYPES = {"0": "Message", "1": "Remote command"}
 
 
-def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()):
+def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> None:
 
     if "get_alerts" not in skip:
 

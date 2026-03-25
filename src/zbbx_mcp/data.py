@@ -7,6 +7,7 @@ All report tools use this instead of duplicating API call logic.
 from __future__ import annotations
 
 import asyncio
+import time as _time
 import re
 from dataclasses import dataclass, field
 from typing import Any
@@ -512,7 +513,7 @@ async def fetch_trends_batch(
     Returns:
         Tuple of (trend_rows, host_map) where host_map is {hostid: host_dict}
     """
-    import time as _time
+
     if metrics is None:
         metrics = ["cpu", "traffic", "load"]
 

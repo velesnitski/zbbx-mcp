@@ -1,3 +1,4 @@
+import time
 import asyncio
 import json
 from itertools import count
@@ -35,7 +36,6 @@ class ZabbixClient:
 
     def _get_cached(self, key: str, ttl: float = 60.0) -> list | None:
         """Get cached result if fresh."""
-        import time
         if key in self._cache:
             ts, data = self._cache[key]
             if time.monotonic() - ts < ttl:
@@ -44,7 +44,6 @@ class ZabbixClient:
 
     def _set_cache(self, key: str, data: list) -> None:
         """Cache a result."""
-        import time
         self._cache[key] = (time.monotonic(), data)
 
     async def close(self):
