@@ -228,8 +228,8 @@ async def fetch_all_data(
         client.call("item.get", {"hostids": all_ids, "output": ["hostid", "lastvalue"],
                                   "search": {"key_": "vpn3"}, "searchWildcardsEnabled": True,
                                   "filter": {"status": "0"}}),
-        client.call("usermacro.get", {"hostids": all_ids, "output": ["hostid", "value"],
-                                       "filter": {"macro": "{$COST_MONTH}"}}),
+        client.call("usermacro.get", {"hostids": all_ids, "output": ["hostid", "macro", "value"],
+                                       "filter": {"macro": ["{$COST_MONTH}", "{$BW_LIMIT}"]}}),
         client.call("host.get", {"hostids": all_ids, "output": ["hostid"],
                                   "selectParentTemplates": ["name"]}),
         graph_task,
@@ -256,7 +256,17 @@ async def fetch_all_data(
     load_map = build_value_map(load_items, lambda v: round(float(v), 2))
     mem_map = build_value_map(mem_items, lambda v: round(float(v) / 1_073_741_824, 1))
     conn_map = build_value_map(conn_items)
-    cost_map = build_value_map(cost_macros, lambda v: float(v))
+    # Split cost and BW limit macros
+    cost_map: dict[str, float] = {}
+    bw_limit_map: dict[str, float] = {}
+    for m in cost_macros:
+        try:
+            if m.get("macro") == "{$COST_MONTH}":
+                cost_map[m["hostid"]] = float(m["value"])
+            elif m.get("macro") == "{$BW_LIMIT}":
+                bw_limit_map[m["hostid"]] = float(m["value"])
+        except (ValueError, TypeError, KeyError):
+            pass
     version_map = build_value_map(version_items, lambda v: str(v))
     vpn1_map = build_value_map(vpn1_items, lambda v: int(float(v)))
     vpn2_map = build_value_map(vpn2_items, lambda v: int(float(v)))
@@ -391,7 +401,7 @@ async def fetch_all_data(
             traffic_in_mbps=in_mbps,
             traffic_out_mbps=out_mbps,
             traffic_total_mbps=total_mbps,
-            bw_util_pct=round(in_mbps / BW_MAX * 100, 1) if in_mbps else None,
+            bw_util_pct=round(in_mbps / (bw_limit_map.get(hid, BW_MAX)) * 100, 1) if in_mbps else None,
             bw_tier=classify_bandwidth(in_mbps),
             connections=conn_map.get(hid),
             vpn1="OK" if vpn1_val == 1 else ("DOWN" if vpn1_val is not None else ""),
