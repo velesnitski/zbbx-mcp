@@ -126,6 +126,7 @@ EXPECTED_TOOLS = {
     "get_server_dashboard",
     "compare_servers",
     "get_health_assessment",
+    "get_shutdown_candidates",
 }
 
 
