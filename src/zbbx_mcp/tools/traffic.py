@@ -8,6 +8,7 @@ import httpx
 
 from zbbx_mcp.resolver import InstanceResolver
 from zbbx_mcp.classify import classify_host as _classify_host, detect_provider
+from zbbx_mcp.data import TRAFFIC_IN_KEYS
 
 
 def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()):
@@ -53,9 +54,8 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()):
                 # Phase 2: traffic + connections + CPU in parallel (3 calls)
                 traffic_task = client.call("item.get", {
                     "hostids": all_ids,
-                    "output": ["hostid", "name", "lastvalue"],
-                    "search": {"name": "Incoming network traffic"},
-                    "filter": {"status": "0"},
+                    "output": ["hostid", "lastvalue"],
+                    "filter": {"key_": TRAFFIC_IN_KEYS, "status": "0"},
                 })
                 conn_task = client.call("item.get", {
                     "hostids": all_ids,
@@ -242,6 +242,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()):
         async def get_traffic_report(
             group: str = "",
             product: str = "",
+            country: str = "",
             sort_by: str = "traffic",
             max_results: int = 50,
             instance: str = "",
@@ -253,6 +254,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()):
             Args:
                 group: Filter by Zabbix host group (optional)
                 product: Filter by product name (optional)
+                country: Filter by country code in hostname (e.g., 'in', 'de', 'nl') (optional)
                 sort_by: Sort by 'traffic' (desc), 'bw_per_client', or 'connections' (default: traffic)
                 max_results: Maximum results (default: 50)
                 instance: Zabbix instance name (optional, for multi-instance setups)
@@ -273,8 +275,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()):
                     client.call("item.get", {
                         "hostids": all_ids,
                         "output": ["hostid", "lastvalue"],
-                        "search": {"name": "Incoming network traffic"},
-                        "filter": {"status": "0"},
+                        "filter": {"key_": TRAFFIC_IN_KEYS, "status": "0"},
                     }),
                     client.call("item.get", {
                         "hostids": all_ids,
@@ -311,6 +312,8 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()):
                     if group:
                         if not any(g["name"].lower() == group.lower() for g in h.get("groups", [])):
                             continue
+                    if country and country.lower() not in h.get("host", "").lower():
+                        continue
 
                     conns = host_conns.get(hid, 0)
                     bw_per_client = (traffic / conns) if conns > 0 else 0
