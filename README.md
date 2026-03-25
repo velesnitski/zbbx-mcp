@@ -91,6 +91,24 @@ You should see `zabbix` listed when Claude starts. Try asking: *"Show current pr
 | **Reports** | `generate_server_report`, `generate_infra_report`, `export_dashboard`, `generate_full_report` (Excel) |
 | **Health** | `check_connection` |
 
+### Report filtering
+
+The `generate_full_report` tool supports filtering by country and product:
+
+```
+generate_full_report(country="in")                    # India servers only
+generate_full_report(product="Premium")               # Premium tier only
+generate_full_report(country="de", product="Free")    # German free servers
+```
+
+Traffic tools also support country filtering:
+
+```
+detect_traffic_drops(country="in")                    # India traffic drops
+detect_traffic_anomalies(country="nl")                # Netherlands anomalies
+get_traffic_report(country="us")                      # US traffic sorted
+```
+
 ## Environment variables
 
 | Variable | Required | Description |
@@ -103,6 +121,7 @@ You should see `zabbix` listed when Claude starts. Try asking: *"Show current pr
 | `ZABBIX_PRODUCT_MAP` | No | JSON file path or inline JSON mapping host groups to products |
 | `SLACK_WEBHOOK_URL` | No | Slack webhook URL for `send_slack_message` / `send_slack_report` |
 | `SENTRY_DSN` | No | Sentry DSN for error tracking — just set the env var, SDK is included |
+| `{$BW_LIMIT}` | No | Per-host Zabbix macro for bandwidth limit in Mbps (default: 800). Set on hosts for accurate BW Util % |
 | `ZABBIX_LOG_FILE` | No | Error log path (default: `~/.zbbx-mcp/zbbx-mcp.log`) |
 | `ZABBIX_ANALYTICS_FILE` | No | Analytics log path (default: `~/.zbbx-mcp/analytics.log`) |
 
