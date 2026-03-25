@@ -124,6 +124,7 @@ EXPECTED_TOOLS = {
     # trends.py
     "get_trends_batch",
     "get_server_dashboard",
+    "compare_servers",
 }
 
 
