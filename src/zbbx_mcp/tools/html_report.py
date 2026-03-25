@@ -97,6 +97,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
             """
             try:
                 client = resolver.resolve(instance)
+                zabbix_base_url = client._config.url.replace("/api_jsonrpc.php", "")
 
                 # Fetch current data
                 result = await fetch_all_data(client)
@@ -177,10 +178,10 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 # Server table
                 html.append('<h2>Server Overview</h2>')
                 html.append('<table><thead><tr>')
-                html.append('<th>Server</th><th>Country</th><th>Product</th><th>Provider</th>')
+                html.append('<th>Server</th><th>IP</th><th>Country</th><th>Product</th><th>Provider</th>')
                 html.append(f'<th>CPU Now</th><th>CPU Avg {period}</th>')
                 html.append(f'<th>Traffic Now</th><th>Traffic Avg {period}</th>')
-                html.append('<th>BW Util</th><th>service Primary</th><th>Trend</th>')
+                html.append('<th>BW Util</th><th>service Primary</th><th>Trend</th><th>Groups</th>')
                 html.append('</tr></thead><tbody>')
 
                 rows.sort(key=lambda r: -(r.get("Traffic In Mbps") or 0))
@@ -207,8 +208,16 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     service1 = r.get("service Primary", "")
                     service_html = _badge("DOWN", "red") if service1 == "DOWN" else (_badge("OK", "green") if service1 == "OK" else "")
 
+                    hostid = r.get("Host ID", "")
+                    ip = r.get("IP", "")
+                    groups = r.get("Groups", "")
+                    zabbix_link = f'{zabbix_base_url}/zabbix.php?action=latest.view&hostids%5B%5D={hostid}' if hostid else ""
+                    host_cell = f'<a href="{zabbix_link}" target="_blank" style="color:var(--accent);text-decoration:none"><strong>{hostname}</strong></a>' if zabbix_link else f'<strong>{hostname}</strong>'
+                    ip_cell = f'<code style="font-size:.8rem;color:var(--muted)">{ip}</code>' if ip else ""
+
                     html.append(f'<tr>')
-                    html.append(f'<td><strong>{hostname}</strong></td>')
+                    html.append(f'<td>{host_cell}</td>')
+                    html.append(f'<td>{ip_cell}</td>')
                     html.append(f'<td>{r.get("Country", "")}</td>')
                     html.append(f'<td>{r.get("Product", "")}/{r.get("Tier", "")}</td>')
                     html.append(f'<td>{r.get("Provider", "")}</td>')
@@ -219,6 +228,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     html.append(f'<td>{_bw_bar(traffic_now)}</td>')
                     html.append(f'<td>{service_html}</td>')
                     html.append(f'<td class="{trend_class}">{trend_dir}</td>')
+                    html.append(f'<td style="font-size:.75rem;color:var(--muted)">{groups}</td>')
                     html.append('</tr>')
 
                 html.append('</tbody></table>')
