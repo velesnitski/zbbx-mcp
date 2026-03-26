@@ -25,7 +25,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ## [1.0.9] - 2026-03-25
 
 ### Added
-- `get_service_health_matrix`: per-country service protocol status (service Primary/service Secondary/service Tertiary OK/DOWN/PARTIAL) with recommendations
+- `get_service_health_matrix`: per-country service protocol status (per-protocol OK/DOWN/PARTIAL) with recommendations
 - `get_traffic_drop_timeline`: when blocks started per country, duration, pre-block traffic vs current
 
 ## [1.0.8] - 2026-03-25
@@ -50,9 +50,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 - **3 new geo monitoring tools** (82 total):
-  - `detect_regional_anomalies`: country-level traffic disruption detection. Groups servers by country, compares current traffic to baseline, flags countries where >50% of servers show >50% traffic drop. Cross-references with service Primary status.
+  - `detect_regional_anomalies`: country-level traffic disruption detection. Groups servers by country, compares current traffic to baseline, flags countries where >50% of servers show >50% traffic drop. Cross-references with service health status.
   - `get_geo_traffic_trends`: per-country traffic over time (30d daily). Shows total Gbps per country, trend direction, growth/decline percentage.
-  - `get_service_uptime_report`: service uptime per server (service Primary, service Secondary). Calculates hours UP vs DOWN from trend data. Country-level summary.
+  - `get_service_uptime_report`: service uptime per server (per protocol). Calculates hours UP vs DOWN from trend data. Country-level summary.
 - `disk_read` and `disk_write` added to `METRIC_KEYS` (sda, vda, nvme0n1)
 
 ## [1.0.5] - 2026-03-25
@@ -75,8 +75,8 @@ existing tools, or require Zabbix-side investigation (not MCP code changes).
 - **79 tools** across 31 modules
 - `generate_html_report`: dark-themed responsive HTML with KPI cards, color-coded server table, traffic bars, 7d trend data, provider distribution. Printable to PDF via browser.
 - `get_capacity_planning`: find overloaded servers needing upgrade. Detects sustained CPU overload, BW saturation, hardware inefficiency (CPU/traffic ratio vs peers), rising traffic trends. Multi-signal scoring with recommended actions.
-- `get_shutdown_candidates`: find servers to decommission. Categories: DEAD (traffic+CPU near zero), ZOMBIE (high CPU, no traffic), BROKEN (service Primary DOWN + low traffic), IDLE (below thresholds). Includes service health per candidate.
-- `get_health_assessment` enhanced: idle/zombie detection (task 34), service service Primary health check (task 36), "recently died" vs "always idle" distinction (task 40)
+- `get_shutdown_candidates`: find servers to decommission. Categories: DEAD (traffic+CPU near zero), ZOMBIE (high CPU, no traffic), BROKEN (service DOWN + low traffic), IDLE (below thresholds). Includes service health per candidate.
+- `get_health_assessment` enhanced: idle/zombie detection (task 34), service health check (task 36), "recently died" vs "always idle" distinction (task 40)
 - `get_underloaded_servers` now shows traffic column alongside CPU
 - `get_trends_batch`: daily breakdown via `aggregation="daily"`, tier filter, iowait/softirq metrics
 - `get_server_dashboard`: daily breakdown table by default
@@ -152,7 +152,7 @@ existing tools, or require Zabbix-side investigation (not MCP code changes).
 - **Host group CRUD**: `create_hostgroup`, `delete_hostgroup`
 - **Provider detection** from IP CIDR ranges (OVH, Scaleway, Hetzner, AWS, Cogent, Melbicom, Psychz, Selectel, Vultr, GTHost, InterKVM)
 - **Country extraction** from hostnames
-- **service health columns**: service Primary, service Secondary, service Tertiary status with color coding
+- **service health columns**: service protocol status with color coding
 - **Agent version** and **templates** in reports
 - **Bandwidth color coding**: dark red ≥800, red ≥650, orange ≥500, green ≥200 Mbps
 - **Structured logging**: JSON error logs + analytics to `~/.zbbx-mcp/`
