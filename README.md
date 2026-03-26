@@ -126,7 +126,7 @@ get_traffic_report(country="us")
 | `{$BW_LIMIT}` | No | Per-host Zabbix macro for bandwidth limit in Mbps (default: 800). Set on hosts for accurate BW Util % |
 | `ZABBIX_COMPACT_TOOLS` | No | Trim tool descriptions to save tokens (default: `true`). Set `false` for full descriptions |
 | `ZABBIX_COMPACT` | No | Strip markdown from tool responses for ~40% token savings. Set `true` to enable |
-| `ZABBIX_RESPONSE_BUDGET` | No | Max chars per tool response (default: `8000`). Set `0` to disable truncation |
+| `ZABBIX_RESPONSE_BUDGET` | No | Max chars per tool response (default: `6000`). Set `0` to disable truncation |
 | `ZABBIX_LOG_FILE` | No | Error log path (default: `~/.zbbx-mcp/zbbx-mcp.log`) |
 | `ZABBIX_ANALYTICS_FILE` | No | Analytics log path (default: `~/.zbbx-mcp/analytics.log`) |
 
