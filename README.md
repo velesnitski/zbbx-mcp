@@ -1,6 +1,6 @@
 # zbbx-mcp
 
-Zabbix MCP server for [Claude Code](https://claude.com/claude-code), [ChatGPT CLI](https://github.com/openai/codex), [n8n](https://n8n.io), and any MCP-compatible client. Talk to your Zabbix monitoring in natural language.
+Zabbix MCP server for [Claude Code](https://claude.com/claude-code), [Codex CLI](https://github.com/openai/codex), [n8n](https://n8n.io), and any MCP-compatible client. Talk to your Zabbix monitoring in natural language.
 
 ## Quick start
 
@@ -232,33 +232,29 @@ claude mcp add zabbix `
 
 **4. Restart Claude Code** and try: *"Show current Zabbix problems"*
 
-## Setup for ChatGPT CLI (GPT-CLI)
+## Setup for Codex CLI
 
-[ChatGPT CLI](https://github.com/openai/codex) supports MCP servers. Add zbbx-mcp to your configuration:
+[Codex CLI](https://github.com/openai/codex) supports MCP servers. Add zbbx-mcp to your configuration:
 
-**1. Edit `~/.codex/config.json`:**
+**Option A — edit `~/.codex/config.toml`:**
 
-```json
-{
-  "mcpServers": {
-    "zabbix": {
-      "command": "uvx",
-      "args": ["--from", "git+https://github.com/velesnitski/zbbx-mcp", "zbbx-mcp"],
-      "env": {
-        "ZABBIX_URL": "https://your-zabbix.example.com",
-        "ZABBIX_TOKEN": "your_api_token"
-      }
-    }
-  }
-}
+```toml
+[mcp_servers.zabbix]
+command = "uvx"
+args = ["--from", "git+https://github.com/velesnitski/zbbx-mcp", "zbbx-mcp"]
+
+[mcp_servers.zabbix.env]
+ZABBIX_URL = "https://your-zabbix.example.com"
+ZABBIX_TOKEN = "your_api_token"
 ```
 
-> If `uvx` is not found, use the full path (find it with `which uvx`).
-
-**2. Start ChatGPT CLI:**
+**Option B — via CLI:**
 
 ```bash
-codex
+codex mcp add zabbix \
+  --env ZABBIX_URL=https://your-zabbix.example.com \
+  --env ZABBIX_TOKEN=your_api_token \
+  -- uvx --from "git+https://github.com/velesnitski/zbbx-mcp" zbbx-mcp
 ```
 
 The Zabbix tools will be available automatically. Multi-instance setup works the same way — add `ZABBIX_INSTANCES` and per-instance env vars as described above.
