@@ -1,6 +1,6 @@
 # zbbx-mcp
 
-Zabbix MCP server for [Claude Code](https://claude.com/claude-code), [n8n](https://n8n.io), and any MCP-compatible client. Talk to your Zabbix monitoring in natural language.
+Zabbix MCP server for [Claude Code](https://claude.com/claude-code), [ChatGPT CLI](https://github.com/openai/codex), [n8n](https://n8n.io), and any MCP-compatible client. Talk to your Zabbix monitoring in natural language.
 
 ## Quick start
 
@@ -60,17 +60,17 @@ You should see `zabbix` listed when Claude starts. Try asking: *"Show current pr
 
 ## What it does
 
-**84 tools** across 32 modules:
+**88 tools** across 32 modules:
 
 | Category | Tools |
 |----------|-------|
-| **Hosts** | `search_hosts`, `get_host`, `create_host`, `update_host`, `delete_host` |
+| **Hosts** | `search_hosts`, `get_host`, `create_host`, `update_host`, `delete_host`, `get_server_clusters`, `search_hosts_by_location` |
 | **Problems** | `get_problems`, `get_problem_detail`, `acknowledge_problem` |
 | **Host Groups** | `get_hostgroups`, `create_hostgroup`, `delete_hostgroup` |
 | **Triggers** | `get_triggers`, `create_trigger`, `update_trigger`, `delete_trigger` |
 | **Templates** | `get_templates`, `link_template`, `unlink_template` |
 | **Items & Metrics** | `get_host_items`, `create_item`, `update_item`, `delete_item`, `get_item_history`, `get_graphs` |
-| **Events & Trends** | `get_events`, `get_trends` |
+| **Events & Trends** | `get_events`, `get_trends`, `get_event_frequency`, `get_correlated_events` |
 | **Dashboards** | `get_dashboards`, `get_dashboard_detail` |
 | **Maintenance** | `get_maintenance`, `create_maintenance`, `delete_maintenance` |
 | **Discovery** | `get_discovery_rules` |
@@ -231,6 +231,37 @@ claude mcp add zabbix `
 > **Note:** If Claude Code can't find `uvx`, use the full path. Find it with `where uvx` (typically `%USERPROFILE%\.local\bin\uvx.exe`) and set `"command"` to that path in your settings.
 
 **4. Restart Claude Code** and try: *"Show current Zabbix problems"*
+
+## Setup for ChatGPT CLI (GPT-CLI)
+
+[ChatGPT CLI](https://github.com/openai/codex) supports MCP servers. Add zbbx-mcp to your configuration:
+
+**1. Edit `~/.codex/config.json`:**
+
+```json
+{
+  "mcpServers": {
+    "zabbix": {
+      "command": "uvx",
+      "args": ["--from", "git+https://github.com/velesnitski/zbbx-mcp", "zbbx-mcp"],
+      "env": {
+        "ZABBIX_URL": "https://your-zabbix.example.com",
+        "ZABBIX_TOKEN": "your_api_token"
+      }
+    }
+  }
+}
+```
+
+> If `uvx` is not found, use the full path (find it with `which uvx`).
+
+**2. Start ChatGPT CLI:**
+
+```bash
+codex
+```
+
+The Zabbix tools will be available automatically. Multi-instance setup works the same way — add `ZABBIX_INSTANCES` and per-instance env vars as described above.
 
 ## Alternative installation
 
