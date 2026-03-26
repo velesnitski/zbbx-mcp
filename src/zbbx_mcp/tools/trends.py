@@ -471,7 +471,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()):
                     service_status = ""
                     if service1_val is not None:
                         if service1_val == 0:
-                            server_issues.append("service Primary DOWN")
+                            server_issues.append("service protocol DOWN")
                             score -= 20
                             service_status = "DOWN"
                         else:
@@ -569,7 +569,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()):
 
             Categories:
             - DEAD: traffic < 1 Mbps AND CPU < 5% — shutdown immediately
-            - BROKEN: service Primary DOWN AND traffic near zero — fix or shutdown
+            - BROKEN: service DOWN AND traffic near zero — fix or shutdown
             - ZOMBIE: CPU > 50% but traffic < 1 Mbps — stuck process
             - IDLE: traffic < threshold AND CPU < threshold — review
 
@@ -658,7 +658,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()):
                         reason = f"CPU {cpu_avg}% but traffic {traffic_avg} Mbps"
                     elif service == "DOWN" and traffic_avg is not None and traffic_avg < 5.0:
                         category = "BROKEN"
-                        reason = f"service Primary DOWN, traffic {traffic_avg} Mbps"
+                        reason = f"service DOWN, traffic {traffic_avg} Mbps"
                     elif (traffic_avg is not None and traffic_avg < traffic_threshold
                           and cpu_avg is not None and cpu_avg < cpu_threshold):
                         category = "IDLE"

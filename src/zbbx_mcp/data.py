@@ -351,7 +351,7 @@ async def fetch_all_data(
         except (ValueError, KeyError, OSError):
             pass  # Fallback is best-effort
 
-    # service Tertiary: any check item with value 1 = OK
+    # service protocol check: any item with value 1 = OK
     service3_map: dict[str, int] = {}
     for i in service3_items:
         try:
