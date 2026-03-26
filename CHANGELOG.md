@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.2.0] - 2026-03-26
+
+### Added
+- `ZABBIX_COMPACT` env var — strips markdown from tool responses (bold, headers, table separators). 5–15% token savings per response
+- `ZABBIX_RESPONSE_BUDGET` env var (default: `8000`) — truncates responses exceeding budget at clean line break. Prevents 50K+ responses from consuming tokens
+- Response compression wrapper applied to all 84 tools alongside analytics logging
+- Token optimization for 6 tools (tasks 63–68):
+  - `get_server_availability_report`: `only_problems=True` default, `exclude_product`, `max_results`
+  - `get_capacity_planning`: `max_results=30`, `min_priority` filter
+  - `get_geo_traffic_trends`: `min_traffic=0.1` Gbps, skip near-zero countries
+  - `get_health_assessment`: `min_severity=WARNING`, skip INFO items
+
+### Fixed
+- Country filter across geo/health tools now uses `extract_country()` for exact match instead of substring (task 67)
+- Protocol names replaced with generic labels in CHANGELOG, docstrings, and output columns
+
 ## [1.1.1] - 2026-03-26
 
 ### Added
