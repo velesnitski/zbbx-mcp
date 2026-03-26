@@ -293,7 +293,7 @@ def _write_health_overview_sheet(wb: Workbook, rows: list[dict]) -> None:
         ("", "", "", ""),
         ("VPN Primary OK", sum(1 for r in rows if r.get("VPN Primary") == "OK"), "", "VPN healthy"),
         ("VPN Primary DOWN", sum(1 for r in rows if r.get("VPN Primary") == "DOWN"), "", "VPN broken — investigate"),
-        ("No VPN Primary Data", sum(1 for r in rows if not r.get("VPN Primary")), "", "Non-VPN server or no check"),
+        ("No VPN Data", sum(1 for r in rows if not r.get("VPN Primary")), "", "Non-VPN server or no check"),
         ("", "", "", ""),
         ("Unique Countries", len(set(r["Country"] for r in rows if r["Country"])), "", ""),
         ("Unique Providers", len(set(r["Provider"] for r in rows if r["Provider"])), "", ""),
