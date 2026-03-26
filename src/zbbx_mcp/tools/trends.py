@@ -69,7 +69,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()):
                         continue
                     if tier and tier.lower() not in (t or "").lower():
                         continue
-                    if country and country.lower() not in h.get("host", "").lower():
+                    if country and extract_country(h.get("host", "")).lower() != country.lower():
                         continue
                     filtered_ids.append(h["hostid"])
                     if len(filtered_ids) >= max_results:
@@ -328,6 +328,8 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()):
             group: str = "",
             period: str = "7d",
             min_severity: str = "WARNING",
+            max_results: int = 30,
+            group_similar: bool = True,
             instance: str = "",
         ) -> str:
             """Automated health assessment with per-server scoring and issue detection.
@@ -550,16 +552,53 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()):
                         parts.append(alert)
                     parts.append("")
 
-                for i in issues:
-                    sev = "CRITICAL" if i["score"] < 30 else "WARNING" if i["score"] < 70 else "INFO"
-                    vpn = f" | VPN: {i.get('vpn', 'N/A')}" if i.get("vpn") else ""
-                    agent = " | Agent: DOWN" if i.get("agent") == "down" else ""
-                    ip_str = f" | IP: {i['ip']}" if i.get("ip") else ""
-                    parts.append(f"### {i['host']} — {i['score']}/100 [{sev}]")
-                    parts.append(f"{i['product']} | {i['provider']}{ip_str} | CPU: {i['cpu_avg'] or 'N/A'}% | Traffic: {i['traffic_avg'] or 'N/A'} Mbps{vpn}{agent}")
-                    for issue in i["issues"]:
-                        parts.append(f"- {issue}")
-                    parts.append("")
+                if group_similar and len(issues) > 10:
+                    # Group servers with identical score+issues by country+provider
+                    grouped: dict[str, list] = {}
+                    for i in issues:
+                        key = f"{extract_country(i['host'])}|{i['provider']}|{i['score']}|{'|'.join(sorted(is_[:30] for is_ in i['issues']))}"
+                        grouped.setdefault(key, []).append(i)
+
+                    for key, group in sorted(grouped.items(), key=lambda x: x[1][0]["score"]):
+                        if len(group) >= 3:
+                            # Render as grouped entry
+                            sample = group[0]
+                            sev = "CRITICAL" if sample["score"] < 30 else "WARNING"
+                            ctry = extract_country(sample["host"])
+                            hostnames = ", ".join(i["host"].split("-")[-1] if "-" in i["host"] else i["host"] for i in group[:8])
+                            if len(group) > 8:
+                                hostnames += f", +{len(group)-8} more"
+                            parts.append(f"### {ctry} {sample['provider']} ({len(group)} servers) — {sample['score']}/100 [{sev}]")
+                            for issue in sample["issues"]:
+                                parts.append(f"- {issue}")
+                            parts.append(f"  Servers: {hostnames}")
+                            parts.append("")
+                        else:
+                            for i in group:
+                                sev = "CRITICAL" if i["score"] < 30 else "WARNING" if i["score"] < 70 else "INFO"
+                                parts.append(f"### {i['host']} — {i['score']}/100 [{sev}]")
+                                parts.append(f"{i['product']} | {i['provider']} | CPU: {i['cpu_avg'] or 'N/A'}% | Traffic: {i['traffic_avg'] or 'N/A'} Mbps")
+                                for issue in i["issues"]:
+                                    parts.append(f"- {issue}")
+                                parts.append("")
+
+                    shown_count = sum(min(len(g), 1) if len(g) >= 3 else len(g) for g in grouped.values())
+                    if shown_count > max_results:
+                        parts = parts[:max_results * 5]  # rough line estimate
+                        parts.append(f"\n*Showing top entries. {len(issues)} total issues.*")
+                else:
+                    shown = issues[:max_results]
+                    for i in shown:
+                        sev = "CRITICAL" if i["score"] < 30 else "WARNING" if i["score"] < 70 else "INFO"
+                        vpn = f" | VPN: {i.get('vpn', 'N/A')}" if i.get("vpn") else ""
+                        agent = " | Agent: DOWN" if i.get("agent") == "down" else ""
+                        parts.append(f"### {i['host']} — {i['score']}/100 [{sev}]")
+                        parts.append(f"{i['product']} | {i['provider']} | CPU: {i['cpu_avg'] or 'N/A'}% | Traffic: {i['traffic_avg'] or 'N/A'} Mbps{vpn}{agent}")
+                        for issue in i["issues"]:
+                            parts.append(f"- {issue}")
+                        parts.append("")
+                    if len(issues) > max_results:
+                        parts.append(f"\n*{len(issues) - max_results} more entries omitted*")
 
                 return "\n".join(parts)
             except (httpx.HTTPError, ValueError) as e:
@@ -612,7 +651,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()):
                         continue
                     if tier and tier.lower() not in (t or "").lower():
                         continue
-                    if country and country.lower() not in h.get("host", "").lower():
+                    if country and extract_country(h.get("host", "")).lower() != country.lower():
                         continue
                     h["_prod"] = prod
                     h["_tier"] = t
@@ -759,7 +798,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()):
                         continue
                     if tier and tier.lower() not in (t or "").lower():
                         continue
-                    if country and country.lower() not in h.get("host", "").lower():
+                    if country and extract_country(h.get("host", "")).lower() != country.lower():
                         continue
                     h["_prod"] = prod
                     h["_tier"] = t
