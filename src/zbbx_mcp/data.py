@@ -351,7 +351,7 @@ async def fetch_all_data(
         except (ValueError, KeyError, OSError):
             pass  # Fallback is best-effort
 
-    # VPN Tertiary: any check item with value 1 = OK
+    # VPN protocol check: any item with value 1 = OK
     vpn3_map: dict[str, int] = {}
     for i in vpn3_items:
         try:

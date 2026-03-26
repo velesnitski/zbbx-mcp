@@ -68,7 +68,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 all_ids = [h["hostid"] for c_hosts in countries.values() for h in c_hosts]
                 trend_rows, _ = await fetch_trends_batch(client, all_ids, ["cpu", "traffic"], f"{baseline_days}d")
 
-                # Also get vpn1 status
+                # Also get VPN health status
                 vpn1_items = await client.call("item.get", {
                     "hostids": all_ids,
                     "output": ["hostid", "lastvalue"],
@@ -268,7 +268,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
             period: str = "30d",
             instance: str = "",
         ) -> str:
-            """VPN protocol availability per server — uptime % for VPN Primary, VPN Secondary, VPN Tertiary.
+            """VPN protocol availability per server — uptime % per protocol.
 
             Uses Zabbix trend data to calculate hours UP vs DOWN for each protocol.
 
@@ -306,7 +306,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 from zbbx_mcp.data import _parse_period
                 time_from = now - _parse_period(period)
 
-                # Get items for vpn1, vpn2, vpn_tertiary checks
+                # Get items for VPN protocol checks
                 vpn_items = await client.call("item.get", {
                     "hostids": hostids,
                     "output": ["itemid", "hostid", "key_"],
@@ -379,7 +379,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
 
                 parts = [
                     f"**VPN Availability ({period}): {len(rows)} servers**\n",
-                    "| Server | Country | VPN Primary Uptime | VPN Secondary Uptime | Status |",
+                    "| Server | Country | VPN Primary | VPN Secondary | Status |",
                     "|--------|---------|-------------|-------------|--------|",
                 ]
                 for r in rows:
@@ -395,7 +395,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
 
                 if country_stats:
                     parts.append(f"\n### Country Summary\n")
-                    parts.append("| Country | Servers | Avg VPN Primary Uptime | DOWN |")
+                    parts.append("| Country | Servers | Avg VPN Uptime | DOWN |")
                     parts.append("|---------|---------|-----------------|------|")
                     for ctry in sorted(country_stats):
                         cs = country_stats[ctry]
@@ -417,7 +417,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
         ) -> str:
             """Show which VPN protocol works in which country.
 
-            Aggregates VPN Primary, VPN Secondary, and VPN Tertiary check status per country.
+            Aggregates VPN protocol check status per country.
             Helps determine: "user in country X should use protocol Y."
 
             Args:
@@ -474,7 +474,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
 
                 parts = [
                     "**Protocol Failure Matrix**\n",
-                    "| Country | Servers | VPN Primary | VPN Secondary | VPN Tertiary | Recommendation |",
+                    "| Country | Servers | Proto 1 | Proto 2 | Proto 3 | Recommendation |",
                     "|---------|---------|------|-------|---------|----------------|",
                 ]
 
@@ -508,11 +508,11 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     # Recommendation
                     working = []
                     if "OK" in x_s or "PARTIAL" in x_s:
-                        working.append("VPN Primary")
+                        working.append("Proto 1")
                     if "OK" in k_s or "PARTIAL" in k_s:
-                        working.append("VPN Secondary")
+                        working.append("Proto 2")
                     if "OK" in o_s or "PARTIAL" in o_s:
-                        working.append("VPN Tertiary")
+                        working.append("Proto 3")
 
                     if not working:
                         rec = "ALL BLOCKED"

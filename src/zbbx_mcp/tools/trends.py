@@ -471,7 +471,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()):
                     vpn_status = ""
                     if vpn1_val is not None:
                         if vpn1_val == 0:
-                            server_issues.append("VPN Primary DOWN")
+                            server_issues.append("VPN protocol DOWN")
                             score -= 20
                             vpn_status = "DOWN"
                         else:
@@ -569,7 +569,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()):
 
             Categories:
             - DEAD: traffic < 1 Mbps AND CPU < 5% — shutdown immediately
-            - BROKEN: VPN Primary DOWN AND traffic near zero — fix or shutdown
+            - BROKEN: VPN DOWN AND traffic near zero — fix or shutdown
             - ZOMBIE: CPU > 50% but traffic < 1 Mbps — stuck process
             - IDLE: traffic < threshold AND CPU < threshold — review
 
@@ -658,7 +658,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()):
                         reason = f"CPU {cpu_avg}% but traffic {traffic_avg} Mbps"
                     elif vpn == "DOWN" and traffic_avg is not None and traffic_avg < 5.0:
                         category = "BROKEN"
-                        reason = f"VPN Primary DOWN, traffic {traffic_avg} Mbps"
+                        reason = f"VPN DOWN, traffic {traffic_avg} Mbps"
                     elif (traffic_avg is not None and traffic_avg < traffic_threshold
                           and cpu_avg is not None and cpu_avg < cpu_threshold):
                         category = "IDLE"

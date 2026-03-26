@@ -246,7 +246,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     '<th>Server</th><th>IP</th><th>Country</th><th>Provider</th>'
                     f'<th>CPU Now</th><th>CPU Avg {period}</th>'
                     f'<th>Traffic Now</th><th>Traffic Avg {period}</th>'
-                    '<th>BW Util</th><th>VPN Primary</th><th>Trend</th>'
+                    '<th>BW Util</th><th>VPN</th><th>Trend</th>'
                     '</tr></thead><tbody>'
                 )
 

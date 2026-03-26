@@ -164,7 +164,7 @@ def _write_product_analytics_sheet(wb: Workbook, rows: list[dict]) -> None:
         "Product", "Tier", "Servers", "On Dashboard",
         "Median CPU %", "Max CPU %",
         "Median Traffic Mbps", "Max Traffic Mbps", "Servers >= 650 Mbps",
-        "VPN Primary OK", "VPN Primary DOWN",
+        "VPN OK", "VPN DOWN",
         "Countries", "Providers",
         "Cost/Month ($)",
     ]
@@ -224,7 +224,7 @@ def _write_country_analytics_sheet(wb: Workbook, rows: list[dict]) -> None:
     headers = [
         "Country", "Servers", "Products", "Providers",
         "Median CPU %", "Median Traffic Mbps", "Total Traffic Gbps",
-        "Servers >= 650 Mbps", "VPN Primary DOWN",
+        "Servers >= 650 Mbps", "VPN DOWN",
     ]
     write_headers(ws, headers)
 
@@ -463,7 +463,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 products = len(set(r["Product"] for r in rows))
 
                 if vpn_down:
-                    parts.append(f"**VPN Primary DOWN:** {vpn_down} servers")
+                    parts.append(f"**VPN DOWN:** {vpn_down} servers")
                 parts.extend([
                     f"**Countries:** {countries} | **Products:** {products}",
                     f"",
