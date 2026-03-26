@@ -5,6 +5,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.1.1] - 2026-03-26
+
+### Added
+- `ZABBIX_COMPACT_TOOLS` env var (default: `true`) — strips redundant Args section from tool descriptions, saving ~5,000 tokens per message (32% reduction). Args info is already in the JSON schema. Set `false` to restore full descriptions.
+
 ## [1.1.0] - 2026-03-25
 
 ### Added

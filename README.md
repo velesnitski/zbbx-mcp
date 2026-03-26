@@ -124,6 +124,7 @@ get_traffic_report(country="us")
 | `SLACK_WEBHOOK_URL` | No | Slack webhook URL for `send_slack_message` / `send_slack_report` |
 | `SENTRY_DSN` | No | Sentry DSN for error tracking — just set the env var, SDK is included |
 | `{$BW_LIMIT}` | No | Per-host Zabbix macro for bandwidth limit in Mbps (default: 800). Set on hosts for accurate BW Util % |
+| `ZABBIX_COMPACT_TOOLS` | No | Trim tool descriptions to save tokens (default: `true`). Set `false` for full descriptions |
 | `ZABBIX_LOG_FILE` | No | Error log path (default: `~/.zbbx-mcp/zbbx-mcp.log`) |
 | `ZABBIX_ANALYTICS_FILE` | No | Analytics log path (default: `~/.zbbx-mcp/analytics.log`) |
 
