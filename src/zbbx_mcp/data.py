@@ -58,7 +58,7 @@ METRIC_KEYS: dict[str, list[str]] = {
 def extract_country(hostname: str) -> str:
     """Extract 2-letter country code from hostname.
 
-    Handles: srv-free-nl0105 → NL, srv-nl01-lite → IN, srv-us01-lite → IN
+    Handles: srv-nl0105 → NL, srv-nl01-lite → IN, srv-us01-lite → IN
     """
     m = _COUNTRY_RE.search(hostname)
     if not m:
