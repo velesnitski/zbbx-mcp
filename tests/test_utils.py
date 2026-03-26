@@ -26,13 +26,13 @@ class TestFormatResults:
 
 class TestExtractCountry:
     def test_nl(self):
-        assert extract_country("srv-free-nl0105") == "NL"
+        assert extract_country("srv-nl0105") == "NL"
 
     def test_de(self):
-        assert extract_country("srv-prem-de3") == "DE"
+        assert extract_country("srv-de3") == "DE"
 
     def test_us(self):
-        assert extract_country("srv-lite-us0001") == "US"
+        assert extract_country("srv-us0001") == "US"
 
     def test_in_lite(self):
         assert extract_country("srv-nl01-lite") == "IN"
