@@ -9,6 +9,7 @@ from statistics import median
 import httpx
 
 from zbbx_mcp.resolver import InstanceResolver
+from zbbx_mcp.data import extract_country
 from zbbx_mcp.classify import classify_host as _classify_host, detect_provider
 
 
@@ -147,7 +148,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     if product and product.lower() not in prod.lower():
                         continue
                     hostname = h.get("host", "")
-                    if country and country.lower() not in hostname.lower():
+                    if country and extract_country(hostname).lower() != country.lower():
                         continue
 
                     ip = ""
