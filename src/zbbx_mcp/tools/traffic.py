@@ -8,7 +8,7 @@ import httpx
 
 from zbbx_mcp.resolver import InstanceResolver
 from zbbx_mcp.classify import classify_host as _classify_host, detect_provider
-from zbbx_mcp.data import TRAFFIC_IN_KEYS
+from zbbx_mcp.data import TRAFFIC_IN_KEYS, extract_country
 
 
 def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> None:
@@ -105,7 +105,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     prod, tier = _classify_host(h.get("groups", []))
                     if product and product.lower() not in (prod or "").lower():
                         continue
-                    if country and country.lower() not in h.get("host", "").lower():
+                    if country and extract_country(h.get("host", "")).lower() != country.lower():
                         continue
                     for g in h.get("groups", []):
                         gname = g["name"]
@@ -320,7 +320,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     if group:
                         if not any(g["name"].lower() == group.lower() for g in h.get("groups", [])):
                             continue
-                    if country and country.lower() not in h.get("host", "").lower():
+                    if country and extract_country(h.get("host", "")).lower() != country.lower():
                         continue
 
                     conns = host_conns.get(hid, 0)
@@ -418,7 +418,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                         continue
                     if group and not any(g["name"].lower() == group.lower() for g in h.get("groups", [])):
                         continue
-                    if country and country.lower() not in h.get("host", "").lower():
+                    if country and extract_country(h.get("host", "")).lower() != country.lower():
                         continue
                     filtered_ids.append(h["hostid"])
 
