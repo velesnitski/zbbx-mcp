@@ -327,6 +327,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()):
             product: str = "",
             group: str = "",
             period: str = "7d",
+            min_severity: str = "WARNING",
             instance: str = "",
         ) -> str:
             """Automated health assessment with per-server scoring and issue detection.
@@ -367,7 +368,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()):
                     prod, tier = _classify_host(h.get("groups", []))
                     if product and product.lower() not in (prod or "").lower():
                         continue
-                    if country and country.lower() not in h.get("host", "").lower():
+                    if country and extract_country(h.get("host", "")).lower() != country.lower():
                         continue
                     h["_prod"] = prod
                     filtered.append(h)
@@ -524,13 +525,24 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()):
 
                 agents_down = sum(1 for i in issues if i.get("agent") == "down")
 
+                # Filter by min_severity
+                sev_thresholds = {"CRITICAL": 30, "WARNING": 70, "INFO": 100}
+                max_score = sev_thresholds.get(min_severity.upper(), 100) if min_severity else 100
+                all_issues = len(issues)
+                issues_filtered = [i for i in issues if i["score"] < max_score]
+                info_omitted = all_issues - len(issues_filtered)
+
                 parts = [
                     f"**Health Assessment ({period}): {len(filtered)} servers**\n",
                     f"Healthy: {healthy} | Warning: {warning} | Critical: {critical}",
                 ]
                 if agents_down:
                     parts.append(f"Agent unavailable: {agents_down}")
+                if info_omitted:
+                    parts.append(f"*{info_omitted} INFO items omitted (use min_severity='INFO' to see all)*")
                 parts.append("")
+
+                issues = issues_filtered
 
                 if cluster_alerts:
                     parts.append("## Cluster Alerts\n")
@@ -711,6 +723,8 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()):
             period: str = "7d",
             cpu_threshold: float = 70.0,
             traffic_threshold: float = 600.0,
+            min_priority: str = "",
+            max_results: int = 30,
             instance: str = "",
         ) -> str:
             """Find overloaded servers that need capacity increase or hardware upgrade.
@@ -835,17 +849,28 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()):
                     return f"No overloaded servers among {len(filtered)}."
 
                 candidates.sort(key=lambda c: -c["severity"])
+
+                # Filter by min_priority
+                total_all = len(candidates)
                 critical = sum(1 for c in candidates if c["category"] == "CRITICAL")
                 high = sum(1 for c in candidates if c["category"] == "HIGH")
                 medium = sum(1 for c in candidates if c["category"] == "MEDIUM")
 
+                if min_priority:
+                    priority_order = {"CRITICAL": 3, "HIGH": 2, "MEDIUM": 1}
+                    min_val = priority_order.get(min_priority.upper(), 0)
+                    candidates = [c for c in candidates if priority_order.get(c["category"], 0) >= min_val]
+
+                shown = candidates[:max_results]
+                omitted = len(candidates) - len(shown)
+
                 parts = [
-                    f"**Capacity Planning ({period}): {len(candidates)} servers need attention**\n",
+                    f"**Capacity Planning ({period}): {total_all} servers need attention**\n",
                     f"CRITICAL: {critical} | HIGH: {high} | MEDIUM: {medium}\n",
                     "| Priority | Server | Country | Product | CPU Avg | Traffic Avg | Peak | Trend | Action |",
                     "|----------|--------|---------|---------|---------|-------------|------|-------|--------|",
                 ]
-                for c in candidates:
+                for c in shown:
                     cpu_a = f"{c['cpu_avg']:.1f}%" if c["cpu_avg"] else "N/A"
                     t_a = f"{c['traffic_avg']:.0f}" if c["traffic_avg"] else "N/A"
                     t_p = f"{c['traffic_peak']:.0f}" if c["traffic_peak"] else "N/A"
@@ -855,8 +880,11 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()):
                         f"{t_a} Mbps | {t_p} Mbps | {c['trend']} | {c['action']} |"
                     )
 
+                if omitted:
+                    parts.append(f"\n*{omitted} more servers omitted (use max_results to see all)*")
+
                 parts.append(f"\n### Top Issues\n")
-                for c in candidates[:5]:
+                for c in shown[:5]:
                     parts.append(f"**{c['host']}** ({c['provider']}):")
                     for s in c["signals"]:
                         parts.append(f"  - {s}")
