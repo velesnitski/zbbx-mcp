@@ -168,6 +168,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
             period: str = "30d",
             aggregation: str = "daily",
             min_servers: int = 2,
+            min_traffic: float = 0.1,
             instance: str = "",
         ) -> str:
             """Per-country traffic trends over time — detect usage growth or decline per region.
@@ -176,6 +177,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 period: Time period (default: 30d)
                 aggregation: 'summary' or 'daily' (default: daily)
                 min_servers: Minimum servers per country (default: 2)
+                min_traffic: Minimum avg Gbps to include country (default: 0.1)
                 instance: Zabbix instance name (optional)
             """
             try:
@@ -221,14 +223,19 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 if not country_data:
                     return f"No traffic trend data for {period}."
 
+                # Filter by min_traffic
+                all_countries = len(country_data)
+                filtered_data = {c: d for c, d in country_data.items() if d["avg"] / 1000 >= min_traffic}
+                skipped = all_countries - len(filtered_data)
+
                 parts = [
-                    f"**Geo Traffic Trends ({period})**\n",
+                    f"**Geo Traffic Trends ({period}): {len(filtered_data)} countries**\n",
                     "| Country | Servers | Traffic Avg | Traffic Now | Trend | Change |",
                     "|---------|---------|-------------|-------------|-------|--------|",
                 ]
 
-                for ctry in sorted(country_data, key=lambda c: -country_data[c]["avg"]):
-                    cd = country_data[ctry]
+                for ctry in sorted(filtered_data, key=lambda c: -filtered_data[c]["avg"]):
+                    cd = filtered_data[ctry]
                     avg_gbps = cd["avg"] / 1000
                     now_gbps = cd["current"] / 1000
                     change = ((cd["current"] - cd["avg"]) / cd["avg"] * 100) if cd["avg"] > 0 else 0
@@ -237,6 +244,9 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                         f"| {ctry} | {cd['servers']} | {avg_gbps:.1f} Gbps | "
                         f"{now_gbps:.1f} Gbps | {trend} | {change:+.0f}% |"
                     )
+
+                if skipped:
+                    parts.append(f"\n*{skipped} countries with <{min_traffic} Gbps omitted*")
 
                 if aggregation == "daily" and country_data:
                     # Show daily for top 5 countries
@@ -265,16 +275,23 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
         async def get_server_availability_report(
             country: str = "",
             product: str = "",
+            exclude_product: str = "",
+            only_problems: bool = True,
+            max_results: int = 50,
             period: str = "30d",
             instance: str = "",
         ) -> str:
             """VPN protocol availability per server — uptime % per protocol.
 
             Uses Zabbix trend data to calculate hours UP vs DOWN for each protocol.
+            By default shows only DOWN/DEGRADED servers and excludes monitoring hosts.
 
             Args:
                 country: Filter by country code (optional)
                 product: Filter by product name (optional)
+                exclude_product: Comma-separated products to exclude (optional)
+                only_problems: Show only DOWN/DEGRADED servers (default: True)
+                max_results: Maximum servers to show (default: 50)
                 period: Analysis period (default: 30d)
                 instance: Zabbix instance name (optional)
             """
@@ -287,12 +304,15 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     "filter": {"status": "0"},
                 })
 
+                exclude_set = {p.strip().lower() for p in exclude_product.split(",") if p.strip()} if exclude_product else set()
                 filtered = []
                 for h in hosts:
                     prod, _ = _classify_host(h.get("groups", []))
                     if product and product.lower() not in (prod or "").lower():
                         continue
-                    if country and country.lower() not in h["host"].lower():
+                    if exclude_set and any(p in (prod or "").lower() for p in exclude_set):
+                        continue
+                    if country and extract_country(h["host"]).lower() != country.lower():
                         continue
                     filtered.append(h)
 
@@ -377,15 +397,26 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
 
                 rows.sort(key=lambda r: (r["vpn1"] or 100))
 
+                # Filter and limit
+                total_all = len(rows)
+                healthy_count = sum(1 for r in rows if r["overall"] == "HEALTHY")
+                if only_problems:
+                    rows = [r for r in rows if r["overall"] != "HEALTHY"]
+                shown = rows[:max_results]
+                omitted = len(rows) - len(shown)
+
                 parts = [
-                    f"**VPN Availability ({period}): {len(rows)} servers**\n",
+                    f"**VPN Availability ({period}): {total_all} servers ({healthy_count} healthy)**\n",
                     "| Server | Country | VPN Primary | VPN Secondary | Status |",
                     "|--------|---------|-------------|-------------|--------|",
                 ]
-                for r in rows:
+                for r in shown:
                     x = f"{r['vpn1']:.1f}%" if r["vpn1"] is not None else "N/A"
                     k = f"{r['vpn2']:.1f}%" if r["vpn2"] is not None else "N/A"
                     parts.append(f"| {r['host']} | {r['country']} | {x} | {k} | {r['overall']} |")
+
+                if omitted:
+                    parts.append(f"\n*{omitted} more servers omitted*")
 
                 # Country summary
                 country_stats: dict[str, list] = {}
