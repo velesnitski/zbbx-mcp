@@ -200,7 +200,8 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     "filter": {"status": "0"},  # enabled items only
                 }
                 if search:
-                    params["search"] = {"name": search, "key_": search}
+                    q = search if "*" in search else f"*{search}*"
+                    params["search"] = {"name": q, "key_": q}
                     params["searchWildcardsEnabled"] = True
                     params["searchByAny"] = True
 

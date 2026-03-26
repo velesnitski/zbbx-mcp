@@ -64,6 +64,8 @@ EXPECTED_TOOLS = {
     # events.py
     "get_events",
     "get_trends",
+    "get_event_frequency",
+    "get_correlated_events",
     # discovery.py
     "get_discovery_rules",
     # configuration.py
