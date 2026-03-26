@@ -23,7 +23,7 @@ def _compress_response(text: str) -> str:
         return text
 
     compact = os.environ.get("ZABBIX_COMPACT", "").lower() in ("1", "true", "yes")
-    budget = int(os.environ.get("ZABBIX_RESPONSE_BUDGET", "8000"))
+    budget = int(os.environ.get("ZABBIX_RESPONSE_BUDGET", "6000"))
 
     if compact:
         # Strip markdown bold/headers
