@@ -129,7 +129,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     filtered = []
                     for r in rows:
                         rp = r.get("Product", "").lower()
-                        if country and country.lower() not in r.get("Country", "").lower() and country.lower() not in r.get("Host", "").lower():
+                        if country and extract_country(r.get("Host", "")).lower() != country.lower():
                             continue
                         if product and product.lower() not in rp:
                             continue

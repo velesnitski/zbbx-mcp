@@ -275,7 +275,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
         async def get_server_availability_report(
             country: str = "",
             product: str = "",
-            exclude_product: str = "",
+            exclude_product: str = "infrastructure,monitoring",
             only_problems: bool = True,
             max_results: int = 50,
             period: str = "30d",
@@ -289,7 +289,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
             Args:
                 country: Filter by country code (optional)
                 product: Filter by product name (optional)
-                exclude_product: Comma-separated products to exclude (optional)
+                exclude_product: Comma-separated products to exclude (default: infrastructure,monitoring)
                 only_problems: Show only DOWN/DEGRADED servers (default: True)
                 max_results: Maximum servers to show (default: 50)
                 period: Analysis period (default: 30d)
