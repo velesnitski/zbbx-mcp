@@ -21,10 +21,10 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
             """Bulk-set monthly costs on servers using {$COST_MONTH} host macros.
 
             Pass a JSON object mapping hostname patterns to cost in USD.
-            Patterns support prefix matching with '*' (e.g., 'srv-a-*').
+            Patterns support prefix matching with '*' (e.g., 'srv-nl-*').
 
             Example:
-                {"srv-a-*": 20, "srv-b-*": 95, "srv-c-*": 15, "srv-01": 45}
+                {"srv-nl-*": 20, "srv-us-*": 95, "srv-de-*": 15, "srv-01": 45}
 
             Args:
                 costs_json: JSON string mapping hostname patterns to monthly cost in USD

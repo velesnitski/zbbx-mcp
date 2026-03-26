@@ -26,6 +26,8 @@ EXPECTED_TOOLS = {
     "create_host",
     "update_host",
     "delete_host",
+    "get_server_clusters",
+    "search_hosts_by_location",
     # problems.py
     "get_problems",
     "get_problem_detail",
