@@ -1,6 +1,12 @@
+import asyncio
+import re
+from collections import defaultdict
+
 import httpx
 
 from zbbx_mcp.resolver import InstanceResolver
+from zbbx_mcp.data import extract_country, TRAFFIC_IN_KEYS, GB_BYTES
+from zbbx_mcp.classify import classify_host as _classify_host, detect_provider
 from zbbx_mcp.formatters import format_host_list, format_host_detail
 
 
@@ -9,26 +15,38 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
     if "search_hosts" not in skip:
 
         @mcp.tool()
-        async def search_hosts(query: str = "", group: str = "", max_results: int = 50, format: str = "table", instance: str = "") -> str:
-            """Search Zabbix hosts by name pattern or host group.
+        async def search_hosts(
+            query: str = "",
+            group: str = "",
+            country: str = "",
+            max_results: int = 50,
+            format: str = "table",
+            instance: str = "",
+        ) -> str:
+            """Search Zabbix hosts by name pattern, host group, or country.
+
+            Supports substring matching — query 'us' finds hosts containing 'us'.
+            Country filter uses exact 2-letter code extraction from hostname.
 
             Args:
-                query: Host name search pattern (wildcards supported, e.g., 'web*')
+                query: Host name search (substring match, e.g. 'us' finds hosts with 'us' in name)
                 group: Filter by host group name
+                country: Filter by 2-letter country code (exact match via hostname pattern)
                 max_results: Maximum number of results (default: 50)
                 format: Output format: 'table' (default) or 'list'
-                instance: Zabbix instance name (optional, for multi-instance setups)
+                instance: Zabbix instance name (optional)
             """
             try:
                 client = resolver.resolve(instance)
                 params = {
                     "output": ["hostid", "host", "name", "status", "available"],
                     "selectInterfaces": ["ip"],
-                    "limit": max_results,
+                    "selectGroups": ["name"],
                     "sortfield": "host",
                 }
                 if query:
-                    params["search"] = {"host": query, "name": query}
+                    q = query if "*" in query else f"*{query}*"
+                    params["search"] = {"host": q, "name": q}
                     params["searchWildcardsEnabled"] = True
                     params["searchByAny"] = True
                 if group:
@@ -41,15 +59,23 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     else:
                         return f"Host group '{group}' not found."
 
+                if not country:
+                    params["limit"] = max_results
+
                 data = await client.call("host.get", params)
+
+                if country:
+                    data = [h for h in data if extract_country(h["host"]).lower() == country.lower()]
 
                 if not data:
                     return "No hosts found."
 
+                total = len(data)
+                data = data[:max_results]
                 count = len(data)
-                header = f"**Found: {count} hosts**"
-                if count >= max_results:
-                    header += f" (showing first {max_results}, more may exist)"
+                header = f"**Found: {total} hosts**"
+                if total > max_results:
+                    header += f" (showing first {max_results})"
 
                 if format == "table":
                     lines = ["| Host | Name | Host ID | Status | IP |",
@@ -218,3 +244,217 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 return format_host_detail(data[0])
             except (httpx.HTTPError, ValueError) as e:
                 return f"Error querying Zabbix: {e}"
+
+    
+    _CLUSTER_RE = re.compile(r"^(.+?\d+)(?:\s+\w+\d+)+$")
+
+    def _parse_cluster_base(hostname: str) -> str:
+        """Extract base host from cluster name.
+
+        'srv-us175 us177' → 'srv-us175'
+        'srv-us175' → 'srv-us175'
+        """
+        return hostname.split()[0]
+
+    def _infer_cluster_role(hostname: str) -> str:
+        """Infer role from hostname pattern.
+
+        Base host (no space-separated suffix) → primary.
+        Host with suffix in visible name → secondary.
+        """
+        parts = hostname.strip().split()
+        return "primary" if len(parts) == 1 else "secondary"
+
+    if "get_server_clusters" not in skip:
+
+        @mcp.tool()
+        async def get_server_clusters(
+            group: str = "",
+            country: str = "",
+            max_results: int = 30,
+            instance: str = "",
+        ) -> str:
+            """Detect server clusters from naming patterns.
+
+            Hosts sharing a base name form a cluster (e.g. 'srv-us1', 'srv-us1 us2').
+            Groups them and infers primary/secondary roles.
+
+            Args:
+                group: Filter by host group name (optional)
+                country: Filter by 2-letter country code (optional)
+                max_results: Maximum clusters to show (default: 30)
+                instance: Zabbix instance name (optional)
+            """
+            try:
+                client = resolver.resolve(instance)
+                params = {
+                    "output": ["hostid", "host", "name", "status"],
+                    "selectGroups": ["name"],
+                    "selectInterfaces": ["ip"],
+                    "filter": {"status": "0"},
+                    "sortfield": "host",
+                }
+                if group:
+                    groups = await client.call("hostgroup.get", {
+                        "output": ["groupid"],
+                        "filter": {"name": [group]},
+                    })
+                    if groups:
+                        params["groupids"] = [g["groupid"] for g in groups]
+                    else:
+                        return f"Host group '{group}' not found."
+
+                hosts = await client.call("host.get", params)
+
+                if country:
+                    hosts = [h for h in hosts if extract_country(h["host"]).lower() == country.lower()]
+
+                # Group by base hostname
+                clusters: dict[str, list[dict]] = defaultdict(list)
+                for h in hosts:
+                    base = _parse_cluster_base(h.get("name", h["host"]))
+                    clusters[base].append(h)
+
+                # Only keep actual clusters (2+ members)
+                multi = {k: v for k, v in clusters.items() if len(v) > 1}
+
+                if not multi:
+                    return f"No clusters found ({len(hosts)} standalone hosts)."
+
+                sorted_clusters = sorted(multi.items(), key=lambda x: -len(x[1]))[:max_results]
+
+                lines = [f"**{len(multi)} clusters** ({sum(len(v) for v in multi.values())} hosts)\n"]
+                for base, members in sorted_clusters:
+                    cc = extract_country(base)
+                    prod, _ = _classify_host(members[0].get("groups", []))
+                    lines.append(f"**{base}** ({cc}, {prod or '?'}) — {len(members)} members")
+                    for m in sorted(members, key=lambda x: x["host"]):
+                        role = _infer_cluster_role(m.get("name", m["host"]))
+                        ip = next((i["ip"] for i in m.get("interfaces", []) if i.get("ip") != "127.0.0.1"), "")
+                        lines.append(f"  {m['host']} — {role} {ip}")
+                    lines.append("")
+
+                omitted = len(multi) - len(sorted_clusters)
+                if omitted > 0:
+                    lines.append(f"*{omitted} more clusters omitted*")
+
+                return "\n".join(lines)
+            except (httpx.HTTPError, ValueError) as e:
+                return f"Error: {e}"
+
+    
+    if "search_hosts_by_location" not in skip:
+
+        @mcp.tool()
+        async def search_hosts_by_location(
+            country: str = "",
+            group: str = "",
+            product: str = "",
+            min_traffic_mbps: float = 0,
+            show_cluster_role: bool = False,
+            max_results: int = 50,
+            instance: str = "",
+        ) -> str:
+            """Search hosts by country, group, product with optional traffic filter.
+
+            Combines country-aware search, metric filtering, and cluster roles
+            in a single call. Much more efficient than chaining multiple tools.
+
+            Args:
+                country: 2-letter country code (exact match)
+                group: Host group name filter
+                product: Product name filter (substring match)
+                min_traffic_mbps: Only show hosts with traffic above this (Mbps)
+                show_cluster_role: Show inferred primary/secondary cluster role
+                max_results: Maximum results (default: 50)
+                instance: Zabbix instance name (optional)
+            """
+            try:
+                client = resolver.resolve(instance)
+                params = {
+                    "output": ["hostid", "host", "name", "status"],
+                    "selectGroups": ["name"],
+                    "selectInterfaces": ["ip"],
+                    "filter": {"status": "0"},
+                    "sortfield": "host",
+                }
+                if group:
+                    grps = await client.call("hostgroup.get", {
+                        "output": ["groupid"],
+                        "filter": {"name": [group]},
+                    })
+                    if grps:
+                        params["groupids"] = [g["groupid"] for g in grps]
+                    else:
+                        return f"Host group '{group}' not found."
+
+                hosts = await client.call("host.get", params)
+
+                # Filter by country
+                if country:
+                    hosts = [h for h in hosts if extract_country(h["host"]).lower() == country.lower()]
+
+                # Filter by product
+                if product:
+                    filtered = []
+                    for h in hosts:
+                        prod, _ = _classify_host(h.get("groups", []))
+                        if prod and product.lower() in prod.lower():
+                            filtered.append(h)
+                    hosts = filtered
+
+                if not hosts:
+                    return "No hosts match the filters."
+
+                # Fetch traffic if needed
+                traffic_map: dict[str, float] = {}
+                if True:  # traffic column always shown
+                    hids = [h["hostid"] for h in hosts]
+                    items = await client.call("item.get", {
+                        "hostids": hids,
+                        "output": ["hostid", "lastvalue", "key_"],
+                        "filter": {"key_": TRAFFIC_IN_KEYS},
+                        "sortfield": "lastvalue",
+                        "sortorder": "DESC",
+                    })
+                    for it in items:
+                        hid = it["hostid"]
+                        try:
+                            val = float(it.get("lastvalue", 0))
+                        except (ValueError, TypeError):
+                            continue
+                        mbps = val * 8 / 1_000_000
+                        if hid not in traffic_map or mbps > traffic_map[hid]:
+                            traffic_map[hid] = mbps
+
+                if min_traffic_mbps > 0:
+                    hosts = [h for h in hosts if traffic_map.get(h["hostid"], 0) >= min_traffic_mbps]
+
+                if not hosts:
+                    return f"No hosts with traffic >= {min_traffic_mbps} Mbps."
+
+                total = len(hosts)
+                hosts = hosts[:max_results]
+
+                lines = [f"**{total} hosts**" + (f" (showing {max_results})" if total > max_results else "")]
+                lines.append("| Host | Country | Product | IP | Traffic Mbps |" + (" Role |" if show_cluster_role else ""))
+                lines.append("|------|---------|---------|----|-----------:|" + ("------|" if show_cluster_role else ""))
+
+                for h in hosts:
+                    hostname = h["host"]
+                    cc = extract_country(hostname)
+                    prod, _ = _classify_host(h.get("groups", []))
+                    ip = next((i["ip"] for i in h.get("interfaces", []) if i.get("ip") != "127.0.0.1"), "")
+                    provider = detect_provider(ip) if ip else ""
+                    mbps = traffic_map.get(h["hostid"], 0)
+                    row = f"| {hostname} | {cc} | {prod or '?'} | {ip} | {mbps:.1f} |"
+                    if show_cluster_role:
+                        role = _infer_cluster_role(h.get("name", hostname))
+                        row += f" {role} |"
+                    lines.append(row)
+
+                if total > max_results:
+                    lines.append(f"\n*{total - max_results} more hosts omitted*")
+                return "\n".join(lines)
+            except (httpx.HTTPError, ValueError) as e:
+                return f"Error: {e}"
