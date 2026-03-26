@@ -293,7 +293,7 @@ def _write_health_overview_sheet(wb: Workbook, rows: list[dict]) -> None:
         ("", "", "", ""),
         ("service Primary OK", sum(1 for r in rows if r.get("service Primary") == "OK"), "", "service healthy"),
         ("service Primary DOWN", sum(1 for r in rows if r.get("service Primary") == "DOWN"), "", "service broken — investigate"),
-        ("No service Primary Data", sum(1 for r in rows if not r.get("service Primary")), "", "Non-service server or no check"),
+        ("No service Data", sum(1 for r in rows if not r.get("service Primary")), "", "Non-service server or no check"),
         ("", "", "", ""),
         ("Unique Countries", len(set(r["Country"] for r in rows if r["Country"])), "", ""),
         ("Unique Providers", len(set(r["Provider"] for r in rows if r["Provider"])), "", ""),
