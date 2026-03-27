@@ -21,6 +21,8 @@ from zbbx_mcp.excel import BW_MAX, classify_bandwidth
 __all__ = [
     "ServerRow", "extract_country", "fetch_all_data", "fetch_trends_batch",
     "build_value_map", "build_max_map", "countries_for_region",
+    "fetch_enabled_hosts", "fetch_traffic_map", "fetch_cpu_map",
+    "group_by_country", "host_ip",
     "TRAFFIC_IN_KEYS", "TRAFFIC_OUT_KEYS", "METRIC_KEYS", "GB_BYTES",
     "REGION_MAP", "CAPITAL_COORDS",
 ]
@@ -110,6 +112,101 @@ def extract_country(hostname: str) -> str:
     if not m:
         return ""
     return (m.group(1) or m.group(2) or "").upper()
+
+
+# Shared fetch helpers — DRY extraction from tools/*.py
+
+async def fetch_enabled_hosts(
+    client: ZabbixClient,
+    *,
+    groups: bool = True,
+    interfaces: bool = True,
+    extra_output: list[str] | None = None,
+) -> list[dict]:
+    """Fetch all enabled hosts with optional groups/interfaces."""
+    output = ["hostid", "host"]
+    if extra_output:
+        output.extend(extra_output)
+    params: dict[str, Any] = {
+        "output": output,
+        "filter": {"status": "0"},
+        "sortfield": "host",
+    }
+    if groups:
+        params["selectGroups"] = ["name"]
+    if interfaces:
+        params["selectInterfaces"] = ["ip"]
+    return await client.call("host.get", params)
+
+
+async def fetch_traffic_map(client: ZabbixClient, hostids: list[str]) -> dict[str, float]:
+    """Fetch max inbound traffic (Mbps) per host. Returns {hostid: mbps}."""
+    if not hostids:
+        return {}
+    items = await client.call("item.get", {
+        "hostids": hostids,
+        "output": ["hostid", "lastvalue"],
+        "filter": {"key_": TRAFFIC_IN_KEYS},
+    })
+    result: dict[str, float] = {}
+    for it in items:
+        try:
+            mbps = float(it.get("lastvalue", 0)) * 8 / 1_000_000
+            hid = it["hostid"]
+            if hid not in result or mbps > result[hid]:
+                result[hid] = mbps
+        except (ValueError, TypeError):
+            pass
+    return result
+
+
+async def fetch_cpu_map(client: ZabbixClient, hostids: list[str]) -> dict[str, float]:
+    """Fetch CPU usage % per host (idle → used). Returns {hostid: cpu_pct}."""
+    if not hostids:
+        return {}
+    items = await client.call("item.get", {
+        "hostids": hostids,
+        "output": ["hostid", "lastvalue"],
+        "filter": {"key_": "system.cpu.util[,idle]"},
+    })
+    result: dict[str, float] = {}
+    for it in items:
+        try:
+            result[it["hostid"]] = round(100 - float(it["lastvalue"]), 1)
+        except (ValueError, TypeError):
+            pass
+    return result
+
+
+def group_by_country(
+    hosts: list[dict],
+    *,
+    country: str = "",
+    region: str = "",
+    product: str = "",
+) -> dict[str, list[dict]]:
+    """Group hosts by country code, with optional filters."""
+    region_codes = countries_for_region(region) if region else set()
+    result: dict[str, list[dict]] = {}
+    for h in hosts:
+        cc = extract_country(h.get("host", ""))
+        if not cc:
+            continue
+        if country and cc.lower() != country.lower():
+            continue
+        if region_codes and cc not in region_codes:
+            continue
+        if product:
+            prod, _ = _classify_host(h.get("groups", []))
+            if not prod or product.lower() not in prod.lower():
+                continue
+        result.setdefault(cc, []).append(h)
+    return result
+
+
+def host_ip(h: dict) -> str:
+    """Extract first non-loopback IP from host interfaces."""
+    return next((i["ip"] for i in h.get("interfaces", []) if i.get("ip") != "127.0.0.1"), "")
 
 
 def build_value_map(items: list[dict], transform=float) -> dict[str, Any]:
