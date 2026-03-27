@@ -5,6 +5,44 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.3.0] - 2026-03-27
+
+### Added
+- **91 tools** — 7 new tools:
+  - `get_server_clusters`: detect host clusters from naming patterns, infer primary/secondary roles
+  - `search_hosts_by_location`: compound query with country + group + product + traffic filter
+  - `get_event_frequency`: flapping detection — count events per host/trigger with avg interval
+  - `get_correlated_events`: find same problem on multiple hosts within a time window
+  - `get_expansion_report`: regional coverage gap analysis with capacity headroom per country
+  - `get_regional_density_map`: server density by country with traffic, CPU, datacenter info
+  - `get_latency_estimate`: nearest server by geographic distance (haversine)
+- `resolve_datacenter(ip)` — IP-to-datacenter-city resolution via CIDR ranges (zero API calls)
+- `region` filter on `get_geo_traffic_trends`, `detect_traffic_drops`, `detect_traffic_anomalies` (LATAM/APAC/EMEA/NA/CIS/ALL)
+- `product` filter on `detect_geo_blocks`
+- `country` param on `search_hosts` with exact `extract_country()` match
+- Shared region mapping (`REGION_MAP`, `CAPITAL_COORDS`) in `data.py`
+- CLAUDE.md, REVIEW.md, AGENTS.md for Claude Code / Warp agent context
+- `py.typed` marker (PEP 561), `__all__` on all core modules
+- CI lint job (ruff), ruff config in pyproject.toml
+- Multi-stage Dockerfile with non-root user and healthcheck
+- Codex CLI setup section in README
+
+### Changed
+- `search_hosts` now uses substring matching (`*query*`) instead of prefix-only
+- Refactored shared helpers into `data.py`: `fetch_enabled_hosts`, `fetch_traffic_map`, `fetch_cpu_map`, `group_by_country`, `host_ip`
+- Trimmed 12 tool docstrings (−3,740 chars, −12% token cost)
+- Version bump to 1.3.0
+
+### Fixed
+- `search_hosts_by_location`: Zabbix API -32500 error (removed unsupported `sortfield: lastvalue`)
+- `get_host_items`: search now uses substring match for name and key
+- Country filter fixed in `report.py`, `html_report.py`, `full_report.py` (was substring, now exact)
+- `get_server_availability_report`: defaults to `exclude_product="infrastructure,monitoring"`
+- `get_health_assessment`: groups identical issues, `max_results=30` default
+- Sensitive hostname patterns scrubbed from git history
+- Protocol names removed from commit messages via filter-repo
+- Unused variables and imports cleaned up (ruff)
+
 ## [1.2.0] - 2026-03-26
 
 ### Added
