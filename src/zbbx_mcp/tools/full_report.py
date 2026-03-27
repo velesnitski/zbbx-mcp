@@ -370,26 +370,16 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
             output_dir: str = "",
             instance: str = "",
         ) -> str:
-            """Generate comprehensive report of ALL distinct servers across ALL dashboards.
-
-            Sheets:
-            1. All Servers — distinct, deduplicated, with all metrics
-            2. Health Overview
-            3. Product Analytics
-            4. Country Analytics
-            5. Per-dashboard tabs summary
-            6. Provider × Product matrix with costs
-            7. Bandwidth analysis (utilization tiers)
-            8. Off-Dashboard servers
+            """Generate comprehensive Excel report of all distinct servers across all dashboards.
 
             Args:
-                include_off_dashboard: Include servers not on any dashboard (default: True)
-                country: Filter by country code in hostname (optional)
-                product: Filter by single product name (optional)
-                products: Comma-separated product names to include (optional)
-                exclude_product: Comma-separated product names to exclude (optional)
-                output_dir: Directory for the Excel file (default: ~/Downloads)
-                instance: Zabbix instance name (optional)
+                include_off_dashboard: Include off-dashboard servers (default: True)
+                country: Country code filter (optional)
+                product: Single product filter (optional)
+                products: Comma-separated products to include (optional)
+                exclude_product: Comma-separated products to exclude (optional)
+                output_dir: Output directory (default: ~/Downloads)
+                instance: Zabbix instance (optional)
             """
             try:
                 client = resolver.resolve(instance)

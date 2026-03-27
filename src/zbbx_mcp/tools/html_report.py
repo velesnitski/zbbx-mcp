@@ -92,20 +92,16 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
             output_dir: str = "",
             instance: str = "",
         ) -> str:
-            """Generate a dark-themed HTML infrastructure report.
-
-            Includes KPI cards, server table with color-coded metrics,
-            traffic bars, trend analysis, and health overview.
-            Printable to PDF via browser (light theme auto-applied).
+            """Generate a dark-themed HTML infrastructure report, printable to PDF.
 
             Args:
-                country: Filter by country code (optional)
-                product: Filter by single product name (optional)
-                products: Comma-separated product names to include (optional)
-                exclude_product: Comma-separated product names to exclude (optional)
-                period: Trend period for avg/peak columns (default: 7d)
-                output_dir: Directory for the HTML file (default: ~/Downloads)
-                instance: Zabbix instance name (optional)
+                country: Country code filter (optional)
+                product: Single product filter (optional)
+                products: Comma-separated products to include (optional)
+                exclude_product: Comma-separated products to exclude (optional)
+                period: Trend period (default: 7d)
+                output_dir: Output directory (default: ~/Downloads)
+                instance: Zabbix instance (optional)
             """
             try:
                 client = resolver.resolve(instance)

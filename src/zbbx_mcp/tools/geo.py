@@ -37,19 +37,16 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
             product: str = "",
             instance: str = "",
         ) -> str:
-            """Detect country-level traffic disruptions by analyzing traffic drops across all servers in each country.
-
-            When >50% of servers in a country show >50% traffic drop vs baseline,
-            flags it as a potential regional anomaly (ISP-level traffic disruptioning).
+            """Detect country-level traffic disruptions by analyzing traffic drops per country.
 
             Args:
                 period: Current period to analyze (default: 1d)
-                baseline_days: Days for baseline comparison (default: 7)
-                drop_threshold: % traffic drop per server to flag (default: 50%)
-                country_threshold: % of servers in country affected (default: 50%)
-                min_servers: Minimum servers in country to analyze (default: 2)
-                product: Filter by product name (optional, e.g. to check only Free or Premium)
-                instance: Zabbix instance name (optional)
+                baseline_days: Days for baseline (default: 7)
+                drop_threshold: % drop per server to flag (default: 50)
+                country_threshold: % of servers affected to flag country (default: 50)
+                min_servers: Min servers per country (default: 2)
+                product: Filter by product (optional)
+                instance: Zabbix instance (optional)
             """
             try:
                 client = resolver.resolve(instance)
