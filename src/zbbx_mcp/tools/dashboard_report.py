@@ -22,20 +22,12 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
             output_dir: str = "",
             instance: str = "",
         ) -> str:
-            """Export a Zabbix dashboard to Excel with full server details.
-
-            For each server on the dashboard, includes:
-            - Dashboard tab name, server hostname, visible name
-            - Product, tier, hosting provider, IP
-            - CPU usage, load average, memory, traffic, active connections
-            - Zabbix groups
-
-            Excel has one sheet per dashboard tab, plus a Summary sheet.
+            """Export a Zabbix dashboard to Excel with full server details and metrics.
 
             Args:
                 dashboard_id: Zabbix dashboard ID (e.g., '113')
-                output_dir: Directory for the Excel file (default: ~/Downloads)
-                instance: Zabbix instance name (optional, for multi-instance setups)
+                output_dir: Output directory (default: ~/Downloads)
+                instance: Zabbix instance (optional)
             """
             try:
                 client = resolver.resolve(instance)
