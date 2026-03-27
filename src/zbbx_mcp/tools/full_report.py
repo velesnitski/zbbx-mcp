@@ -209,9 +209,9 @@ def _write_product_analytics_sheet(wb: Workbook, rows: list[dict]) -> None:
         if high_bw:
             cell_bw.fill = RED_FILL
         ws.cell(row=idx, column=10, value=service_ok if service_ok else "")
-        cell_xd = ws.cell(row=idx, column=11, value=service_down if service_down else "")
+        cell_vd = ws.cell(row=idx, column=11, value=service_down if service_down else "")
         if service_down:
-            cell_xd.fill = RED_FILL
+            cell_vd.fill = RED_FILL
         ws.cell(row=idx, column=12, value=", ".join(countries))
         ws.cell(row=idx, column=13, value=", ".join(providers))
         ws.cell(row=idx, column=14, value=round(cost, 2) if cost else "")
@@ -262,9 +262,9 @@ def _write_country_analytics_sheet(wb: Workbook, rows: list[dict]) -> None:
         cell_bw = ws.cell(row=idx, column=8, value=high_bw if high_bw else "")
         if high_bw:
             cell_bw.fill = RED_FILL
-        cell_xd = ws.cell(row=idx, column=9, value=service_down if service_down else "")
+        cell_vd = ws.cell(row=idx, column=9, value=service_down if service_down else "")
         if service_down:
-            cell_xd.fill = RED_FILL
+            cell_vd.fill = RED_FILL
 
     # Totals
     total_row = len(sorted_countries) + 2

@@ -295,13 +295,13 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
 
                 hosts = await fetch_enabled_hosts(client)
 
-                # service check items
-                service1_items = await client.call("item.get", {
+                # service primary check items
+                service_items = await client.call("item.get", {
                     "hostids": [h["hostid"] for h in hosts],
                     "output": ["hostid", "lastvalue"],
                     "filter": {"key_": "service_primary_check[{HOST.IP}]", "status": "0"},
                 })
-                service_map = build_value_map(service1_items, lambda v: int(float(v)))
+                service_map = build_value_map(service_items, lambda v: int(float(v)))
 
                 # Get trend data for uptime estimation
                 all_ids = [h["hostid"] for h in hosts]
