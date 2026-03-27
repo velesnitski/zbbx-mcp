@@ -28,19 +28,16 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()):
         ) -> str:
             """Get trend data (avg/peak/min) for multiple servers and metrics.
 
-            Shows historical averages instead of point-in-time snapshots.
-            Uses batch API calls (3 total) regardless of server count.
-
             Args:
-                country: Filter by country code in hostname (optional)
-                product: Filter by product name (optional)
-                tier: Filter by tier name (optional)
-                group: Filter by Zabbix host group (optional)
+                country: Country code filter (optional)
+                product: Filter by product (optional)
+                tier: Filter by tier (optional)
+                group: Zabbix host group (optional)
                 metrics: Comma-separated: cpu, traffic, load, memory (default: cpu,traffic,load)
-                period: Time period: 1d, 7d, 30d (default: 7d)
-                aggregation: 'summary' (default) or 'daily' for per-day breakdown
-                max_results: Maximum servers (default: 50)
-                instance: Zabbix instance name (optional, for multi-instance setups)
+                period: 1d, 7d, or 30d (default: 7d)
+                aggregation: 'summary' or 'daily' (default: summary)
+                max_results: Max servers (default: 50)
+                instance: Zabbix instance (optional)
             """
             try:
                 client = resolver.resolve(instance)
@@ -618,20 +615,14 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()):
         ) -> str:
             """Find servers that can be safely shut down or need investigation.
 
-            Categories:
-            - DEAD: traffic < 1 Mbps AND CPU < 5% — shutdown immediately
-            - BROKEN: VPN DOWN AND traffic near zero — fix or shutdown
-            - ZOMBIE: CPU > 50% but traffic < 1 Mbps — stuck process
-            - IDLE: traffic < threshold AND CPU < threshold — review
-
             Args:
-                product: Filter by product name (optional)
-                tier: Filter by tier name (optional)
-                country: Filter by country code (optional)
+                product: Filter by product (optional)
+                tier: Filter by tier (optional)
+                country: Country code filter (optional)
                 period: Analysis period (default: 7d)
                 traffic_threshold: Mbps below which = idle (default: 5.0)
                 cpu_threshold: CPU % below which = idle (default: 5.0)
-                instance: Zabbix instance name (optional)
+                instance: Zabbix instance (optional)
             """
             try:
                 import asyncio as _aio
@@ -766,22 +757,16 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()):
             max_results: int = 30,
             instance: str = "",
         ) -> str:
-            """Find overloaded servers that need capacity increase or hardware upgrade.
-
-            Detects:
-            - OVERLOADED: sustained high CPU (avg > threshold, never drops below 50%)
-            - SATURATED: traffic approaching NIC limit
-            - INEFFICIENT: high CPU per traffic ratio vs peers (needs upgrade)
-            - GROWING: traffic trend rising >20% (will hit limit soon)
+            """Find overloaded servers that need capacity increase or upgrade.
 
             Args:
-                product: Filter by product name (optional)
-                tier: Filter by tier name (optional)
-                country: Filter by country code (optional)
+                product: Filter by product (optional)
+                tier: Filter by tier (optional)
+                country: Country code filter (optional)
                 period: Analysis period (default: 7d)
-                cpu_threshold: CPU avg % above which = overloaded (default: 70%)
-                traffic_threshold: Traffic avg Mbps above which = saturated (default: 600)
-                instance: Zabbix instance name (optional)
+                cpu_threshold: CPU avg % for overloaded (default: 70)
+                traffic_threshold: Mbps for saturated (default: 600)
+                instance: Zabbix instance (optional)
             """
             try:
                 client = resolver.resolve(instance)

@@ -69,18 +69,13 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
         ) -> str:
             """Generate and send a Zabbix infrastructure summary to Slack.
 
-            Builds a formatted report with product summary, active problems,
-            and high CPU servers, then posts it to Slack.
-
-            Webhook URL is read from SLACK_WEBHOOK_URL environment variable.
-
             Args:
                 title: Report title (default: 'Zabbix Server Report')
-                product: Filter by product name (optional)
-                include_problems: Include active problems section (default: True)
-                include_high_cpu: Include high CPU servers section (default: True)
-                cpu_threshold: CPU threshold for high CPU section (default: 80%)
-                instance: Zabbix instance name (optional, for multi-instance setups)
+                product: Filter by product (optional)
+                include_problems: Include problems section (default: True)
+                include_high_cpu: Include high CPU section (default: True)
+                cpu_threshold: CPU % threshold (default: 80)
+                instance: Zabbix instance (optional)
             """
             from zbbx_mcp.classify import classify_host as _classify_host
 
