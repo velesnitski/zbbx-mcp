@@ -1,14 +1,15 @@
-import atexit
 import asyncio as _asyncio
+import atexit
 import os
 import re
 
 from mcp.server.fastmcp import FastMCP
-from zbbx_mcp.config import load_all_configs, load_global_policy
+
 from zbbx_mcp.client import ZabbixClient
+from zbbx_mcp.config import load_all_configs, load_global_policy
+from zbbx_mcp.logging import INSTANCE_ID, logged, setup_logging, setup_sentry
 from zbbx_mcp.resolver import InstanceResolver
 from zbbx_mcp.tools import register_all
-from zbbx_mcp.logging import setup_logging, setup_sentry, INSTANCE_ID, logged
 
 # Regex to strip Args/Parameters section from docstrings
 _ARGS_RE = re.compile(r"\n\s*Args:\s*\n.*", re.DOTALL)

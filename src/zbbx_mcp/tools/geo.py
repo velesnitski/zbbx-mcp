@@ -8,12 +8,13 @@ from statistics import median
 
 import httpx
 
-from zbbx_mcp.resolver import InstanceResolver
+from zbbx_mcp.classify import classify_host as _classify_host
 from zbbx_mcp.data import (
-    fetch_trends_batch, extract_country, build_value_map, build_max_map,
-    TRAFFIC_IN_KEYS, GB_BYTES,
+    build_value_map,
+    extract_country,
+    fetch_trends_batch,
 )
-from zbbx_mcp.classify import classify_host as _classify_host, detect_provider
+from zbbx_mcp.resolver import InstanceResolver
 
 
 def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> None:
@@ -250,10 +251,10 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
 
                 if aggregation == "daily" and country_data:
                     # Show daily for top 5 countries
-                    parts.append(f"\n### Daily Breakdown (top countries)\n")
+                    parts.append("\n### Daily Breakdown (top countries)\n")
                     top = sorted(country_data.items(), key=lambda x: -x[1]["avg"])[:5]
                     all_days = sorted(set(
-                        d for _, cd in top for d in cd["daily"].keys()
+                        d for _, cd in top for d in cd["daily"]
                     ))
                     if all_days:
                         day_cols = " | ".join(all_days)
@@ -425,7 +426,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                         country_stats.setdefault(r["country"], []).append(r)
 
                 if country_stats:
-                    parts.append(f"\n### Country Summary\n")
+                    parts.append("\n### Country Summary\n")
                     parts.append("| Country | Servers | Avg service Uptime | DOWN |")
                     parts.append("|---------|---------|-----------------|------|")
                     for ctry in sorted(country_stats):
@@ -576,7 +577,6 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 instance: Zabbix instance name (optional)
             """
             try:
-                from datetime import datetime, timezone
 
                 client = resolver.resolve(instance)
 
@@ -611,7 +611,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 # Find block start date for each country
                 blocks = []
                 for ctry, daily in country_daily.items():
-                    days = sorted(daily.keys())
+                    days = sorted(daily)
                     if not days:
                         continue
 

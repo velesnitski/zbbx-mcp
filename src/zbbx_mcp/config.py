@@ -2,6 +2,8 @@ import logging
 import os
 from dataclasses import dataclass, field
 
+__all__ = ["ZabbixConfig", "load_config", "load_all_configs"]
+
 
 @dataclass(frozen=True)
 class ZabbixConfig:

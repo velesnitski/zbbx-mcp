@@ -1,5 +1,5 @@
-from zbbx_mcp.utils import format_results, ROLLBACK_STRIP_FIELDS
-from zbbx_mcp.data import extract_country, build_value_map, build_max_map
+from zbbx_mcp.data import build_max_map, build_value_map, extract_country
+from zbbx_mcp.utils import ROLLBACK_STRIP_FIELDS, format_results
 
 
 class TestFormatResults:
