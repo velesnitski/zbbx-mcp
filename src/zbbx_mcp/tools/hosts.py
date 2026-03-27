@@ -4,7 +4,12 @@ from collections import defaultdict
 import httpx
 
 from zbbx_mcp.classify import classify_host as _classify_host
-from zbbx_mcp.data import TRAFFIC_IN_KEYS, extract_country
+from zbbx_mcp.data import (
+    extract_country,
+    fetch_enabled_hosts,
+    fetch_traffic_map,
+    host_ip,
+)
 from zbbx_mcp.formatters import format_host_detail, format_host_list
 from zbbx_mcp.resolver import InstanceResolver
 
@@ -369,59 +374,28 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
             """
             try:
                 client = resolver.resolve(instance)
-                params = {
-                    "output": ["hostid", "host", "name", "status"],
-                    "selectGroups": ["name"],
-                    "selectInterfaces": ["ip"],
-                    "filter": {"status": "0"},
-                    "sortfield": "host",
-                }
+                hosts = await fetch_enabled_hosts(client, extra_output=["name", "status"])
+
                 if group:
                     grps = await client.call("hostgroup.get", {
                         "output": ["groupid"],
                         "filter": {"name": [group]},
                     })
-                    if grps:
-                        params["groupids"] = [g["groupid"] for g in grps]
-                    else:
+                    if not grps:
                         return f"Host group '{group}' not found."
+                    gids = {g["groupid"] for g in grps}
+                    hosts = [h for h in hosts if any(g.get("groupid") in gids for g in h.get("groups", []))]
 
-                hosts = await client.call("host.get", params)
-
-                # Filter by country
                 if country:
                     hosts = [h for h in hosts if extract_country(h["host"]).lower() == country.lower()]
-
-                # Filter by product
                 if product:
-                    filtered = []
-                    for h in hosts:
-                        prod, _ = _classify_host(h.get("groups", []))
-                        if prod and product.lower() in prod.lower():
-                            filtered.append(h)
-                    hosts = filtered
+                    hosts = [h for h in hosts if product.lower() in (_classify_host(h.get("groups", []))[0] or "").lower()]
 
                 if not hosts:
                     return "No hosts match the filters."
 
-                # Fetch traffic if needed
-                traffic_map: dict[str, float] = {}
-                if True:  # traffic column always shown
-                    hids = [h["hostid"] for h in hosts]
-                    items = await client.call("item.get", {
-                        "hostids": hids,
-                        "output": ["hostid", "lastvalue", "key_"],
-                        "filter": {"key_": TRAFFIC_IN_KEYS},
-                    })
-                    for it in items:
-                        hid = it["hostid"]
-                        try:
-                            val = float(it.get("lastvalue", 0))
-                        except (ValueError, TypeError):
-                            continue
-                        mbps = val * 8 / 1_000_000
-                        if hid not in traffic_map or mbps > traffic_map[hid]:
-                            traffic_map[hid] = mbps
+                hids = [h["hostid"] for h in hosts]
+                traffic_map = await fetch_traffic_map(client, hids)
 
                 if min_traffic_mbps > 0:
                     hosts = [h for h in hosts if traffic_map.get(h["hostid"], 0) >= min_traffic_mbps]
@@ -440,7 +414,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     hostname = h["host"]
                     cc = extract_country(hostname)
                     prod, _ = _classify_host(h.get("groups", []))
-                    ip = next((i["ip"] for i in h.get("interfaces", []) if i.get("ip") != "127.0.0.1"), "")
+                    ip = host_ip(h)
                     mbps = traffic_map.get(h["hostid"], 0)
                     row = f"| {hostname} | {cc} | {prod or '?'} | {ip} | {mbps:.1f} |"
                     if show_cluster_role:
