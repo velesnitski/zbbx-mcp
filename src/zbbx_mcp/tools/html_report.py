@@ -282,8 +282,8 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     cpu_cls = _cpu_class(cpu_now)
                     cpu_str = f'{cpu_now:.1f}%' if cpu_now is not None else "N/A"
                     traffic_str = f'{traffic_now:.0f}' if traffic_now is not None else "N/A"
-                    vpn1 = r.get("VPN Primary", "")
-                    vpn_html = _badge("DOWN", "red") if vpn1 == "DOWN" else (_badge("OK", "green") if vpn1 == "OK" else "")
+                    vpn_status = r.get("VPN Primary", "")
+                    vpn_html = _badge("DOWN", "red") if vpn_status == "DOWN" else (_badge("OK", "green") if vpn_status == "OK" else "")
                     hostid = r.get("Host ID", "")
                     ip = r.get("IP", "")
                     dashid = r.get("Dashboard ID", "")

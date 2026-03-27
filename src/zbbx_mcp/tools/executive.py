@@ -295,13 +295,13 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
 
                 hosts = await fetch_enabled_hosts(client)
 
-                # VPN check items
-                vpn1_items = await client.call("item.get", {
+                # VPN primary check items
+                vpn_items = await client.call("item.get", {
                     "hostids": [h["hostid"] for h in hosts],
                     "output": ["hostid", "lastvalue"],
                     "filter": {"key_": "vpn_primary_check[{HOST.IP}]", "status": "0"},
                 })
-                vpn_map = build_value_map(vpn1_items, lambda v: int(float(v)))
+                vpn_map = build_value_map(vpn_items, lambda v: int(float(v)))
 
                 # Get trend data for uptime estimation
                 all_ids = [h["hostid"] for h in hosts]
