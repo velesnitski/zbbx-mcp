@@ -1,7 +1,7 @@
 import httpx
 
-from zbbx_mcp.resolver import InstanceResolver
 from zbbx_mcp.formatters import format_hostgroup_list
+from zbbx_mcp.resolver import InstanceResolver
 
 
 def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> None:

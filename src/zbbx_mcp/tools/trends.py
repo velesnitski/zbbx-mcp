@@ -1,13 +1,13 @@
 """Batch trend tools: historical metrics, dashboards, comparison, health, capacity."""
 
-from typing import Any
 
 import httpx
 
-from zbbx_mcp.resolver import InstanceResolver
-from zbbx_mcp.data import fetch_trends_batch, extract_country, METRIC_KEYS
-from zbbx_mcp.classify import classify_host as _classify_host, detect_provider
+from zbbx_mcp.classify import classify_host as _classify_host
+from zbbx_mcp.classify import detect_provider
+from zbbx_mcp.data import extract_country, fetch_trends_batch
 from zbbx_mcp.excel import BW_MAX
+from zbbx_mcp.resolver import InstanceResolver
 
 
 def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()):
@@ -92,7 +92,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()):
                 if aggregation == "daily":
                     # Collect all unique days across all rows
                     all_days = sorted(set(
-                        d for r in trend_rows for d in r.daily.keys()
+                        d for r in trend_rows for d in r.daily
                     ))
                     if not all_days:
                         return "No daily data available."
@@ -197,9 +197,9 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()):
 
                 # Daily breakdown table
                 if aggregation == "daily":
-                    all_days = sorted(set(d for r in trend_rows for d in r.daily.keys()))
+                    all_days = sorted(set(d for r in trend_rows for d in r.daily))
                     if all_days:
-                        parts.append(f"\n## Daily Breakdown\n")
+                        parts.append("\n## Daily Breakdown\n")
                         day_cols = " | ".join(all_days)
                         parts.append(f"| Metric | {day_cols} |")
                         parts.append(f"|--------|{'---|' * len(all_days)}")
@@ -413,7 +413,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()):
 
                 # Peer medians for efficiency
                 from statistics import median as _median
-                cpu_avgs = [hm["cpu"].avg for hm in host_metrics.values() if "cpu" in hm]
+                # cpu_avgs removed (unused)
                 efficiencies = []
                 for hm in host_metrics.values():
                     cpu = hm.get("cpu")
@@ -559,7 +559,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()):
                         key = f"{extract_country(i['host'])}|{i['provider']}|{i['score']}|{'|'.join(sorted(is_[:30] for is_ in i['issues']))}"
                         grouped.setdefault(key, []).append(i)
 
-                    for key, group in sorted(grouped.items(), key=lambda x: x[1][0]["score"]):
+                    for _key, group in sorted(grouped.items(), key=lambda x: x[1][0]["score"]):
                         if len(group) >= 3:
                             # Render as grouped entry
                             sample = group[0]
@@ -922,7 +922,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()):
                 if omitted:
                     parts.append(f"\n*{omitted} more servers omitted (use max_results to see all)*")
 
-                parts.append(f"\n### Top Issues\n")
+                parts.append("\n### Top Issues\n")
                 for c in shown[:5]:
                     parts.append(f"**{c['host']}** ({c['provider']}):")
                     for s in c["signals"]:

@@ -4,8 +4,8 @@ build-backend = "hatchling.build"
 
 [project]
 name = "zbbx-mcp"
-version = "1.2.0"
-description = "Zabbix MCP server for Claude Code, n8n, and any MCP-compatible client"
+version = "1.3.0"
+description = "Zabbix MCP server for Claude Code, Codex CLI, n8n, and any MCP-compatible client"
 readme = "README.md"
 license = "MIT"
 requires-python = ">=3.10"
@@ -22,7 +22,9 @@ classifiers = [
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
     "Topic :: Software Development :: Libraries",
+    "Topic :: System :: Monitoring",
 ]
+keywords = ["zabbix", "mcp", "monitoring", "claude", "codex"]
 dependencies = [
     "mcp>=1.0.0,<1.26.0",
     "httpx[http2]>=0.27.0",
@@ -32,6 +34,7 @@ dependencies = [
 
 [project.optional-dependencies]
 test = ["pytest>=8.0", "pytest-asyncio>=0.24"]
+lint = ["ruff>=0.4"]
 
 [project.urls]
 Homepage = "https://github.com/velesnitski/zbbx-mcp"
@@ -45,3 +48,11 @@ zbbx-mcp = "zbbx_mcp.server:main"
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
+
+[tool.ruff]
+target-version = "py310"
+line-length = 120
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+ignore = ["E501", "SIM105", "SIM102"]

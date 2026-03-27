@@ -1,13 +1,12 @@
-import asyncio
 import re
 from collections import defaultdict
 
 import httpx
 
+from zbbx_mcp.classify import classify_host as _classify_host
+from zbbx_mcp.data import TRAFFIC_IN_KEYS, extract_country
+from zbbx_mcp.formatters import format_host_detail, format_host_list
 from zbbx_mcp.resolver import InstanceResolver
-from zbbx_mcp.data import extract_country, TRAFFIC_IN_KEYS, GB_BYTES
-from zbbx_mcp.classify import classify_host as _classify_host, detect_provider
-from zbbx_mcp.formatters import format_host_list, format_host_detail
 
 
 def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> None:
@@ -72,7 +71,6 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
 
                 total = len(data)
                 data = data[:max_results]
-                count = len(data)
                 header = f"**Found: {total} hosts**"
                 if total > max_results:
                     header += f" (showing first {max_results})"
@@ -445,7 +443,6 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     cc = extract_country(hostname)
                     prod, _ = _classify_host(h.get("groups", []))
                     ip = next((i["ip"] for i in h.get("interfaces", []) if i.get("ip") != "127.0.0.1"), "")
-                    provider = detect_provider(ip) if ip else ""
                     mbps = traffic_map.get(h["hostid"], 0)
                     row = f"| {hostname} | {cc} | {prod or '?'} | {ip} | {mbps:.1f} |"
                     if show_cluster_role:

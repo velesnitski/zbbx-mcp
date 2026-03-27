@@ -1,12 +1,10 @@
-import os
-from unittest.mock import patch
 
 from mcp.server.fastmcp import FastMCP
 
-from zbbx_mcp.config import ZabbixConfig
 from zbbx_mcp.client import ZabbixClient
+from zbbx_mcp.config import ZabbixConfig
 from zbbx_mcp.resolver import InstanceResolver
-from zbbx_mcp.tools import register_all, WRITE_TOOLS
+from zbbx_mcp.tools import WRITE_TOOLS, register_all
 
 
 def _setup(read_only=False, disabled_tools=frozenset()):

@@ -2,9 +2,8 @@ from collections import defaultdict
 
 import httpx
 
+from zbbx_mcp.formatters import _ts, format_severity
 from zbbx_mcp.resolver import InstanceResolver
-from zbbx_mcp.data import extract_country
-from zbbx_mcp.formatters import format_severity, _ts
 
 EVENT_SOURCES = {"0": "Trigger", "1": "Discovery", "2": "Autoregistration", "3": "Internal"}
 EVENT_VALUES = {

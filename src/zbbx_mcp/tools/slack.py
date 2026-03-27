@@ -82,7 +82,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 cpu_threshold: CPU threshold for high CPU section (default: 80%)
                 instance: Zabbix instance name (optional, for multi-instance setups)
             """
-            from zbbx_mcp.classify import classify_host as _classify_host, detect_provider
+            from zbbx_mcp.classify import classify_host as _classify_host
 
             url = os.environ.get(SLACK_WEBHOOK_ENV, "")
             if not url:

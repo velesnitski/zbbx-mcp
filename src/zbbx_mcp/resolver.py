@@ -1,5 +1,7 @@
 from zbbx_mcp.client import ZabbixClient
 
+__all__ = ["InstanceResolver"]
+
 
 class InstanceResolver:
     """Resolves which Zabbix client to use for a given request.

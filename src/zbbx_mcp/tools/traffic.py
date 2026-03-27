@@ -6,9 +6,10 @@ from statistics import median, stdev
 
 import httpx
 
-from zbbx_mcp.resolver import InstanceResolver
-from zbbx_mcp.classify import classify_host as _classify_host, detect_provider
+from zbbx_mcp.classify import classify_host as _classify_host
+from zbbx_mcp.classify import detect_provider
 from zbbx_mcp.data import TRAFFIC_IN_KEYS, extract_country
+from zbbx_mcp.resolver import InstanceResolver
 
 
 def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> None:

@@ -4,8 +4,8 @@ import time as _time
 
 import httpx
 
-from zbbx_mcp.resolver import InstanceResolver
 from zbbx_mcp.formatters import _ts
+from zbbx_mcp.resolver import InstanceResolver
 
 ALERT_STATUS = {"0": "Not sent", "1": "Sent", "2": "Failed", "3": "New"}
 ALERT_TYPES = {"0": "Message", "1": "Remote command"}

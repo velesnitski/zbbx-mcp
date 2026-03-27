@@ -7,8 +7,9 @@ from statistics import median
 
 import httpx
 
+from zbbx_mcp.classify import classify_host as _classify_host
+from zbbx_mcp.classify import detect_provider
 from zbbx_mcp.resolver import InstanceResolver
-from zbbx_mcp.classify import classify_host as _classify_host, detect_provider
 
 
 def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> None:
@@ -84,7 +85,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                         all_hostids.add(h["hostid"])
 
                 if not all_hostids:
-                    return f"No hosts resolved from dashboard graphs."
+                    return "No hosts resolved from dashboard graphs."
 
                 # Phase 2: host details + all metrics (parallel)
                 tasks = [
@@ -220,7 +221,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
 
                 # Generate Excel
                 from openpyxl import Workbook
-                from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+                from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 
                 wb = Workbook()
                 header_font = Font(bold=True, color="FFFFFF", size=11)
@@ -327,11 +328,11 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 # Text summary
                 parts = [
                     f"**Dashboard Export: {dash_name}**",
-                    f"",
+                    "",
                     f"**File:** `{filepath}`",
                     f"**Servers:** {len(all_rows)} across {len(tab_rows)} tabs",
-                    f"",
-                    f"### Tabs",
+                    "",
+                    "### Tabs",
                 ]
                 for tab, rows in tab_rows.items():
                     cpu_vals = [r["CPU %"] for r in rows if r["CPU %"] is not None]
@@ -341,8 +342,8 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     parts.append(f"- **{tab}**: {len(rows)} servers, median CPU {med_cpu}, median traffic {med_traffic}")
 
                 parts.extend([
-                    f"",
-                    f"### Sheets",
+                    "",
+                    "### Sheets",
                     f"1. **All** — {len(all_rows)} servers × {len(headers)} columns",
                 ] + [
                     f"{i+2}. **{tab}** — {len(rows)} servers"

@@ -1,7 +1,6 @@
 import httpx
 
 from zbbx_mcp.resolver import InstanceResolver
-from zbbx_mcp.formatters import _ts
 
 SERVICE_STATUS = {
     "-1": "OK",

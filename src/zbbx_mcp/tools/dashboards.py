@@ -2,7 +2,6 @@ import httpx
 
 from zbbx_mcp.resolver import InstanceResolver
 
-
 WIDGET_TYPES = {
     "graph": "Graph",
     "clock": "Clock",

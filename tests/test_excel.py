@@ -1,7 +1,13 @@
 from zbbx_mcp.excel import (
-    classify_bandwidth, bandwidth_fill, cpu_fill,
-    BW_MAX, BW_RED, BW_ORANGE, BW_GREEN,
-    RED_FILL, DARK_RED_FILL, ORANGE_FILL, GREEN_FILL, LIGHT_GREEN_FILL,
+    BW_RED,
+    DARK_RED_FILL,
+    GREEN_FILL,
+    LIGHT_GREEN_FILL,
+    ORANGE_FILL,
+    RED_FILL,
+    bandwidth_fill,
+    classify_bandwidth,
+    cpu_fill,
 )
 
 
