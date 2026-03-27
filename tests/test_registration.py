@@ -142,6 +142,12 @@ EXPECTED_TOOLS = {
     "get_server_availability_report",
     "get_protocol_failure_matrix",
     "get_block_timeline",
+    # executive.py
+    "get_executive_dashboard",
+    "get_month_over_month",
+    "get_fleet_risk_score",
+    "get_sla_dashboard",
+    "get_report_snapshot",
 }
 
 

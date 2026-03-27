@@ -87,41 +87,57 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
         @mcp.tool()
         async def get_alert_summary(
             hours: int = 24,
+            compare: bool = True,
             instance: str = "",
         ) -> str:
-            """Get alert summary for the last N hours — counts by status and top subjects.
+            """Alert summary with period-over-period trend.
 
             Args:
-                hours: Number of hours to look back (default: 24)
-                instance: Zabbix instance name (optional, for multi-instance setups)
+                hours: Lookback period (default: 24)
+                compare: Show comparison with previous period (default: True)
+                instance: Zabbix instance name (optional)
             """
             try:
                 client = resolver.resolve(instance)
-                time_from = int(_time.time()) - (hours * 3600)
+                now = int(_time.time())
+                time_from = now - (hours * 3600)
 
-                data = await client.call("alert.get", {
+                params = {
                     "output": ["alertid", "status", "subject", "alerttype"],
-                    "time_from": time_from,
                     "sortfield": "clock",
                     "sortorder": "DESC",
-                    "limit": 1000,
-                })
+                    "limit": 2000,
+                }
 
-                if not data:
+                if compare:
+                    params["time_from"] = now - (hours * 2 * 3600)
+                else:
+                    params["time_from"] = time_from
+
+                data = await client.call("alert.get", params)
+
+                current = [a for a in data if int(a.get("clock", now)) >= time_from]
+                previous = [a for a in data if int(a.get("clock", now)) < time_from] if compare else []
+
+                if not current:
                     return f"No alerts in the last {hours} hours."
 
-                # Count by status
                 status_counts: dict[str, int] = {}
                 subject_counts: dict[str, int] = {}
-                for a in data:
+                for a in current:
                     s = ALERT_STATUS.get(a.get("status", "0"), "?")
                     status_counts[s] = status_counts.get(s, 0) + 1
                     subj = a.get("subject", "Unknown")[:60]
                     subject_counts[subj] = subject_counts.get(subj, 0) + 1
 
+                trend = ""
+                if compare and previous:
+                    delta = len(current) - len(previous)
+                    arrow = "+" if delta > 0 else ""
+                    trend = f" ({arrow}{delta} vs prev {hours}h)"
+
                 parts = [
-                    f"**Alert Summary (last {hours}h): {len(data)} alerts**\n",
-                    "## By Status\n",
+                    f"**Alerts (last {hours}h): {len(current)}{trend}**\n",
                     "| Status | Count |",
                     "|--------|-------|",
                 ]
@@ -129,11 +145,11 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     parts.append(f"| {s} | {c} |")
 
                 parts.extend([
-                    "\n## Top Subjects\n",
+                    "\n**Top subjects:**",
                     "| Subject | Count |",
                     "|---------|-------|",
                 ])
-                for subj, c in sorted(subject_counts.items(), key=lambda x: -x[1])[:15]:
+                for subj, c in sorted(subject_counts.items(), key=lambda x: -x[1])[:10]:
                     parts.append(f"| {subj} | {c} |")
 
                 return "\n".join(parts)
