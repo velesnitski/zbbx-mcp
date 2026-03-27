@@ -13,7 +13,12 @@ from zbbx_mcp.data import (
     build_value_map,
     countries_for_region,
     extract_country,
+    fetch_cpu_map,
+    fetch_enabled_hosts,
+    fetch_traffic_map,
     fetch_trends_batch,
+    group_by_country,
+    host_ip,
 )
 from zbbx_mcp.resolver import InstanceResolver
 
@@ -697,41 +702,17 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
             """
             try:
                 client = resolver.resolve(instance)
-                from zbbx_mcp.data import TRAFFIC_IN_KEYS
-
-                hosts = await client.call("host.get", {
-                    "output": ["hostid", "host"],
-                    "selectGroups": ["name"],
-                    "selectInterfaces": ["ip"],
-                    "filter": {"status": "0"},
-                })
+                from zbbx_mcp.classify import detect_provider
 
                 region_codes = countries_for_region(region)
                 if not region_codes:
                     return f"Unknown region '{region}'. Use: LATAM, APAC, EMEA, NA, CIS, ALL."
 
-                by_country: dict[str, list[dict]] = {}
-                for h in hosts:
-                    cc = extract_country(h["host"])
-                    if cc and cc in region_codes:
-                        by_country.setdefault(cc, []).append(h)
+                hosts = await fetch_enabled_hosts(client)
+                by_country = group_by_country(hosts, region=region)
 
                 all_ids = [h["hostid"] for hs in by_country.values() for h in hs]
-                traffic_map: dict[str, float] = {}
-                if all_ids:
-                    items = await client.call("item.get", {
-                        "hostids": all_ids,
-                        "output": ["hostid", "lastvalue"],
-                        "filter": {"key_": TRAFFIC_IN_KEYS},
-                    })
-                    for it in items:
-                        try:
-                            mbps = float(it.get("lastvalue", 0)) * 8 / 1_000_000
-                            hid = it["hostid"]
-                            if hid not in traffic_map or mbps > traffic_map[hid]:
-                                traffic_map[hid] = mbps
-                        except (ValueError, TypeError):
-                            pass
+                traffic_map = await fetch_traffic_map(client, all_ids)
 
                 rows = []
                 for cc, cc_hosts in by_country.items():
@@ -739,12 +720,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     if total_mbps < min_traffic_mbps and min_traffic_mbps > 0:
                         continue
                     density = total_mbps / len(cc_hosts) if cc_hosts else 0
-                    providers = set()
-                    for h in cc_hosts:
-                        ip = next((i["ip"] for i in h.get("interfaces", []) if i.get("ip") != "127.0.0.1"), "")
-                        if ip:
-                            from zbbx_mcp.classify import detect_provider
-                            providers.add(detect_provider(ip))
+                    providers = {detect_provider(host_ip(h)) for h in cc_hosts if host_ip(h)}
                     rows.append({
                         "cc": cc, "servers": len(cc_hosts),
                         "traffic_gbps": round(total_mbps / 1000, 2),
@@ -803,60 +779,19 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
             """
             try:
                 client = resolver.resolve(instance)
-                from zbbx_mcp.data import TRAFFIC_IN_KEYS
+                from zbbx_mcp.classify import detect_provider
 
-                hosts = await client.call("host.get", {
-                    "output": ["hostid", "host"],
-                    "selectGroups": ["name"],
-                    "selectInterfaces": ["ip"],
-                    "filter": {"status": "0"},
-                })
-
-                region_codes = countries_for_region(region) if region else set()
-
-                by_country: dict[str, list[dict]] = {}
-                for h in hosts:
-                    cc = extract_country(h["host"])
-                    if not cc:
-                        continue
-                    if country and cc.lower() != country.lower():
-                        continue
-                    if region_codes and cc not in region_codes:
-                        continue
-                    by_country.setdefault(cc, []).append(h)
+                hosts = await fetch_enabled_hosts(client)
+                by_country = group_by_country(hosts, country=country, region=region)
 
                 if not by_country:
                     return "No servers match the filters."
 
                 all_ids = [h["hostid"] for hs in by_country.values() for h in hs]
-                traffic_task = client.call("item.get", {
-                    "hostids": all_ids,
-                    "output": ["hostid", "lastvalue"],
-                    "filter": {"key_": TRAFFIC_IN_KEYS},
-                })
-                cpu_task = client.call("item.get", {
-                    "hostids": all_ids,
-                    "output": ["hostid", "lastvalue"],
-                    "filter": {"key_": "system.cpu.util[,idle]"},
-                })
-                traffic_items, cpu_items = await asyncio.gather(traffic_task, cpu_task)
-
-                traffic_map: dict[str, float] = {}
-                for it in traffic_items:
-                    try:
-                        mbps = float(it.get("lastvalue", 0)) * 8 / 1_000_000
-                        hid = it["hostid"]
-                        if hid not in traffic_map or mbps > traffic_map[hid]:
-                            traffic_map[hid] = mbps
-                    except (ValueError, TypeError):
-                        pass
-
-                cpu_map: dict[str, float] = {}
-                for it in cpu_items:
-                    try:
-                        cpu_map[it["hostid"]] = round(100 - float(it["lastvalue"]), 1)
-                    except (ValueError, TypeError):
-                        pass
+                traffic_map, cpu_map = await asyncio.gather(
+                    fetch_traffic_map(client, all_ids),
+                    fetch_cpu_map(client, all_ids),
+                )
 
                 rows = []
                 for cc, cc_hosts in by_country.items():
@@ -865,12 +800,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                         continue
                     cpus = [cpu_map[h["hostid"]] for h in cc_hosts if h["hostid"] in cpu_map]
                     avg_cpu = round(sum(cpus) / len(cpus), 1) if cpus else 0
-                    providers = set()
-                    for h in cc_hosts:
-                        ip = next((i["ip"] for i in h.get("interfaces", []) if i.get("ip") != "127.0.0.1"), "")
-                        if ip:
-                            from zbbx_mcp.classify import detect_provider
-                            providers.add(detect_provider(ip))
+                    providers = {detect_provider(host_ip(h)) for h in cc_hosts if host_ip(h)}
                     flag = " **!**" if len(cc_hosts) == 1 else ""
                     rows.append({
                         "cc": cc, "servers": len(cc_hosts), "flag": flag,
