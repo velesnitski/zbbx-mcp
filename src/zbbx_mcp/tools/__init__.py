@@ -9,6 +9,7 @@ from zbbx_mcp.tools import (
     dashboards,
     discovery,
     events,
+    executive,
     full_report,
     geo,
     health,
@@ -96,7 +97,7 @@ def register_all(
         configuration, scripts, services, macros, rollback_tools,
         inventory, report, alerts, users, proxies, maps, media, slack,
         infra_report, costs, traffic, dashboard_report, full_report, trends,
-        html_report, geo,
+        html_report, geo, executive,
     ]
     for module in modules:
         module.register(mcp, resolver, skip=skip)
