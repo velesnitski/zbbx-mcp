@@ -1,7 +1,7 @@
 import httpx
 
+from zbbx_mcp.formatters import _ts, format_severity
 from zbbx_mcp.resolver import InstanceResolver
-from zbbx_mcp.formatters import format_severity, _ts
 
 TRIGGER_STATES = {"0": "Normal", "1": "Unknown"}
 TRIGGER_STATUS = {"0": "Enabled", "1": "Disabled"}

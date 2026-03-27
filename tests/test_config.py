@@ -3,7 +3,7 @@ from unittest.mock import patch
 
 import pytest
 
-from zbbx_mcp.config import load_config, load_all_configs, load_global_policy, ZabbixConfig
+from zbbx_mcp.config import load_all_configs, load_config, load_global_policy
 
 
 class TestLoadConfig:
@@ -110,8 +110,5 @@ class TestLoadAllConfigs:
     @patch.dict(os.environ, {"ZABBIX_URL": "https://z.com", "ZABBIX_TOKEN": "t"}, clear=True)
     def test_config_is_frozen(self):
         cfg = load_config()
-        try:
+        with pytest.raises(AttributeError):
             cfg.url = "https://other.com"
-            assert False, "Should have raised"
-        except AttributeError:
-            pass

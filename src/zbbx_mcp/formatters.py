@@ -1,4 +1,8 @@
+"""Output formatters for Zabbix data — severity labels, host/trigger formatting."""
+
 from datetime import datetime, timezone
+
+__all__ = ["format_severity", "format_host_list", "format_host_detail"]
 
 # Zabbix severity levels (shared across triggers, problems, events)
 SEVERITY_NAMES = {

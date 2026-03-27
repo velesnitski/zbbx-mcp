@@ -2,15 +2,15 @@
 
 import asyncio
 import os
-import tempfile
-from datetime import datetime, timezone
+from datetime import datetime
 from statistics import median
 
 import httpx
 
-from zbbx_mcp.resolver import InstanceResolver
+from zbbx_mcp.classify import classify_host as _classify_host
+from zbbx_mcp.classify import detect_provider
 from zbbx_mcp.data import extract_country
-from zbbx_mcp.classify import classify_host as _classify_host, detect_provider
+from zbbx_mcp.resolver import InstanceResolver
 
 
 def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> None:
@@ -209,7 +209,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
 
                 # Generate Excel
                 from openpyxl import Workbook
-                from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+                from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 
                 wb = Workbook()
 
@@ -269,7 +269,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     cell.fill = header_fill
                     cell.alignment = Alignment(horizontal="center")
 
-                for row_idx, (key, s) in enumerate(sorted(prod_summary.items()), 2):
+                for row_idx, (_key, s) in enumerate(sorted(prod_summary.items()), 2):
                     ws2.cell(row=row_idx, column=1, value=s["Product"])
                     ws2.cell(row=row_idx, column=2, value=s["Tier"])
                     ws2.cell(row=row_idx, column=3, value=s["Servers"])
@@ -315,16 +315,16 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 load_vals = [r["Load Avg5"] for r in rows if r["Load Avg5"] is not None]
 
                 summary = [
-                    f"**Server Report Generated**",
-                    f"",
+                    "**Server Report Generated**",
+                    "",
                     f"**File:** `{filepath}`",
                     f"**Servers:** {total} ({on_dash} on dashboards)",
                     f"**Median CPU:** {median(cpu_vals):.1f}%" if cpu_vals else "",
                     f"**Median Load:** {median(load_vals):.2f}" if load_vals else "",
                     f"**Products:** {len(prod_summary)}",
                     f"**Providers:** {len(prov_summary)}",
-                    f"",
-                    f"### Sheets",
+                    "",
+                    "### Sheets",
                     f"1. **Servers** — {total} rows, 13 columns (filterable, color-coded CPU)",
                     f"2. **Products** — {len(prod_summary)} product/tier groups with median metrics",
                     f"3. **Providers** — {len(prov_summary)} providers with server counts",

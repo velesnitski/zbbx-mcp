@@ -1,8 +1,7 @@
 import httpx
 
 from zbbx_mcp.resolver import InstanceResolver
-from zbbx_mcp.rollback import Action, SNAPSHOT_CONFIG
-from zbbx_mcp.formatters import _ts
+from zbbx_mcp.rollback import SNAPSHOT_CONFIG, Action
 from zbbx_mcp.utils import ROLLBACK_STRIP_FIELDS
 
 

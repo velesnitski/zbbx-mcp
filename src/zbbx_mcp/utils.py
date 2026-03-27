@@ -1,6 +1,6 @@
 """Shared utilities for tool modules."""
 
-from typing import Callable
+from collections.abc import Callable
 
 from zbbx_mcp.client import ZabbixClient
 

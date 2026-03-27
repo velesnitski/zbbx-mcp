@@ -1,10 +1,10 @@
 from zbbx_mcp.formatters import (
-    format_severity,
-    format_host_list,
-    format_problem_list,
-    format_host_detail,
-    format_hostgroup_list,
     _ts,
+    format_host_detail,
+    format_host_list,
+    format_hostgroup_list,
+    format_problem_list,
+    format_severity,
 )
 
 

@@ -2,8 +2,8 @@ import asyncio
 
 import httpx
 
+from zbbx_mcp.formatters import _ts, format_problem_list, format_severity
 from zbbx_mcp.resolver import InstanceResolver
-from zbbx_mcp.formatters import format_problem_list, format_severity, _ts
 
 
 def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> None:

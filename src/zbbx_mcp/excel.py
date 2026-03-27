@@ -2,11 +2,15 @@
 
 from __future__ import annotations
 
-from openpyxl import Workbook
-from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 from openpyxl.worksheet.worksheet import Worksheet
 
+__all__ = [
+    "BW_MAX", "BW_RED", "BW_ORANGE", "BW_GREEN",
+    "classify_bandwidth", "write_headers", "write_data_rows",
+    "finalize_sheet", "auto_width",
+]
 
 
 HEADER_FONT = Font(bold=True, color="FFFFFF", size=11)

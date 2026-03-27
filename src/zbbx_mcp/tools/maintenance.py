@@ -1,9 +1,8 @@
-import asyncio
 
 import httpx
 
-from zbbx_mcp.resolver import InstanceResolver
 from zbbx_mcp.formatters import _ts
+from zbbx_mcp.resolver import InstanceResolver
 
 MAINTENANCE_TYPES = {"0": "With data collection", "1": "Without data collection"}
 

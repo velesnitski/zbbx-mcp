@@ -1,8 +1,8 @@
-import pytest
-from unittest.mock import MagicMock
 
-from zbbx_mcp.config import ZabbixConfig
+import pytest
+
 from zbbx_mcp.client import ZabbixClient
+from zbbx_mcp.config import ZabbixConfig
 from zbbx_mcp.resolver import InstanceResolver
 
 

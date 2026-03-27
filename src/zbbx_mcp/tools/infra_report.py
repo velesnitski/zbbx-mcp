@@ -8,13 +8,14 @@ Generates a multi-sheet Excel report matching the "Infrastructure Costs" format:
 
 import asyncio
 import os
-from datetime import datetime, timezone
+from datetime import datetime
 from statistics import median
 
 import httpx
 
+from zbbx_mcp.classify import classify_host as _classify_host
+from zbbx_mcp.classify import detect_provider
 from zbbx_mcp.resolver import InstanceResolver
-from zbbx_mcp.classify import classify_host as _classify_host, detect_provider
 
 
 def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> None:
@@ -252,7 +253,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
 
                 # Generate Excel
                 from openpyxl import Workbook
-                from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+                from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 
                 wb = Workbook()
                 header_font = Font(bold=True, color="FFFFFF", size=11)
@@ -375,8 +376,8 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 costed_servers = sum(1 for r in rows if r["Cost/Month ($)"])
 
                 parts = [
-                    f"**Infrastructure Report Generated**",
-                    f"",
+                    "**Infrastructure Report Generated**",
+                    "",
                     f"**File:** `{filepath}`",
                     f"**Total servers:** {len(rows)} ({costed_servers} with cost data)",
                     f"**Underloaded (CPU <{100-cpu_idle_threshold:.0f}%):** {len(unused_rows)}",
@@ -387,8 +388,8 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 if total_savings:
                     parts.append(f"**Potential savings:** ${total_savings:,.2f}/month from underloaded servers")
                 parts.extend([
-                    f"",
-                    f"### Sheets",
+                    "",
+                    "### Sheets",
                     f"1. **Apps & Infra** — {len(rows)} servers × {len(h1)} columns",
                     f"2. **Unused & Underloaded** — {len(unused_rows)} decommission candidates",
                     f"3. **Provider Summary** — {len(prov_data)} providers with costs and savings",
@@ -396,13 +397,13 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
 
                 if costed_servers == 0:
                     parts.extend([
-                        f"",
-                        f"*No cost data found. Set `{{$COST_MONTH}}` macro on hosts "
-                        f"or use `import_server_costs` to bulk-import from a spreadsheet.*",
+                        "",
+                        "*No cost data found. Set `{$COST_MONTH}` macro on hosts "
+                        "or use `import_server_costs` to bulk-import from a spreadsheet.*",
                     ])
 
                 if unused_rows:
-                    parts.append(f"\n### Top Decommission Candidates")
+                    parts.append("\n### Top Decommission Candidates")
                     for r in unused_rows[:5]:
                         cost_str = f" — ${r['Cost/Month ($)']}/mo" if r.get("Cost/Month ($)") else ""
                         parts.append(

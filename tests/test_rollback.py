@@ -1,4 +1,4 @@
-from zbbx_mcp.rollback import RollbackLog, RollbackEntry, Action, SNAPSHOT_CONFIG
+from zbbx_mcp.rollback import SNAPSHOT_CONFIG, Action, RollbackLog
 
 
 class TestRollbackLog:

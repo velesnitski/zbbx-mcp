@@ -1,8 +1,7 @@
 import httpx
 
-from zbbx_mcp.resolver import InstanceResolver
 from zbbx_mcp.formatters import _ts
-
+from zbbx_mcp.resolver import InstanceResolver
 
 ITEM_TYPES = {
     "0": "Zabbix agent",
