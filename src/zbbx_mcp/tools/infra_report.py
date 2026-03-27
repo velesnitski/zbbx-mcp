@@ -28,20 +28,12 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
             output_dir: str = "",
             instance: str = "",
         ) -> str:
-            """Generate an infrastructure optimization report (Excel).
-
-            Analyzes all servers from Zabbix: classifies by product/provider,
-            detects underloaded/idle servers, and builds a cost optimization report.
-
-            Sheets:
-            1. Apps & Infra — full server inventory with specs and metrics
-            2. Unused/Underloaded — decommission candidates (CPU idle > threshold)
-            3. Provider Summary — aggregated by hosting provider
+            """Infrastructure optimization report (Excel) — inventory, idle servers, provider summary.
 
             Args:
-                cpu_idle_threshold: CPU idle % above which a server is flagged as underloaded (default: 90%, meaning <10% CPU used)
-                output_dir: Directory for the Excel file (default: ~/Downloads)
-                instance: Zabbix instance name (optional, for multi-instance setups)
+                cpu_idle_threshold: CPU idle % to flag as underloaded (default: 90%)
+                output_dir: Directory for Excel file (default: ~/Downloads)
+                instance: Zabbix instance name (optional)
             """
             try:
                 client = resolver.resolve(instance)

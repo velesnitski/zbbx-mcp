@@ -20,15 +20,9 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
         ) -> str:
             """Bulk-set monthly costs on servers using {$COST_MONTH} host macros.
 
-            Pass a JSON object mapping hostname patterns to cost in USD.
-            Patterns support prefix matching with '*' (e.g., 'srv-nl-*').
-
-            Example:
-                {"srv-nl-*": 20, "srv-us-*": 95, "srv-de-*": 15, "srv-01": 45}
-
             Args:
-                costs_json: JSON string mapping hostname patterns to monthly cost in USD
-                instance: Zabbix instance name (optional, for multi-instance setups)
+                costs_json: JSON mapping hostname patterns to USD cost (e.g. {"srv-nl-*": 20})
+                instance: Zabbix instance (optional)
             """
             try:
                 cost_rules = json.loads(costs_json)

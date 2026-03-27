@@ -26,19 +26,11 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
         ) -> str:
             """Generate a full server report with Excel export.
 
-            Queries all dashboards, resolves hosts from graph widgets,
-            fetches CPU/load/memory metrics, classifies by product and provider.
-
-            The Excel file contains:
-            - Sheet 1: Full server list with all columns
-            - Sheet 2: Product summary (aggregated)
-            - Sheet 3: Provider summary (aggregated)
-
             Args:
-                product: Filter by product name (optional)
-                country: Filter by country code in hostname (optional)
-                output_dir: Directory for the Excel file (default: ~/Downloads)
-                instance: Zabbix instance name (optional, for multi-instance setups)
+                product: Filter by product (optional)
+                country: Country code filter (optional)
+                output_dir: Output directory (default: ~/Downloads)
+                instance: Zabbix instance (optional)
             """
             try:
                 client = resolver.resolve(instance)

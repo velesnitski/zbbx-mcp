@@ -28,20 +28,14 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
         ) -> str:
             """Detect servers with abnormally low traffic compared to their peer group.
 
-            Uses three signals to filter noise:
-            1. Peer comparison — flags servers below X% of group median
-            2. Connection correlation — if connections > 0 but traffic is low,
-               the tunnel is likely broken (not just idle)
-            3. Statistical outlier — flags servers > 2 standard deviations below mean
-
             Args:
-                group: Analyze a specific Zabbix host group (optional, default: all groups)
-                product: Filter by product name (optional)
-                country: Filter by country code in hostname (optional)
-                region: Filter by region: LATAM, APAC, EMEA, NA, CIS, ALL (optional)
-                threshold_pct: Flag servers below this % of group median (default: 20%)
-                min_peers: Minimum peers needed for comparison (default: 3)
-                instance: Zabbix instance name (optional)
+                group: Zabbix host group (optional)
+                product: Filter by product (optional)
+                country: Country code filter (optional)
+                region: LATAM, APAC, EMEA, NA, CIS, ALL (optional)
+                threshold_pct: % of group median to flag (default: 20)
+                min_peers: Min peers for comparison (default: 3)
+                instance: Zabbix instance (optional)
             """
             try:
                 client = resolver.resolve(instance)
@@ -389,20 +383,17 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
             max_results: int = 50,
             instance: str = "",
         ) -> str:
-            """Detect servers where traffic dropped significantly compared to their baseline.
-
-            Compares current traffic to the server's own 7-day average from Zabbix trends.
-            A drop from 500 Mbps to 50 Mbps = 90% drop = likely regional outageing.
+            """Detect servers where traffic dropped significantly vs their baseline.
 
             Args:
-                group: Filter by Zabbix host group (optional)
-                product: Filter by product name (optional)
-                country: Filter by country code in hostname (optional)
-                region: Filter by region: LATAM, APAC, EMEA, NA, CIS, ALL (optional)
-                drop_pct: Minimum drop percentage to flag (default: 50% = traffic halved)
-                baseline_days: Days of trend data for baseline (default: 7)
-                max_results: Maximum results (default: 50)
-                instance: Zabbix instance name (optional, for multi-instance setups)
+                group: Zabbix host group (optional)
+                product: Filter by product (optional)
+                country: Country code filter (optional)
+                region: LATAM, APAC, EMEA, NA, CIS, ALL (optional)
+                drop_pct: Min drop % to flag (default: 50)
+                baseline_days: Days for baseline (default: 7)
+                max_results: Max results (default: 50)
+                instance: Zabbix instance (optional)
             """
             try:
                 client = resolver.resolve(instance)
