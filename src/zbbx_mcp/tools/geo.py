@@ -11,6 +11,7 @@ import httpx
 from zbbx_mcp.classify import classify_host as _classify_host
 from zbbx_mcp.data import (
     build_value_map,
+    countries_for_region,
     extract_country,
     fetch_trends_batch,
 )
@@ -28,6 +29,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
             drop_threshold: float = 50.0,
             country_threshold: float = 50.0,
             min_servers: int = 2,
+            product: str = "",
             instance: str = "",
         ) -> str:
             """Detect country-level VPN blocks by analyzing traffic drops across all servers in each country.
@@ -41,6 +43,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 drop_threshold: % traffic drop per server to flag (default: 50%)
                 country_threshold: % of servers in country affected (default: 50%)
                 min_servers: Minimum servers in country to analyze (default: 2)
+                product: Filter by product name (optional, e.g. to check only Free or Premium)
                 instance: Zabbix instance name (optional)
             """
             try:
@@ -53,9 +56,13 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     "filter": {"status": "0"},
                 })
 
-                # Group by country
+                # Filter by product and group by country
                 countries: dict[str, list[dict]] = {}
                 for h in hosts:
+                    if product:
+                        prod, _ = _classify_host(h.get("groups", []))
+                        if not prod or product.lower() not in prod.lower():
+                            continue
                     ctry = extract_country(h["host"])
                     if ctry:
                         countries.setdefault(ctry, []).append(h)
@@ -170,6 +177,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
             aggregation: str = "daily",
             min_servers: int = 2,
             min_traffic: float = 0.1,
+            region: str = "",
             instance: str = "",
         ) -> str:
             """Per-country traffic trends over time — detect usage growth or decline per region.
@@ -179,6 +187,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 aggregation: 'summary' or 'daily' (default: daily)
                 min_servers: Minimum servers per country (default: 2)
                 min_traffic: Minimum avg Gbps to include country (default: 0.1)
+                region: Filter by region: LATAM, APAC, EMEA, NA, CIS, ALL (optional)
                 instance: Zabbix instance name (optional)
             """
             try:
@@ -197,6 +206,11 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                         countries.setdefault(ctry, []).append(h["hostid"])
                         host_map[h["hostid"]] = h["host"]
 
+                if region:
+                    region_codes = countries_for_region(region)
+                    if not region_codes:
+                        return f"Unknown region '{region}'. Use: LATAM, APAC, EMEA, NA, CIS, ALL."
+                    countries = {c: ids for c, ids in countries.items() if c in region_codes}
                 countries = {c: ids for c, ids in countries.items() if len(ids) >= min_servers}
                 if not countries:
                     return "No countries with enough servers."
@@ -657,5 +671,318 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     )
 
                 return "\n".join(parts)
+            except (httpx.HTTPError, ValueError) as e:
+                return f"Error: {e}"
+
+    
+    if "get_expansion_report" not in skip:
+
+        @mcp.tool()
+        async def get_expansion_report(
+            region: str = "ALL",
+            min_traffic_mbps: float = 0,
+            max_results: int = 40,
+            instance: str = "",
+        ) -> str:
+            """Coverage gap analysis — countries with/without servers, capacity headroom.
+
+            Shows server density (servers/Gbps) per country, flags overloaded
+            countries needing more servers, identifies expansion opportunities.
+
+            Args:
+                region: LATAM, APAC, EMEA, NA, CIS, ALL (default: ALL)
+                min_traffic_mbps: Minimum traffic to include country (default: 0)
+                max_results: Maximum countries to show (default: 40)
+                instance: Zabbix instance name (optional)
+            """
+            try:
+                client = resolver.resolve(instance)
+                from zbbx_mcp.data import TRAFFIC_IN_KEYS
+
+                hosts = await client.call("host.get", {
+                    "output": ["hostid", "host"],
+                    "selectGroups": ["name"],
+                    "selectInterfaces": ["ip"],
+                    "filter": {"status": "0"},
+                })
+
+                region_codes = countries_for_region(region)
+                if not region_codes:
+                    return f"Unknown region '{region}'. Use: LATAM, APAC, EMEA, NA, CIS, ALL."
+
+                by_country: dict[str, list[dict]] = {}
+                for h in hosts:
+                    cc = extract_country(h["host"])
+                    if cc and cc in region_codes:
+                        by_country.setdefault(cc, []).append(h)
+
+                all_ids = [h["hostid"] for hs in by_country.values() for h in hs]
+                traffic_map: dict[str, float] = {}
+                if all_ids:
+                    items = await client.call("item.get", {
+                        "hostids": all_ids,
+                        "output": ["hostid", "lastvalue"],
+                        "filter": {"key_": TRAFFIC_IN_KEYS},
+                    })
+                    for it in items:
+                        try:
+                            mbps = float(it.get("lastvalue", 0)) * 8 / 1_000_000
+                            hid = it["hostid"]
+                            if hid not in traffic_map or mbps > traffic_map[hid]:
+                                traffic_map[hid] = mbps
+                        except (ValueError, TypeError):
+                            pass
+
+                rows = []
+                for cc, cc_hosts in by_country.items():
+                    total_mbps = sum(traffic_map.get(h["hostid"], 0) for h in cc_hosts)
+                    if total_mbps < min_traffic_mbps and min_traffic_mbps > 0:
+                        continue
+                    density = total_mbps / len(cc_hosts) if cc_hosts else 0
+                    providers = set()
+                    for h in cc_hosts:
+                        ip = next((i["ip"] for i in h.get("interfaces", []) if i.get("ip") != "127.0.0.1"), "")
+                        if ip:
+                            from zbbx_mcp.classify import detect_provider
+                            providers.add(detect_provider(ip))
+                    rows.append({
+                        "cc": cc, "servers": len(cc_hosts),
+                        "traffic_gbps": round(total_mbps / 1000, 2),
+                        "density_mbps": round(density, 1),
+                        "providers": len(providers),
+                        "status": "OVERLOADED" if density > 500 else "OK" if density > 50 else "LOW",
+                    })
+
+                missing = sorted(region_codes - set(by_country.keys()))
+                rows.sort(key=lambda x: -x["traffic_gbps"])
+                shown = rows[:max_results]
+
+                lines = [f"**Expansion Report — {region}** ({len(rows)} countries with servers)\n"]
+                lines.append("| Country | Servers | Traffic Gbps | Mbps/srv | Providers | Status |")
+                lines.append("|---------|---------|-------------|----------|-----------|--------|")
+                for s in shown:
+                    lines.append(
+                        f"| {s['cc']} | {s['servers']} | {s['traffic_gbps']} | "
+                        f"{s['density_mbps']} | {s['providers']} | {s['status']} |"
+                    )
+
+                if len(rows) > max_results:
+                    lines.append(f"\n*{len(rows) - max_results} more countries omitted*")
+
+                overloaded = [s for s in rows if s["status"] == "OVERLOADED"]
+                if overloaded:
+                    lines.append(f"\n**Needs more servers:** {', '.join(s['cc'] for s in overloaded)}")
+                if missing:
+                    lines.append(f"\n**No servers in region:** {', '.join(missing[:20])}")
+
+                return "\n".join(lines)
+            except (httpx.HTTPError, ValueError) as e:
+                return f"Error: {e}"
+
+    
+    if "get_regional_density_map" not in skip:
+
+        @mcp.tool()
+        async def get_regional_density_map(
+            region: str = "ALL",
+            country: str = "",
+            min_traffic_mbps: float = 0,
+            max_results: int = 40,
+            instance: str = "",
+        ) -> str:
+            """Server density by country — count, traffic, CPU, provider mix.
+
+            Highlights countries with only 1 server (no redundancy).
+
+            Args:
+                region: LATAM, APAC, EMEA, NA, CIS, ALL (default: ALL)
+                country: Filter by specific country code (optional)
+                min_traffic_mbps: Minimum total traffic to include (default: 0)
+                max_results: Maximum rows (default: 40)
+                instance: Zabbix instance name (optional)
+            """
+            try:
+                client = resolver.resolve(instance)
+                from zbbx_mcp.data import TRAFFIC_IN_KEYS
+
+                hosts = await client.call("host.get", {
+                    "output": ["hostid", "host"],
+                    "selectGroups": ["name"],
+                    "selectInterfaces": ["ip"],
+                    "filter": {"status": "0"},
+                })
+
+                region_codes = countries_for_region(region) if region else set()
+
+                by_country: dict[str, list[dict]] = {}
+                for h in hosts:
+                    cc = extract_country(h["host"])
+                    if not cc:
+                        continue
+                    if country and cc.lower() != country.lower():
+                        continue
+                    if region_codes and cc not in region_codes:
+                        continue
+                    by_country.setdefault(cc, []).append(h)
+
+                if not by_country:
+                    return "No servers match the filters."
+
+                all_ids = [h["hostid"] for hs in by_country.values() for h in hs]
+                traffic_task = client.call("item.get", {
+                    "hostids": all_ids,
+                    "output": ["hostid", "lastvalue"],
+                    "filter": {"key_": TRAFFIC_IN_KEYS},
+                })
+                cpu_task = client.call("item.get", {
+                    "hostids": all_ids,
+                    "output": ["hostid", "lastvalue"],
+                    "filter": {"key_": "system.cpu.util[,idle]"},
+                })
+                traffic_items, cpu_items = await asyncio.gather(traffic_task, cpu_task)
+
+                traffic_map: dict[str, float] = {}
+                for it in traffic_items:
+                    try:
+                        mbps = float(it.get("lastvalue", 0)) * 8 / 1_000_000
+                        hid = it["hostid"]
+                        if hid not in traffic_map or mbps > traffic_map[hid]:
+                            traffic_map[hid] = mbps
+                    except (ValueError, TypeError):
+                        pass
+
+                cpu_map: dict[str, float] = {}
+                for it in cpu_items:
+                    try:
+                        cpu_map[it["hostid"]] = round(100 - float(it["lastvalue"]), 1)
+                    except (ValueError, TypeError):
+                        pass
+
+                rows = []
+                for cc, cc_hosts in by_country.items():
+                    total_mbps = sum(traffic_map.get(h["hostid"], 0) for h in cc_hosts)
+                    if total_mbps < min_traffic_mbps and min_traffic_mbps > 0:
+                        continue
+                    cpus = [cpu_map[h["hostid"]] for h in cc_hosts if h["hostid"] in cpu_map]
+                    avg_cpu = round(sum(cpus) / len(cpus), 1) if cpus else 0
+                    providers = set()
+                    for h in cc_hosts:
+                        ip = next((i["ip"] for i in h.get("interfaces", []) if i.get("ip") != "127.0.0.1"), "")
+                        if ip:
+                            from zbbx_mcp.classify import detect_provider
+                            providers.add(detect_provider(ip))
+                    flag = " **!**" if len(cc_hosts) == 1 else ""
+                    rows.append({
+                        "cc": cc, "servers": len(cc_hosts), "flag": flag,
+                        "traffic_gbps": round(total_mbps / 1000, 2),
+                        "avg_cpu": avg_cpu,
+                        "providers": ", ".join(sorted(providers - {""})) or "?",
+                    })
+
+                rows.sort(key=lambda x: -x["traffic_gbps"])
+                shown = rows[:max_results]
+
+                lines = [f"**Density Map** ({len(rows)} countries)\n"]
+                lines.append("| Country | Servers | Traffic Gbps | Avg CPU% | Providers |")
+                lines.append("|---------|---------|-------------|----------|-----------|")
+                for r in shown:
+                    lines.append(
+                        f"| {r['cc']}{r['flag']} | {r['servers']} | {r['traffic_gbps']} | "
+                        f"{r['avg_cpu']}% | {r['providers']} |"
+                    )
+
+                no_redundancy = [r for r in rows if r["servers"] == 1]
+                if no_redundancy:
+                    lines.append(f"\n**No redundancy (1 server):** {', '.join(r['cc'] for r in no_redundancy)}")
+                if len(rows) > max_results:
+                    lines.append(f"\n*{len(rows) - max_results} more countries omitted*")
+
+                return "\n".join(lines)
+            except (httpx.HTTPError, ValueError) as e:
+                return f"Error: {e}"
+
+    
+    if "get_latency_estimate" not in skip:
+
+        @mcp.tool()
+        async def get_latency_estimate(
+            client_country: str = "",
+            product: str = "",
+            max_results: int = 10,
+            instance: str = "",
+        ) -> str:
+            """Estimate nearest server for a given client country by geographic distance.
+
+            Uses haversine between capital coordinates as a rough latency proxy.
+            Useful for expansion planning — "where should we add next server?"
+
+            Args:
+                client_country: 2-letter country code (required)
+                product: Filter by product name (optional)
+                max_results: Maximum results (default: 10)
+                instance: Zabbix instance name (optional)
+            """
+            import math
+
+            from zbbx_mcp.data import CAPITAL_COORDS
+
+            def _haversine(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+                R = 6371
+                dlat, dlon = math.radians(lat2 - lat1), math.radians(lon2 - lon1)
+                a = math.sin(dlat/2)**2 + math.cos(math.radians(lat1)) * math.cos(math.radians(lat2)) * math.sin(dlon/2)**2
+                return R * 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+
+            if not client_country:
+                return "client_country is required (2-letter code, e.g. 'CO')."
+
+            cc = client_country.upper()
+            if cc not in CAPITAL_COORDS:
+                return f"Unknown country '{cc}'. No coordinates available."
+
+            try:
+                client_inst = resolver.resolve(instance)
+                hosts = await client_inst.call("host.get", {
+                    "output": ["hostid", "host"],
+                    "selectGroups": ["name"],
+                    "filter": {"status": "0"},
+                })
+
+                server_countries: dict[str, int] = {}
+                for h in hosts:
+                    if product:
+                        prod, _ = _classify_host(h.get("groups", []))
+                        if not prod or product.lower() not in prod.lower():
+                            continue
+                    srv_cc = extract_country(h["host"])
+                    if srv_cc:
+                        server_countries[srv_cc] = server_countries.get(srv_cc, 0) + 1
+
+                if not server_countries:
+                    return "No servers found."
+
+                client_lat, client_lon = CAPITAL_COORDS[cc]
+                distances = []
+                for srv_cc, count in server_countries.items():
+                    if srv_cc in CAPITAL_COORDS:
+                        srv_lat, srv_lon = CAPITAL_COORDS[srv_cc]
+                        dist = _haversine(client_lat, client_lon, srv_lat, srv_lon)
+                        distances.append({"cc": srv_cc, "servers": count, "km": round(dist)})
+
+                distances.sort(key=lambda x: x["km"])
+                shown = distances[:max_results]
+
+                lines = [f"**Nearest servers for clients in {cc}**\n"]
+                lines.append("| Server Country | Servers | Distance km |")
+                lines.append("|---------------|---------|------------|")
+                for d in shown:
+                    marker = " *" if d["cc"] == cc else ""
+                    lines.append(f"| {d['cc']}{marker} | {d['servers']} | {d['km']:,} |")
+
+                if cc not in server_countries:
+                    nearest = distances[0] if distances else None
+                    if nearest:
+                        lines.append(f"\n**No servers in {cc}.** Nearest: {nearest['cc']} ({nearest['km']:,} km)")
+
+                return "\n".join(lines)
             except (httpx.HTTPError, ValueError) as e:
                 return f"Error: {e}"

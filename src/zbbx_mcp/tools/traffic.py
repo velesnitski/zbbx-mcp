@@ -8,7 +8,7 @@ import httpx
 
 from zbbx_mcp.classify import classify_host as _classify_host
 from zbbx_mcp.classify import detect_provider
-from zbbx_mcp.data import TRAFFIC_IN_KEYS, extract_country
+from zbbx_mcp.data import TRAFFIC_IN_KEYS, countries_for_region, extract_country
 from zbbx_mcp.resolver import InstanceResolver
 
 
@@ -21,6 +21,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
             group: str = "",
             product: str = "",
             country: str = "",
+            region: str = "",
             threshold_pct: float = 20.0,
             min_peers: int = 3,
             instance: str = "",
@@ -36,10 +37,11 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
             Args:
                 group: Analyze a specific Zabbix host group (optional, default: all groups)
                 product: Filter by product name (optional)
-                country: Filter by country code in hostname (e.g., 'in', 'de', 'nl') (optional)
+                country: Filter by country code in hostname (optional)
+                region: Filter by region: LATAM, APAC, EMEA, NA, CIS, ALL (optional)
                 threshold_pct: Flag servers below this % of group median (default: 20%)
                 min_peers: Minimum peers needed for comparison (default: 3)
-                instance: Zabbix instance name (optional, for multi-instance setups)
+                instance: Zabbix instance name (optional)
             """
             try:
                 client = resolver.resolve(instance)
@@ -108,6 +110,10 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                         continue
                     if country and extract_country(h.get("host", "")).lower() != country.lower():
                         continue
+                    if region:
+                        rc = countries_for_region(region)
+                        if rc and extract_country(h.get("host", "")).upper() not in rc:
+                            continue
                     for g in h.get("groups", []):
                         gname = g["name"]
                         if group and group.lower() != gname.lower():
@@ -377,6 +383,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
             group: str = "",
             product: str = "",
             country: str = "",
+            region: str = "",
             drop_pct: float = 50.0,
             baseline_days: int = 7,
             max_results: int = 50,
@@ -387,13 +394,11 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
             Compares current traffic to the server's own 7-day average from Zabbix trends.
             A drop from 500 Mbps to 50 Mbps = 90% drop = likely ISP blocking.
 
-            This is NOT noise because it compares each server to its OWN history,
-            not to a fixed threshold or peer group.
-
             Args:
                 group: Filter by Zabbix host group (optional)
                 product: Filter by product name (optional)
-                country: Filter by country code in hostname (e.g., 'in', 'de', 'nl') (optional)
+                country: Filter by country code in hostname (optional)
+                region: Filter by region: LATAM, APAC, EMEA, NA, CIS, ALL (optional)
                 drop_pct: Minimum drop percentage to flag (default: 50% = traffic halved)
                 baseline_days: Days of trend data for baseline (default: 7)
                 max_results: Maximum results (default: 50)
@@ -421,6 +426,10 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                         continue
                     if country and extract_country(h.get("host", "")).lower() != country.lower():
                         continue
+                    if region:
+                        rc = countries_for_region(region)
+                        if rc and extract_country(h.get("host", "")).upper() not in rc:
+                            continue
                     filtered_ids.append(h["hostid"])
 
                 if not filtered_ids:

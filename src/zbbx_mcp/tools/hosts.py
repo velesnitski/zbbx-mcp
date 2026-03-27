@@ -412,8 +412,6 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                         "hostids": hids,
                         "output": ["hostid", "lastvalue", "key_"],
                         "filter": {"key_": TRAFFIC_IN_KEYS},
-                        "sortfield": "lastvalue",
-                        "sortorder": "DESC",
                     })
                     for it in items:
                         hid = it["hostid"]

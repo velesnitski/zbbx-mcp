@@ -20,8 +20,9 @@ from zbbx_mcp.excel import BW_MAX, classify_bandwidth
 
 __all__ = [
     "ServerRow", "extract_country", "fetch_all_data", "fetch_trends_batch",
-    "build_value_map", "build_max_map",
+    "build_value_map", "build_max_map", "countries_for_region",
     "TRAFFIC_IN_KEYS", "TRAFFIC_OUT_KEYS", "METRIC_KEYS", "GB_BYTES",
+    "REGION_MAP", "CAPITAL_COORDS",
 ]
 
 _COUNTRY_RE = re.compile(
@@ -30,6 +31,45 @@ _COUNTRY_RE = re.compile(
     re.IGNORECASE,
 )
 GB_BYTES = 1_073_741_824  # 1 GB in bytes
+
+# Region → country code mapping for geo filtering
+REGION_MAP: dict[str, list[str]] = {
+    "LATAM": ["AR", "BR", "MX", "CL", "CO", "PE", "VE", "EC", "UY", "PY", "BO", "CR", "PA"],
+    "APAC": ["JP", "IN", "ID", "TH", "KZ", "AZ", "SG", "KR", "AU", "NZ", "PH", "VN", "MY", "TW", "HK"],
+    "EMEA": ["NL", "DE", "FR", "GB", "ES", "IT", "SE", "FI", "NO", "DK", "PL", "CZ", "AT", "CH", "BE",
+             "PT", "IE", "RO", "BG", "HR", "UA", "TR", "IL", "AE", "ZA", "NG", "EG", "KE"],
+    "NA": ["US", "CA"],
+    "CIS": ["RU", "BY", "KZ", "UZ", "GE", "AM", "MD"],
+}
+
+# Capital coordinates for distance estimation (lat, lon)
+CAPITAL_COORDS: dict[str, tuple[float, float]] = {
+    "AR": (-34.6, -58.4), "BR": (-15.8, -47.9), "MX": (19.4, -99.1),
+    "CL": (-33.4, -70.6), "CO": (4.7, -74.1), "PE": (-12.0, -77.0),
+    "VE": (10.5, -66.9), "EC": (-0.2, -78.5), "UY": (-34.9, -56.2),
+    "US": (38.9, -77.0), "CA": (45.4, -75.7),
+    "NL": (52.4, 4.9), "DE": (52.5, 13.4), "FR": (48.9, 2.3),
+    "GB": (51.5, -0.1), "ES": (40.4, -3.7), "IT": (41.9, 12.5),
+    "SE": (59.3, 18.1), "FI": (60.2, 24.9), "NO": (59.9, 10.8),
+    "PL": (52.2, 21.0), "CZ": (50.1, 14.4), "AT": (48.2, 16.4),
+    "CH": (46.9, 7.4), "BE": (50.8, 4.4), "PT": (38.7, -9.1),
+    "IE": (53.3, -6.3), "RO": (44.4, 26.1), "BG": (42.7, 23.3),
+    "HR": (45.8, 16.0), "UA": (50.4, 30.5), "TR": (39.9, 32.9),
+    "IL": (31.8, 34.8), "AE": (24.5, 54.7), "ZA": (-33.9, 18.4),
+    "JP": (35.7, 139.7), "IN": (28.6, 77.2), "ID": (-6.2, 106.8),
+    "TH": (13.8, 100.5), "KZ": (51.2, 71.4), "AZ": (40.4, 49.9),
+    "SG": (1.3, 103.8), "KR": (37.6, 127.0), "AU": (-33.9, 151.2),
+    "RU": (55.8, 37.6), "BY": (53.9, 27.6),
+    "DK": (55.7, 12.6), "HK": (22.3, 114.2), "TW": (25.0, 121.5),
+}
+
+
+def countries_for_region(region: str) -> set[str]:
+    """Return set of country codes for a region name. ALL returns everything."""
+    r = region.upper()
+    if r == "ALL":
+        return {cc for codes in REGION_MAP.values() for cc in codes}
+    return set(REGION_MAP.get(r, []))
 
 # All known physical network interface keys (discovered from infrastructure)
 TRAFFIC_IN_KEYS = [
