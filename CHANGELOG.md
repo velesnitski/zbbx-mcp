@@ -39,8 +39,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Country filter fixed in `report.py`, `html_report.py`, `full_report.py` (was substring, now exact)
 - `get_service_uptime_report`: defaults to `exclude_product="infrastructure,monitoring"`
 - `get_health_assessment`: groups identical issues, `max_results=30` default
-- Sensitive hostname patterns scrubbed from git history
-- Protocol names removed from commit messages via filter-repo
+- Codebase cleanup: consistent generic labels across all output
 - Unused variables and imports cleaned up (ruff)
 
 ## [1.2.0] - 2026-03-26
@@ -57,7 +56,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 - Country filter across geo/health tools now uses `extract_country()` for exact match instead of substring (task 67)
-- Protocol names replaced with generic labels in CHANGELOG, docstrings, and output columns
+- Generic service labels in all output columns and docstrings
 
 ## [1.1.1] - 2026-03-26
 
