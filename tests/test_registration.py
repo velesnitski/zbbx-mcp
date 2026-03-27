@@ -142,6 +142,12 @@ EXPECTED_TOOLS = {
     "get_service_uptime_report",
     "get_service_health_matrix",
     "get_traffic_drop_timeline",
+    # executive.py
+    "get_executive_dashboard",
+    "get_month_over_month",
+    "get_fleet_risk_score",
+    "get_sla_dashboard",
+    "get_report_snapshot",
 }
 
 
