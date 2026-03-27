@@ -282,8 +282,8 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     cpu_cls = _cpu_class(cpu_now)
                     cpu_str = f'{cpu_now:.1f}%' if cpu_now is not None else "N/A"
                     traffic_str = f'{traffic_now:.0f}' if traffic_now is not None else "N/A"
-                    service1 = r.get("service Primary", "")
-                    service_html = _badge("DOWN", "red") if service1 == "DOWN" else (_badge("OK", "green") if service1 == "OK" else "")
+                    service_status = r.get("service Primary", "")
+                    service_html = _badge("DOWN", "red") if service_status == "DOWN" else (_badge("OK", "green") if service_status == "OK" else "")
                     hostid = r.get("Host ID", "")
                     ip = r.get("IP", "")
                     dashid = r.get("Dashboard ID", "")
