@@ -1,7 +1,7 @@
 import httpx
 
-from zbbx_mcp.resolver import InstanceResolver
 from zbbx_mcp.formatters import _ts
+from zbbx_mcp.resolver import InstanceResolver
 
 LLD_STATUS = {"0": "Enabled", "1": "Disabled"}
 LLD_STATE = {"0": "Normal", "1": "Not supported"}

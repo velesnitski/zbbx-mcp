@@ -105,8 +105,8 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                             break
 
                 parts = [
-                    f"**Cost import complete**",
-                    f"",
+                    "**Cost import complete**",
+                    "",
                     f"Matched: {matched} servers",
                     f"Created: {created} new macros",
                     f"Updated: {updated} existing macros",
@@ -208,7 +208,8 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 instance: Zabbix instance name (optional, for multi-instance setups)
             """
             try:
-                from zbbx_mcp.classify import classify_host as _classify_host, detect_provider
+                from zbbx_mcp.classify import classify_host as _classify_host
+                from zbbx_mcp.classify import detect_provider
 
                 client = resolver.resolve(instance)
 
@@ -261,20 +262,20 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 parts = [
                     f"**Cost Summary: ${total:,.2f}/month (${total * 12:,.2f}/year)**",
                     f"Servers with cost: {costed} | Without: {uncosted}",
-                    f"",
-                    f"## By Product",
-                    f"| Product / Tier | Servers | Cost/Month | Cost/Year |",
-                    f"|---|---|---|---|",
+                    "",
+                    "## By Product",
+                    "| Product / Tier | Servers | Cost/Month | Cost/Year |",
+                    "|---|---|---|---|",
                 ]
                 for key in sorted(prod_costs, key=lambda x: -prod_costs[x]["total"]):
                     p = prod_costs[key]
                     parts.append(f"| {key} | {p['count']} | ${p['total']:,.2f} | ${p['total']*12:,.2f} |")
 
                 parts.extend([
-                    f"",
-                    f"## By Provider",
-                    f"| Provider | Servers | Cost/Month | Cost/Year |",
-                    f"|---|---|---|---|",
+                    "",
+                    "## By Provider",
+                    "| Provider | Servers | Cost/Month | Cost/Year |",
+                    "|---|---|---|---|",
                 ])
                 for prov in sorted(prov_costs, key=lambda x: -prov_costs[x]["total"]):
                     p = prov_costs[prov]

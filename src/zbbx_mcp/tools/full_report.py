@@ -9,15 +9,24 @@ from statistics import median
 import httpx
 from openpyxl import Workbook
 
-from zbbx_mcp.resolver import InstanceResolver
-from zbbx_mcp.data import fetch_all_data, extract_country
+from zbbx_mcp.data import extract_country, fetch_all_data
 from zbbx_mcp.excel import (
-    BW_RED, BW_ORANGE, BW_GREEN,
-    RED_FILL, BOLD_FONT, GREEN_FILL, ORANGE_FILL, LIGHT_GREEN_FILL,
-    write_headers, write_data_rows, finalize_sheet, auto_width,
-    bandwidth_fill, cpu_fill,
+    BOLD_FONT,
+    BW_GREEN,
+    BW_ORANGE,
+    BW_RED,
+    GREEN_FILL,
+    LIGHT_GREEN_FILL,
+    ORANGE_FILL,
+    RED_FILL,
+    auto_width,
+    bandwidth_fill,
+    cpu_fill,
+    finalize_sheet,
+    write_data_rows,
+    write_headers,
 )
-
+from zbbx_mcp.resolver import InstanceResolver
 
 # Column layout for the main sheet
 MAIN_HEADERS = [
@@ -450,8 +459,8 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 cost = sum(r["Cost/Month ($)"] or 0 for r in rows)
 
                 parts = [
-                    f"**Full Server Report**",
-                    f"",
+                    "**Full Server Report**",
+                    "",
                     f"**File:** `{filepath}`",
                     f"**Servers:** {len(rows)} distinct ({on} on dashboards, {off} off)",
                     f"**Bandwidth:** {critical} critical (>={BW_RED} Mbps), {high} high (>={BW_ORANGE} Mbps)",
@@ -466,15 +475,15 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     parts.append(f"**VPN DOWN:** {vpn_down} servers")
                 parts.extend([
                     f"**Countries:** {countries} | **Products:** {products}",
-                    f"",
-                    f"### Sheets",
+                    "",
+                    "### Sheets",
                     f"1. **All Servers** — {len(rows)} × {len(MAIN_HEADERS)} columns",
-                    f"2. **Health Overview** — infrastructure health summary",
+                    "2. **Health Overview** — infrastructure health summary",
                     f"3. **Product Analytics** — {products} products with metrics",
                     f"4. **Country Analytics** — {countries} countries",
                     f"5. **Dashboard Tabs** — {len(result.tab_data)} tabs",
-                    f"6. **Provider × Product** — matrix with costs",
-                    f"7. **Bandwidth Analysis** — utilization tiers",
+                    "6. **Provider × Product** — matrix with costs",
+                    "7. **Bandwidth Analysis** — utilization tiers",
                     f"8. **Off-Dashboard** — {off} unmonitored servers",
                 ])
 

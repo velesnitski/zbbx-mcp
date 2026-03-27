@@ -2,8 +2,8 @@
 
 import httpx
 
-from zbbx_mcp.resolver import InstanceResolver
 from zbbx_mcp.formatters import _ts
+from zbbx_mcp.resolver import InstanceResolver
 
 # Zabbix 6.4 uses "host" field for proxy name, "status" for mode
 PROXY_MODE = {"5": "Active", "6": "Passive"}
