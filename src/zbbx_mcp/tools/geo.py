@@ -9,6 +9,7 @@ from statistics import median
 import httpx
 
 from zbbx_mcp.classify import classify_host as _classify_host
+from zbbx_mcp.classify import resolve_datacenter
 from zbbx_mcp.data import (
     build_value_map,
     countries_for_region,
@@ -776,7 +777,6 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
             """
             try:
                 client = resolver.resolve(instance)
-                from zbbx_mcp.classify import detect_provider
 
                 hosts = await fetch_enabled_hosts(client)
                 by_country = group_by_country(hosts, country=country, region=region)
@@ -797,25 +797,30 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                         continue
                     cpus = [cpu_map[h["hostid"]] for h in cc_hosts if h["hostid"] in cpu_map]
                     avg_cpu = round(sum(cpus) / len(cpus), 1) if cpus else 0
-                    providers = {detect_provider(host_ip(h)) for h in cc_hosts if host_ip(h)}
+                    dcs = set()
+                    for h in cc_hosts:
+                        ip = host_ip(h)
+                        if ip:
+                            prov, city = resolve_datacenter(ip)
+                            dcs.add(city if city and city != "Various" else prov)
                     flag = " **!**" if len(cc_hosts) == 1 else ""
                     rows.append({
                         "cc": cc, "servers": len(cc_hosts), "flag": flag,
                         "traffic_gbps": round(total_mbps / 1000, 2),
                         "avg_cpu": avg_cpu,
-                        "providers": ", ".join(sorted(providers - {""})) or "?",
+                        "dcs": ", ".join(sorted(dcs - {""}))[:40] or "?",
                     })
 
                 rows.sort(key=lambda x: -x["traffic_gbps"])
                 shown = rows[:max_results]
 
                 lines = [f"**Density Map** ({len(rows)} countries)\n"]
-                lines.append("| Country | Servers | Traffic Gbps | Avg CPU% | Providers |")
-                lines.append("|---------|---------|-------------|----------|-----------|")
+                lines.append("| Country | Servers | Traffic Gbps | Avg CPU% | Datacenters |")
+                lines.append("|---------|---------|-------------|----------|-------------|")
                 for r in shown:
                     lines.append(
                         f"| {r['cc']}{r['flag']} | {r['servers']} | {r['traffic_gbps']} | "
-                        f"{r['avg_cpu']}% | {r['providers']} |"
+                        f"{r['avg_cpu']}% | {r['dcs']} |"
                     )
 
                 no_redundancy = [r for r in rows if r["servers"] == 1]
