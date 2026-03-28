@@ -13,6 +13,7 @@ import httpx
 from zbbx_mcp.classify import classify_host as _classify_host
 from zbbx_mcp.classify import detect_provider
 from zbbx_mcp.data import (
+    KEY_service_PRIMARY,
     build_value_map,
     extract_country,
     fetch_cpu_map,
@@ -322,12 +323,14 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 hosts = await fetch_enabled_hosts(client)
 
                 # service primary check items
-                service_items = await client.call("item.get", {
-                    "hostids": [h["hostid"] for h in hosts],
-                    "output": ["hostid", "lastvalue"],
-                    "filter": {"key_": "service_primary_check[{HOST.IP}]", "status": "0"},
-                })
-                service_map = build_value_map(service_items, lambda v: int(float(v)))
+                service_map: dict[str, int] = {}
+                if KEY_service_PRIMARY:
+                    service_items = await client.call("item.get", {
+                        "hostids": [h["hostid"] for h in hosts],
+                        "output": ["hostid", "lastvalue"],
+                        "filter": {"key_": KEY_service_PRIMARY, "status": "0"},
+                    })
+                    service_map = build_value_map(service_items, lambda v: int(float(v)))
 
                 # Get trend data for uptime estimation
                 all_ids = [h["hostid"] for h in hosts]
