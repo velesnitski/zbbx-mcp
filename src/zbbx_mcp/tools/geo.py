@@ -259,14 +259,18 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     change = ((cd["current"] - cd["avg"]) / cd["avg"] * 100) if cd["avg"] > 0 else 0
                     # Derive trend from aggregated daily data (not last host)
                     daily_vals = sorted(cd["daily"].items())
-                    if len(daily_vals) >= 4:
-                        q = len(daily_vals) // 4
+                    if len(daily_vals) >= 4 and avg_gbps >= 0.05:
+                        q = max(len(daily_vals) // 4, 1)
                         older_avg = sum(v for _, v in daily_vals[:q]) / q
                         recent_avg = sum(v for _, v in daily_vals[-q:]) / q
-                        dir_pct = ((recent_avg - older_avg) / older_avg * 100) if older_avg > 0 else 0
-                        trend = "rising" if dir_pct > 15 else "dropping" if dir_pct < -15 else "stable"
+                        if older_avg > 0:
+                            dir_pct = (recent_avg - older_avg) / older_avg * 100
+                            trend = "rising" if dir_pct > 15 else "dropping" if dir_pct < -15 else "stable"
+                        else:
+                            trend = "rising" if recent_avg > 0 else "stable"
                     else:
-                        trend = cd["trend"]
+                        # Too little traffic for meaningful trend
+                        trend = "stable" if avg_gbps < 0.05 else cd.get("trend", "stable")
                     if cd["current"] < 1 and cd["avg"] > 10:
                         trend = "dead"
                     parts.append(
