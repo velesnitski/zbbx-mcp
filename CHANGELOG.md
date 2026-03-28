@@ -5,6 +5,32 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.4.0] - 2026-03-28
+
+### Added
+- **98 tools** — 8 new tools:
+  - `generate_ceo_report`: full executive HTML report with fleet KPIs, alerts, traffic trends, SLA, capacity, risk, provider distribution, expansion opportunities, shutdown candidates, and strategic recommendations
+  - `get_peak_analysis`: peak vs off-peak traffic by hour-of-day from trend data
+- 93 hosting providers (368 CIDR ranges) in IP classification database — covers hyperscalers, European/US/Asian hosting, CDN, and niche providers
+- Datacenter city resolution via CIDR ranges (`resolve_datacenter`)
+- Region filters on geo/traffic tools (LATAM, APAC, EMEA, NA, CIS)
+- UK → GB country code normalization
+
+### Changed
+- Expansion report thresholds: OVERLOADED at 3000 Mbps/server (was 500), added HIGH tier
+- Pre-compiled regex patterns in response compression
+- Host fetch caching (60s TTL) for repeated calls
+- Extracted Zabbix key constants (`KEY_CPU_IDLE`, etc.)
+- Batched trend fetch (200/chunk) to avoid Zabbix 500 on large fleets
+
+### Fixed
+- Country trend direction derived from aggregated daily data (was last-host-wins)
+- `get_month_over_month` period parsing (was unparseable "60d-30d")
+- `get_sla_dashboard` 0% uptime (was counting servers without service check as DOWN)
+- `get_executive_dashboard` TrendRow attribute error
+- HTML report trend data lookup (uses Host ID directly)
+- Noisy trend labels for countries with <0.05 Gbps traffic
+
 ## [1.3.0] - 2026-03-27
 
 ### Added
