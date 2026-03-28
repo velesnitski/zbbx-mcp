@@ -445,17 +445,15 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                         reasons.append("VPN issues")
                     if cd.get("change", 0) < -30 and cd.get("avg_gbps", 0) > 0.5:
                         reasons.append("traffic drop")
-                    # Infrastructure-only countries (servers exist but no VPN service)
+                    # Countries with no VPN monitoring coverage
                     cc_hosts = by_country.get(cc, [])
-                    has_vpn = any(h["hostid"] in vpn_map for h in cc_hosts)
-                    infra_only = all(
-                        _classify_host(h.get("groups", []))[0] in ("Infrastructure", "Unknown")
-                        for h in cc_hosts
-                    ) if cc_hosts else False
-                    if not has_vpn and len(cc_hosts) > 2 and not infra_only:
-                        reasons.append("no VPN checks")
-                    if infra_only and len(cc_hosts) > 2:
-                        reasons.append("infra only")
+                    vpn_checked = sum(1 for h in cc_hosts if h["hostid"] in vpn_map)
+                    if vpn_checked == 0 and len(cc_hosts) > 2:
+                        infra_count = sum(1 for h in cc_hosts if _classify_host(h.get("groups", []))[0] == "Infrastructure")
+                        if infra_count == len(cc_hosts):
+                            reasons.append("infra only")
+                        else:
+                            reasons.append("no VPN checks")
                     if reasons:
                         deep_dive_countries.append((cc, cd, reasons, cc_hosts))
 
