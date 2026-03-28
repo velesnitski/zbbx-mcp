@@ -1,5 +1,6 @@
 import asyncio as _asyncio
 import atexit
+import functools
 import os
 import re
 
@@ -13,6 +14,14 @@ from zbbx_mcp.tools import register_all
 
 # Regex to strip Args/Parameters section from docstrings
 _ARGS_RE = re.compile(r"\n\s*Args:\s*\n.*", re.DOTALL)
+
+# Pre-compiled regexes for _compress_response (avoid re-compiling on every call)
+_RE_BOLD = re.compile(r"\*\*([^*]+)\*\*")
+_RE_HEADERS = re.compile(r"^#{1,4}\s+", re.MULTILINE)
+_RE_TABLE_SEP = re.compile(r"\|[-:\s]+\|[-:\s|]+\|?\n")
+_RE_LONG_DASH = re.compile(r"-{3,}")
+_RE_BLANK_LINES = re.compile(r"\n{3,}")
+_RE_TRAILING_SPACES = re.compile(r" +\n")
 
 def _compress_response(text: str) -> str:
     """Compress MCP tool response to save tokens.
@@ -28,15 +37,15 @@ def _compress_response(text: str) -> str:
 
     if compact:
         # Strip markdown bold/headers
-        text = re.sub(r"\*\*([^*]+)\*\*", r"\1", text)
-        text = re.sub(r"^#{1,4}\s+", "", text, flags=re.MULTILINE)
+        text = _RE_BOLD.sub(r"\1", text)
+        text = _RE_HEADERS.sub("", text)
         # Collapse table separators
-        text = re.sub(r"\|[-:\s]+\|[-:\s|]+\|?\n", "", text)
-        text = re.sub(r"-{3,}", "---", text)
+        text = _RE_TABLE_SEP.sub("", text)
+        text = _RE_LONG_DASH.sub("---", text)
         # Collapse blank lines
-        text = re.sub(r"\n{3,}", "\n\n", text)
+        text = _RE_BLANK_LINES.sub("\n\n", text)
         # Strip trailing spaces
-        text = re.sub(r" +\n", "\n", text)
+        text = _RE_TRAILING_SPACES.sub("\n", text)
 
     # Budget truncation
     if budget > 0 and len(text) > budget:
@@ -100,7 +109,6 @@ def create_server() -> tuple[FastMCP, dict[str, ZabbixClient]]:
         for tool in mcp._tool_manager._tools.values():
             if hasattr(tool, "fn"):
                 original_fn = tool.fn
-                import functools
 
                 @functools.wraps(original_fn)
                 async def _compressed_wrapper(*args, _fn=original_fn, **kwargs):
