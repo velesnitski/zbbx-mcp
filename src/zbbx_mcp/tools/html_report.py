@@ -141,19 +141,8 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 if not rows:
                     return "No servers match the filters."
 
-                # Fetch trends for filtered hosts
-
-                hostids = []
-                host_id_map = {}
-                all_hosts = await client.call("host.get", {
-                    "output": ["hostid", "host"], "filter": {"status": "0"},
-                })
-                name_to_id = {h["host"]: h["hostid"] for h in all_hosts}
-                for r in rows:
-                    hid = name_to_id.get(r["Host"])
-                    if hid:
-                        hostids.append(hid)
-                        host_id_map[r["Host"]] = hid
+                # Fetch trends for filtered hosts (use Host ID from fetch_all_data)
+                hostids = [r["Host ID"] for r in rows if r.get("Host ID")]
 
                 trend_rows = []
                 if hostids:
