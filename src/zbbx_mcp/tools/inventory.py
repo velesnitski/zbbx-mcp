@@ -123,7 +123,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()):
                 parts = ["| Product | Tier | Total | Enabled | Type |",
                          "|---------|------|-------|---------|------|"]
 
-                free_keywords = {"free", "filtered", "relay"}
+                free_keywords = {"free", "relay", "basic"}
                 for prod in sorted(products):
                     for tier in sorted(products[prod]):
                         info = products[prod][tier]
