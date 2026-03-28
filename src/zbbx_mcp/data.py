@@ -103,15 +103,20 @@ METRIC_KEYS: dict[str, list[str]] = {
 }
 
 
+_COUNTRY_ALIASES = {"UK": "GB"}  # normalize non-ISO codes
+
+
 def extract_country(hostname: str) -> str:
     """Extract 2-letter country code from hostname.
 
     Handles: srv-nl0105 → NL, srv-nl01-lite → IN, srv-us01-lite → IN
+    Normalizes UK → GB.
     """
     m = _COUNTRY_RE.search(hostname)
     if not m:
         return ""
-    return (m.group(1) or m.group(2) or "").upper()
+    cc = (m.group(1) or m.group(2) or "").upper()
+    return _COUNTRY_ALIASES.get(cc, cc)
 
 
 # Shared fetch helpers — DRY extraction from tools/*.py
