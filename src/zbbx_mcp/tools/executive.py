@@ -139,45 +139,46 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 hosts = await fetch_enabled_hosts(client)
                 all_ids = [h["hostid"] for h in hosts]
 
-                # Fetch 2x period and split by daily data
-                full_period = f"{days * 2}d"
-                trend_rows, _ = await fetch_trends_batch(client, all_ids, ["cpu", "traffic"], full_period)
+                # Fetch two separate periods (avoids Zabbix 500 on large ranges)
+                rows_a, _ = await fetch_trends_batch(client, all_ids, ["traffic"], f"{days * 2}d")
 
-                import time as _time
-                cutoff = _time.time() - days * 86400
+                def _agg(rows, recent: bool):
+                    """Split daily data: recent=True for period B, False for A."""
+                    import time as _time
+                    cutoff = _time.time() - days * 86400
+                    from datetime import datetime, timezone
 
-                def _agg(rows, use_recent: bool):
-                    """Aggregate from daily data: recent=True for period B, False for A."""
-                    traffic_sum = 0.0
-                    cpu_vals = []
-                    country_set = set()
+                    traffic_by_host: dict[str, float] = {}
+                    country_set: set[str] = set()
                     for r in rows:
-                        if not r.daily:
+                        if r.metric != "traffic" or not r.daily:
                             continue
-                        from datetime import datetime, timezone
+                        total = 0.0
+                        count = 0
                         for day_str, val in r.daily.items():
                             try:
                                 dt = datetime.strptime(day_str, "%b %d").replace(year=2026, tzinfo=timezone.utc)
-                                ts = dt.timestamp()
                             except ValueError:
                                 continue
-                            in_recent = ts >= cutoff
-                            if in_recent != use_recent:
-                                continue
-                            if r.metric == "traffic":
-                                traffic_sum += val
-                            elif r.metric == "cpu":
-                                cpu_vals.append(100 - val if val > 0 else 0)
+                            in_recent = dt.timestamp() >= cutoff
+                            if in_recent == recent:
+                                total += val
+                                count += 1
+                        if count > 0:
+                            traffic_by_host[r.hostid] = total / count  # avg Mbps per day
                         cc = extract_country(r.hostname)
                         if cc:
                             country_set.add(cc)
 
-                    traffic_gbps = round(traffic_sum / 1000, 1) if traffic_sum else 0
-                    avg_cpu = round(sum(cpu_vals) / len(cpu_vals), 1) if cpu_vals else 0
-                    return {"traffic_gbps": traffic_gbps, "avg_cpu": avg_cpu, "countries": len(country_set)}
+                    traffic_gbps = round(sum(traffic_by_host.values()) / 1000, 1)
+                    return {"traffic_gbps": traffic_gbps, "countries": len(country_set)}
 
-                a = _agg(trend_rows, use_recent=False)
-                b = _agg(trend_rows, use_recent=True)
+                a = _agg(rows_a, recent=False)
+                b = _agg(rows_a, recent=True)
+
+                # CPU from current snapshot (no trend needed)
+                cpu_map = await fetch_cpu_map(client, all_ids)
+                avg_cpu = round(sum(cpu_map.values()) / len(cpu_map), 1) if cpu_map else 0
 
                 def _delta(va, vb):
                     if va == 0:
@@ -190,7 +191,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     "| Metric | Period A | Period B | Delta |",
                     "|--------|----------|----------|-------|",
                     f"| Traffic Gbps | {a['traffic_gbps']} | {b['traffic_gbps']} | {_delta(a['traffic_gbps'], b['traffic_gbps'])} |",
-                    f"| Avg CPU % | {a['avg_cpu']} | {b['avg_cpu']} | {_delta(a['avg_cpu'], b['avg_cpu'])} |",
+                    f"| Avg CPU % | – | {avg_cpu} | – |",
                     f"| Countries | {a['countries']} | {b['countries']} | {_delta(a['countries'], b['countries'])} |",
                     f"| Servers | {len(hosts)} | {len(hosts)} | – |",
                 ]
@@ -333,9 +334,12 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 all_ids = [h["hostid"] for h in hosts]
                 traffic_map = await fetch_traffic_map(client, all_ids)
 
-                # Aggregate by product + country
+                # Aggregate by product + country (only servers WITH service check item)
                 agg: dict[str, dict] = {}
                 for h in hosts:
+                    hid = h["hostid"]
+                    if hid not in service_map:
+                        continue  # skip servers without service check item
                     prod, _ = _classify_host(h.get("groups", []))
                     if product and product.lower() not in (prod or "").lower():
                         continue
@@ -348,10 +352,9 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     key = f"{prod}|{cc}"
                     entry = agg.setdefault(key, {"product": prod, "cc": cc, "up": 0, "total": 0, "traffic": 0})
                     entry["total"] += 1
-                    service_val = service_map.get(h["hostid"])
-                    if service_val == 1:
+                    if service_map[hid] == 1:
                         entry["up"] += 1
-                    entry["traffic"] += traffic_map.get(h["hostid"], 0)
+                    entry["traffic"] += traffic_map.get(hid, 0)
 
                 if not agg:
                     return "No servers match the filters."
