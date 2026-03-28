@@ -13,6 +13,9 @@ from zbbx_mcp.classify import classify_host as _classify_host
 from zbbx_mcp.classify import resolve_datacenter
 from zbbx_mcp.data import (
     CAPITAL_COORDS,
+    KEY_service_PRIMARY,
+    KEY_service_SECONDARY,
+    KEY_service_TERTIARY,
     build_value_map,
     countries_for_region,
     extract_country,
@@ -82,12 +85,14 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 trend_rows, _ = await fetch_trends_batch(client, all_ids, ["cpu", "traffic"], f"{baseline_days}d")
 
                 # Also get service health status
-                service1_items = await client.call("item.get", {
-                    "hostids": all_ids,
-                    "output": ["hostid", "lastvalue"],
-                    "filter": {"key_": "service_primary_check[{HOST.IP}]", "status": "0"},
-                })
-                service1_map = build_value_map(service1_items, lambda v: int(float(v)))
+                service1_map: dict[str, int] = {}
+                if KEY_service_PRIMARY:
+                    service1_items = await client.call("item.get", {
+                        "hostids": all_ids,
+                        "output": ["hostid", "lastvalue"],
+                        "filter": {"key_": KEY_service_PRIMARY, "status": "0"},
+                    })
+                    service1_map = build_value_map(service1_items, lambda v: int(float(v)))
 
                 # Build per-host metrics
                 host_metrics: dict[str, dict] = {}
@@ -107,9 +112,9 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     for h in c_hosts:
                         hm = host_metrics.get(h["hostid"], {})
                         traffic = hm.get("traffic")
-                        service1 = service1_map.get(h["hostid"])
+                        service1_status = service1_map.get(h["hostid"])
 
-                        if service1 == 0:
+                        if service1_status == 0:
                             service_down += 1
 
                         if traffic and traffic.avg > 1:
@@ -161,10 +166,10 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     for h in b["hosts"]:
                         hm = host_metrics.get(h["hostid"], {})
                         traffic = hm.get("traffic")
-                        service1 = service1_map.get(h["hostid"])
+                        service1_status = service1_map.get(h["hostid"])
                         t_now = f"{traffic.current:.1f}" if traffic else "N/A"
                         t_avg = f"{traffic.avg:.1f}" if traffic else "N/A"
-                        service = "DOWN" if service1 == 0 else ("OK" if service1 == 1 else "?")
+                        service = "DOWN" if service1_status == 0 else ("OK" if service1_status == 1 else "?")
                         parts.append(f"- {h['host']}: {t_now} Mbps (was {t_avg}) | service: {service}")
 
                 if healthy:
@@ -359,13 +364,13 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 time_from = now - _parse_period(period)
 
                 # Get items for service protocol checks
+                service_keys = [k for k in (KEY_service_PRIMARY, KEY_service_SECONDARY) if k]
+                if not service_keys:
+                    return "No service check keys configured."
                 service_items = await client.call("item.get", {
                     "hostids": hostids,
                     "output": ["itemid", "hostid", "key_"],
-                    "filter": {"key_": [
-                        "service_primary_check[{HOST.IP}]",
-                        "service_secondary_check[{HOST.IP}]",
-                    ], "status": "0"},
+                    "filter": {"key_": service_keys, "status": "0"},
                 })
 
                 if not service_items:
@@ -383,7 +388,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 # Map itemid -> (hostid, protocol)
                 item_info: dict[str, tuple[str, str]] = {}
                 for i in service_items:
-                    proto = "service1" if "service1" in i["key_"] else "service2"
+                    proto = "service1" if KEY_service_PRIMARY and KEY_service_PRIMARY in i["key_"] else "service2"
                     item_info[i["itemid"]] = (i["hostid"], proto)
 
                 # Calculate uptime per host per protocol
@@ -409,11 +414,11 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     ctry = extract_country(hostname)
                     hu = host_uptime.get(hid, {})
 
-                    service1 = hu.get("service1", {"up": 0, "total": 0})
-                    service2 = hu.get("service2", {"up": 0, "total": 0})
+                    service1_data = hu.get("service1", {"up": 0, "total": 0})
+                    service2_data = hu.get("service2", {"up": 0, "total": 0})
 
-                    service1_pct = (service1["up"] / service1["total"] * 100) if service1["total"] > 0 else None
-                    service2_pct = (service2["up"] / service2["total"] * 100) if service2["total"] > 0 else None
+                    service1_pct = (service1_data["up"] / service1_data["total"] * 100) if service1_data["total"] > 0 else None
+                    service2_pct = (service2_data["up"] / service2_data["total"] * 100) if service2_data["total"] > 0 else None
 
                     overall = "HEALTHY"
                     if service1_pct is not None and service1_pct < 50:
@@ -424,7 +429,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     rows.append({
                         "host": hostname, "country": ctry,
                         "service1": service1_pct, "service2": service2_pct,
-                        "overall": overall, "hours": service1["total"],
+                        "overall": overall, "hours": service1_data["total"],
                     })
 
                 rows.sort(key=lambda r: (r["service1"] or 100))
@@ -507,20 +512,22 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
 
                 all_ids = [h["hostid"] for hs in countries.values() for h in hs]
 
+                async def _empty():
+                    return []
+
                 service1_items, service2_items, service3_items = await asyncio.gather(
                     client.call("item.get", {
                         "hostids": all_ids, "output": ["hostid", "lastvalue"],
-                        "filter": {"key_": "service_primary_check[{HOST.IP}]", "status": "0"},
-                    }),
+                        "filter": {"key_": KEY_service_PRIMARY, "status": "0"},
+                    }) if KEY_service_PRIMARY else _empty(),
                     client.call("item.get", {
                         "hostids": all_ids, "output": ["hostid", "lastvalue"],
-                        "filter": {"key_": "service_secondary_check[{HOST.IP}]", "status": "0"},
-                    }),
+                        "filter": {"key_": KEY_service_SECONDARY, "status": "0"},
+                    }) if KEY_service_SECONDARY else _empty(),
                     client.call("item.get", {
                         "hostids": all_ids, "output": ["hostid", "lastvalue"],
-                        "search": {"key_": "service3"}, "searchWildcardsEnabled": True,
-                        "filter": {"status": "0"},
-                    }),
+                        "filter": {"key_": KEY_service_TERTIARY, "status": "0"},
+                    }) if KEY_service_TERTIARY else _empty(),
                 )
 
                 service1_map = build_value_map(service1_items, lambda v: int(float(v)))
@@ -550,8 +557,8 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     service2_up = sum(1 for hid in hids if service2_map.get(hid) == 1)
                     service3_up = sum(1 for hid in hids if service3_map.get(hid, 0) >= 1)
 
-                    service_primary_checked = sum(1 for hid in hids if hid in service1_map)
-                    service_secondary_checked = sum(1 for hid in hids if hid in service2_map)
+                    service1_checked = sum(1 for hid in hids if hid in service1_map)
+                    service2_checked = sum(1 for hid in hids if hid in service2_map)
                     service3_checked = sum(1 for hid in hids if hid in service3_map)
 
                     def _status(up: int, checked: int) -> str:
@@ -564,8 +571,8 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                             return f"PARTIAL ({up}/{checked})"
                         return f"DOWN ({up}/{checked})"
 
-                    x_s = _status(service1_up, service_primary_checked)
-                    k_s = _status(service2_up, service_secondary_checked)
+                    x_s = _status(service1_up, service1_checked)
+                    k_s = _status(service2_up, service2_checked)
                     o_s = _status(service3_up, service3_checked)
 
                     # Recommendation

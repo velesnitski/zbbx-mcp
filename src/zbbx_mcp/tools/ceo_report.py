@@ -11,6 +11,7 @@ import httpx
 from zbbx_mcp.classify import classify_host as _classify_host
 from zbbx_mcp.classify import detect_provider
 from zbbx_mcp.data import (
+    KEY_service_PRIMARY,
     build_value_map,
     extract_country,
     fetch_cpu_map,
@@ -125,12 +126,14 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 )
 
                 # service check
-                service_items = await client.call("item.get", {
-                    "hostids": all_ids,
-                    "output": ["hostid", "lastvalue"],
-                    "filter": {"key_": "service_primary_check[{HOST.IP}]", "status": "0"},
-                })
-                service_map = build_value_map(service_items, lambda v: int(float(v)))
+                service_map: dict[str, int] = {}
+                if KEY_service_PRIMARY:
+                    service_items = await client.call("item.get", {
+                        "hostids": all_ids,
+                        "output": ["hostid", "lastvalue"],
+                        "filter": {"key_": KEY_service_PRIMARY, "status": "0"},
+                    })
+                    service_map = build_value_map(service_items, lambda v: int(float(v)))
 
                                 by_country = group_by_country(hosts)
                 total_traffic = round(sum(traffic_map.values()) / 1000, 1)
