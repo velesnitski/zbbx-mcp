@@ -93,6 +93,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
         @mcp.tool()
         async def generate_ceo_report(
             period: str = "30d",
+            deep_dive_country: str = "",
             output_dir: str = "",
             instance: str = "",
         ) -> str:
@@ -100,6 +101,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
 
             Args:
                 period: Trend period (default: 30d)
+                deep_dive_country: Force a country deep dive section (2-letter code, optional)
                 output_dir: Output directory (default: ~/Downloads)
                 instance: Zabbix instance name (optional)
             """
@@ -457,8 +459,16 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     if reasons:
                         deep_dive_countries.append((cc, cd, reasons, cc_hosts))
 
+                # Force-add requested deep dive country if not already present
+                if deep_dive_country:
+                    ddc = deep_dive_country.upper()
+                    if ddc not in {cc for cc, _, _, _ in deep_dive_countries}:
+                        if ddc in country_data:
+                            dd_hosts = by_country.get(ddc, [])
+                            deep_dive_countries.append((ddc, country_data[ddc], ["requested"], dd_hosts))
+
                 # Sort deep dives: critical issues first, then by traffic
-                _REASON_PRIORITY = {"dead": 0, "service issues": 1, "traffic drop": 2, "no service checks": 3, "infra only": 3, "explosive growth": 4}
+                _REASON_PRIORITY = {"dead": 0, "service issues": 1, "traffic drop": 2, "no service checks": 3, "infra only": 3, "requested": 3, "explosive growth": 4}
                 deep_dive_countries.sort(key=lambda x: (min(_REASON_PRIORITY.get(r, 5) for r in x[2]), -x[1]["traffic_gbps"]))
 
                 if deep_dive_countries:
@@ -521,6 +531,10 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                             rec = f"Traffic +{cd.get('change', 0)}%. Monitor capacity — may need more servers soon."
                         elif "traffic drop" in reasons:
                             rec = f"Traffic declined {cd.get('change', 0)}%. Check for regional anomalying or routing issues."
+                        elif "no service checks" in reasons:
+                            rec = f"{cd['servers']} servers without service health monitoring. Add standard check items."
+                        elif "requested" in reasons:
+                            rec = f"Manual review requested. {cd['servers']} servers, {cd['traffic_gbps']} Gbps."
                         if rec:
                             html.append(f'<div class="alert alert-yellow" style="margin-top:8px"><b>Recommendation:</b> {rec}</div>')
 
