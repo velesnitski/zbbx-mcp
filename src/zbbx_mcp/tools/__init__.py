@@ -3,6 +3,7 @@ __all__ = ["WRITE_TOOLS", "register_all"]
 from zbbx_mcp.resolver import InstanceResolver
 from zbbx_mcp.tools import (
     alerts,
+    ceo_report,
     configuration,
     costs,
     dashboard_report,
@@ -97,7 +98,7 @@ def register_all(
         configuration, scripts, services, macros, rollback_tools,
         inventory, report, alerts, users, proxies, maps, media, slack,
         infra_report, costs, traffic, dashboard_report, full_report, trends,
-        html_report, geo, executive,
+        html_report, geo, executive, ceo_report,
     ]
     for module in modules:
         module.register(mcp, resolver, skip=skip)
