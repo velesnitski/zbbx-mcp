@@ -391,11 +391,9 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 _SKIP_PRODUCTS = {"Monitoring", "Infrastructure", "Unknown"}
                 for h in hosts:
                     hid = h["hostid"]
-                    has_traffic = hid in traffic_map
-                    has_cpu = hid in cpu_map
-                    if not has_traffic and not has_cpu:
-                        continue  # no monitoring data — can't classify
-                    traffic = traffic_map.get(hid, 0)
+                    if hid not in traffic_map:
+                        continue  # no traffic data — can't classify (cluster secondary, etc.)
+                    traffic = traffic_map[hid]
                     cpu = cpu_map.get(hid, 0)
                     vpn_val = vpn_map.get(hid)
                     hostname = h["host"]
@@ -405,11 +403,11 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     ip = host_ip(h)
                     prov = detect_provider(ip) if ip else "?"
 
-                    if has_traffic and traffic < 0.1 and cpu < 2:
+                    if traffic < 0.1 and cpu < 2:
                         dead_servers.append((hostname, prod, prov, cpu, traffic, vpn_val))
                     elif vpn_val == 0 and traffic < 5:
                         broken_servers.append((hostname, prod, prov, cpu, traffic))
-                    elif has_traffic and traffic < 5 and traffic > 0 and cpu < 10:
+                    elif traffic < 5 and traffic > 0 and cpu < 10:
                         idle_servers.append((hostname, prod, prov, cpu, traffic, vpn_val))
 
                 if dead_servers or broken_servers or idle_servers:
@@ -447,7 +445,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                         reasons.append("VPN issues")
                     if cd.get("change", 0) < -30 and cd.get("avg_gbps", 0) > 0.5:
                         reasons.append("traffic drop")
-                    # Infra Tunnel-only countries (servers exist but no VPN check items)
+                    # Infrastructure-only countries (servers exist but no VPN service)
                     cc_hosts = by_country.get(cc, [])
                     has_vpn = any(h["hostid"] in vpn_map for h in cc_hosts)
                     infra_only = all(
@@ -457,7 +455,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     if not has_vpn and len(cc_hosts) > 2 and not infra_only:
                         reasons.append("no VPN checks")
                     if infra_only and len(cc_hosts) > 2:
-                        reasons.append("infra_tunnel only")
+                        reasons.append("infra only")
                     if reasons:
                         deep_dive_countries.append((cc, cd, reasons, cc_hosts))
 
@@ -512,7 +510,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                         rec = ""
                         if "dead" in reasons:
                             rec = f"All {cd['servers']} servers offline. Investigate or decommission."
-                        elif "infra_tunnel only" in reasons:
+                        elif "infra only" in reasons:
                             rec = f"Only tunneling infrastructure ({cd['servers']} servers). Add VPN servers to serve {name} users directly."
                         elif "VPN issues" in reasons:
                             down = cd["vpn_total"] - cd["vpn_up"]
