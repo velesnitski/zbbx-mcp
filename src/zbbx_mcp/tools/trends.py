@@ -329,13 +329,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()):
             group_similar: bool = True,
             instance: str = "",
         ) -> str:
-            """Automated health assessment with per-server scoring and issue detection.
-
-            Analyzes trends to detect:
-            - Chronic CPU overload (avg > 80%, min > 50%)
-            - Traffic drops (current < 70% of period avg)
-            - Hardware inefficiency (CPU per 100 Mbps > 3x peer median)
-            - Near bandwidth saturation (peak > 700 Mbps)
+            """Health assessment — per-server scoring for CPU, traffic, efficiency issues.
 
             Args:
                 country: Filter by country code (optional)

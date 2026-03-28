@@ -310,19 +310,16 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
             period: str = "30d",
             instance: str = "",
         ) -> str:
-            """VPN protocol availability per server — uptime % per protocol.
-
-            Uses Zabbix trend data to calculate hours UP vs DOWN for each protocol.
-            By default shows only DOWN/DEGRADED servers and excludes monitoring hosts.
+            """Protocol availability per server — uptime % over a period.
 
             Args:
-                country: Filter by country code (optional)
-                product: Filter by product name (optional)
-                exclude_product: Comma-separated products to exclude (default: infrastructure,monitoring)
-                only_problems: Show only DOWN/DEGRADED servers (default: True)
-                max_results: Maximum servers to show (default: 50)
+                country: Country code filter (optional)
+                product: Product name filter (optional)
+                exclude_product: Products to exclude (default: infrastructure,monitoring)
+                only_problems: Only DOWN/DEGRADED servers (default: True)
+                max_results: Max servers (default: 50)
                 period: Analysis period (default: 30d)
-                instance: Zabbix instance name (optional)
+                instance: Zabbix instance (optional)
             """
             try:
                 client = resolver.resolve(instance)
@@ -698,16 +695,13 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
             max_results: int = 40,
             instance: str = "",
         ) -> str:
-            """Coverage gap analysis — countries with/without servers, capacity headroom.
-
-            Shows server density (servers/Gbps) per country, flags overloaded
-            countries needing more servers, identifies expansion opportunities.
+            """Coverage gap analysis per country with capacity headroom.
 
             Args:
                 region: LATAM, APAC, EMEA, NA, CIS, ALL (default: ALL)
-                min_traffic_mbps: Minimum traffic to include country (default: 0)
-                max_results: Maximum countries to show (default: 40)
-                instance: Zabbix instance name (optional)
+                min_traffic_mbps: Min traffic to include (default: 0)
+                max_results: Max countries to show (default: 40)
+                instance: Zabbix instance (optional)
             """
             try:
                 client = resolver.resolve(instance)
@@ -854,16 +848,13 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
             max_results: int = 10,
             instance: str = "",
         ) -> str:
-            """Estimate nearest server for a given client country by geographic distance.
-
-            Uses haversine between capital coordinates as a rough latency proxy.
-            Useful for expansion planning — "where should we add next server?"
+            """Estimate nearest server by geographic distance from client country.
 
             Args:
                 client_country: 2-letter country code (required)
-                product: Filter by product name (optional)
-                max_results: Maximum results (default: 10)
-                instance: Zabbix instance name (optional)
+                product: Product name filter (optional)
+                max_results: Max results (default: 10)
+                instance: Zabbix instance (optional)
             """
             import math
 

@@ -174,17 +174,14 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
             max_results: int = 30,
             instance: str = "",
         ) -> str:
-            """Detect flapping: hosts/triggers with frequent events in a period.
-
-            Counts PROBLEM events per host+trigger and highlights repeated issues.
-            Useful for finding unstable services that keep going down and recovering.
+            """Detect flapping hosts/triggers with frequent events.
 
             Args:
                 hours: Lookback period in hours (default: 24)
-                min_events: Minimum events to be considered flapping (default: 3)
-                group: Filter by host group name (optional)
-                max_results: Maximum results (default: 30)
-                instance: Zabbix instance name (optional)
+                min_events: Min events to flag as flapping (default: 3)
+                group: Host group name filter (optional)
+                max_results: Max results (default: 30)
+                instance: Zabbix instance (optional)
             """
             try:
                 client = resolver.resolve(instance)
@@ -270,18 +267,15 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
             max_results: int = 20,
             instance: str = "",
         ) -> str:
-            """Find same problem occurring on multiple hosts within a time window.
-
-            Detects correlated failures — e.g. service down on 5 hosts at the same
-            time suggests infrastructure issue rather than individual host problem.
+            """Find correlated problems across multiple hosts in a time window.
 
             Args:
                 hours: Lookback period in hours (default: 24)
-                min_hosts: Minimum hosts with same problem to report (default: 2)
-                window_minutes: Time window for correlation in minutes (default: 10)
-                group: Filter by host group name (optional)
-                max_results: Maximum correlated groups to show (default: 20)
-                instance: Zabbix instance name (optional)
+                min_hosts: Min hosts with same problem (default: 2)
+                window_minutes: Correlation window in minutes (default: 10)
+                group: Host group name filter (optional)
+                max_results: Max correlated groups (default: 20)
+                instance: Zabbix instance (optional)
             """
             try:
                 client = resolver.resolve(instance)
