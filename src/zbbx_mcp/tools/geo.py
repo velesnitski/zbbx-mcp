@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import math
 import time as _time
 from statistics import median
 
@@ -11,6 +12,7 @@ import httpx
 from zbbx_mcp.classify import classify_host as _classify_host
 from zbbx_mcp.classify import resolve_datacenter
 from zbbx_mcp.data import (
+    CAPITAL_COORDS,
     build_value_map,
     countries_for_region,
     extract_country,
@@ -860,10 +862,6 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 max_results: Max results (default: 10)
                 instance: Zabbix instance (optional)
             """
-            import math
-
-            from zbbx_mcp.data import CAPITAL_COORDS
-
             def _haversine(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
                 R = 6371
                 dlat, dlon = math.radians(lat2 - lat1), math.radians(lon2 - lon1)

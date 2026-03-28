@@ -1,3 +1,4 @@
+import time
 from collections import defaultdict
 
 import httpx
@@ -185,7 +186,6 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
             """
             try:
                 client = resolver.resolve(instance)
-                import time
                 time_from = int(time.time()) - hours * 3600
 
                 params = {
@@ -279,7 +279,6 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
             """
             try:
                 client = resolver.resolve(instance)
-                import time
                 time_from = int(time.time()) - hours * 3600
 
                 params = {
