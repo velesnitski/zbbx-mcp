@@ -29,16 +29,13 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
         ) -> str:
             """Search Zabbix hosts by name pattern, host group, or country.
 
-            Supports substring matching — query 'us' finds hosts containing 'us'.
-            Country filter uses exact 2-letter code extraction from hostname.
-
             Args:
-                query: Host name search (substring match, e.g. 'us' finds hosts with 'us' in name)
-                group: Filter by host group name
-                country: Filter by 2-letter country code (exact match via hostname pattern)
-                max_results: Maximum number of results (default: 50)
-                format: Output format: 'table' (default) or 'list'
-                instance: Zabbix instance name (optional)
+                query: Host name substring search
+                group: Host group name filter
+                country: 2-letter country code filter
+                max_results: Max results (default: 50)
+                format: 'table' (default) or 'list'
+                instance: Zabbix instance (optional)
             """
             try:
                 client = resolver.resolve(instance)
@@ -360,17 +357,14 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
         ) -> str:
             """Search hosts by country, group, product with optional traffic filter.
 
-            Combines country-aware search, metric filtering, and cluster roles
-            in a single call. Much more efficient than chaining multiple tools.
-
             Args:
-                country: 2-letter country code (exact match)
+                country: 2-letter country code
                 group: Host group name filter
-                product: Product name filter (substring match)
-                min_traffic_mbps: Only show hosts with traffic above this (Mbps)
-                show_cluster_role: Show inferred primary/secondary cluster role
-                max_results: Maximum results (default: 50)
-                instance: Zabbix instance name (optional)
+                product: Product name filter (substring)
+                min_traffic_mbps: Min traffic threshold in Mbps
+                show_cluster_role: Show primary/secondary role
+                max_results: Max results (default: 50)
+                instance: Zabbix instance (optional)
             """
             try:
                 client = resolver.resolve(instance)

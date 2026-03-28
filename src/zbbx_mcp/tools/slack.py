@@ -22,17 +22,12 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
             channel: str = "",
             blocks: str = "",
         ) -> str:
-            """Send an ad-hoc message to Slack via webhook.
-
-            Use for sending reports, summaries, or alerts to a Slack channel.
-            Supports plain text and Block Kit JSON.
-
-            Webhook URL is read from SLACK_WEBHOOK_URL environment variable.
+            """Send a message to Slack via webhook.
 
             Args:
                 text: Message text (markdown supported)
-                channel: Override channel (optional, uses webhook default)
-                blocks: Slack Block Kit JSON string for rich formatting (optional)
+                channel: Override channel (optional)
+                blocks: Block Kit JSON string (optional)
             """
             url = os.environ.get(SLACK_WEBHOOK_ENV, "")
             if not url:
