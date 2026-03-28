@@ -431,6 +431,97 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                         html.append(f'<tr><td colspan="7" style="color:#9ca3af;font-size:11px">+ {remaining} more not shown</td></tr>')
                     html.append('</tbody></table></div>')
 
+                                # Auto-detect countries needing detailed analysis
+                deep_dive_countries = []
+                for cc, cd in sorted_countries:
+                    reasons = []
+                    if cd["trend"] == "dead":
+                        reasons.append("dead")
+                    if cd.get("change", 0) > 100 and cd["traffic_gbps"] > 1:
+                        reasons.append("explosive growth")
+                    if cd["service_total"] > 0 and cd["service_up"] < cd["service_total"] * 0.7:
+                        reasons.append("service issues")
+                    if cd.get("change", 0) < -30 and cd.get("avg_gbps", 0) > 0.5:
+                        reasons.append("traffic drop")
+                    # Infra Tunnel-only countries (servers exist but no service check items)
+                    cc_hosts = by_country.get(cc, [])
+                    has_service = any(h["hostid"] in service_map for h in cc_hosts)
+                    infra_only = all(
+                        _classify_host(h.get("groups", []))[0] in ("Infrastructure", "Unknown")
+                        for h in cc_hosts
+                    ) if cc_hosts else False
+                    if not has_service and len(cc_hosts) > 2 and not infra_only:
+                        reasons.append("no service checks")
+                    if infra_only and len(cc_hosts) > 2:
+                        reasons.append("infra_tunnel only")
+                    if reasons:
+                        deep_dive_countries.append((cc, cd, reasons, cc_hosts))
+
+                if deep_dive_countries:
+                    html.append('<div class="section"><h2>Country Deep Dives</h2>')
+                    html.append('<div class="desc">Countries requiring detailed analysis</div>')
+                    for cc, cd, reasons, cc_hosts in deep_dive_countries[:6]:
+                        name = _COUNTRY_NAMES.get(cc, cc)
+                        reason_badges = " ".join(_badge("critical" if r in ("dead", "service issues") else "high" if r == "traffic drop" else "stable", r) for r in reasons)
+
+                        # Build detail grid
+                        html.append(f'<h3>{name} {reason_badges}</h3>')
+                        html.append('<div class="grid-3" style="margin-bottom:8px">')
+                        html.append(_card("Servers", str(cd["servers"]), f"{cd['traffic_gbps']} Gbps total"))
+
+                        # Provider breakdown for this country
+                        cc_provs: dict[str, int] = {}
+                        for h in cc_hosts:
+                            p = detect_provider(host_ip(h)) if host_ip(h) else "?"
+                            cc_provs[p] = cc_provs.get(p, 0) + 1
+                        prov_str = ", ".join(f"{p} ({c})" for p, c in sorted(cc_provs.items(), key=lambda x: -x[1])[:3])
+                        html.append(_card("Providers", str(len(cc_provs)), prov_str))
+
+                        # service status
+                        if cd["service_total"] > 0:
+                            uptime = round(cd["service_up"] / cd["service_total"] * 100)
+                            service_sub = f"{cd['service_up']}/{cd['service_total']} UP"
+                            html.append(_card("service Uptime", f"{uptime}%", service_sub))
+                        else:
+                            html.append(_card("service Status", "N/A", "No service check items"))
+                        html.append('</div>')
+
+                        # Cluster analysis
+                        from collections import defaultdict as _defaultdict
+                        clusters: dict[str, list] = _defaultdict(list)
+                        for h in cc_hosts:
+                            base = h.get("host", "").split()[0]
+                            clusters[base].append(h)
+                        multi_clusters = {k: v for k, v in clusters.items() if len(v) > 1}
+
+                        if multi_clusters:
+                            html.append('<table><thead><tr><th>Cluster</th><th class="num">Members</th><th>Product</th><th class="num">Primary Traffic</th><th>Provider</th></tr></thead><tbody>')
+                            for base, members in sorted(multi_clusters.items(), key=lambda x: -len(x[1])):
+                                primary = members[0]
+                                prod, _ = _classify_host(primary.get("groups", []))
+                                primary_traffic = traffic_map.get(primary["hostid"], 0)
+                                prov = detect_provider(host_ip(primary)) if host_ip(primary) else "?"
+                                html.append(f'<tr><td><b>{base}</b></td><td class="num">{len(members)}</td><td>{prod}</td><td class="num">{primary_traffic:.1f} Mbps</td><td>{prov}</td></tr>')
+                            html.append('</tbody></table>')
+
+                        # Recommendation
+                        rec = ""
+                        if "dead" in reasons:
+                            rec = f"All {cd['servers']} servers offline. Investigate or decommission."
+                        elif "infra_tunnel only" in reasons:
+                            rec = f"Only tunneling infrastructure ({cd['servers']} servers). Add service servers to serve {name} users directly."
+                        elif "service issues" in reasons:
+                            down = cd["service_total"] - cd["service_up"]
+                            rec = f"{down} service servers DOWN. Investigate blocked IPs or service failures."
+                        elif "explosive growth" in reasons:
+                            rec = f"Traffic +{cd.get('change', 0)}%. Monitor capacity — may need more servers soon."
+                        elif "traffic drop" in reasons:
+                            rec = f"Traffic declined {cd.get('change', 0)}%. Check for regional anomalying or routing issues."
+                        if rec:
+                            html.append(f'<div class="alert alert-yellow" style="margin-top:8px"><b>Recommendation:</b> {rec}</div>')
+
+                    html.append('</div>')
+
                                 prov_counts: dict[str, int] = {}
                 for h in hosts:
                     ip = host_ip(h)
