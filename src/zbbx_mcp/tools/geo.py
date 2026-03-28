@@ -13,6 +13,9 @@ from zbbx_mcp.classify import classify_host as _classify_host
 from zbbx_mcp.classify import resolve_datacenter
 from zbbx_mcp.data import (
     CAPITAL_COORDS,
+    KEY_VPN_PRIMARY,
+    KEY_VPN_SECONDARY,
+    KEY_VPN_TERTIARY,
     build_value_map,
     countries_for_region,
     extract_country,
@@ -82,12 +85,14 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 trend_rows, _ = await fetch_trends_batch(client, all_ids, ["cpu", "traffic"], f"{baseline_days}d")
 
                 # Also get VPN health status
-                vpn1_items = await client.call("item.get", {
-                    "hostids": all_ids,
-                    "output": ["hostid", "lastvalue"],
-                    "filter": {"key_": "vpn_primary_check[{HOST.IP}]", "status": "0"},
-                })
-                vpn1_map = build_value_map(vpn1_items, lambda v: int(float(v)))
+                vpn1_map: dict[str, int] = {}
+                if KEY_VPN_PRIMARY:
+                    vpn1_items = await client.call("item.get", {
+                        "hostids": all_ids,
+                        "output": ["hostid", "lastvalue"],
+                        "filter": {"key_": KEY_VPN_PRIMARY, "status": "0"},
+                    })
+                    vpn1_map = build_value_map(vpn1_items, lambda v: int(float(v)))
 
                 # Build per-host metrics
                 host_metrics: dict[str, dict] = {}
@@ -107,9 +112,9 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     for h in c_hosts:
                         hm = host_metrics.get(h["hostid"], {})
                         traffic = hm.get("traffic")
-                        vpn1 = vpn1_map.get(h["hostid"])
+                        vpn1_status = vpn1_map.get(h["hostid"])
 
-                        if vpn1 == 0:
+                        if vpn1_status == 0:
                             vpn_down += 1
 
                         if traffic and traffic.avg > 1:
@@ -161,10 +166,10 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     for h in b["hosts"]:
                         hm = host_metrics.get(h["hostid"], {})
                         traffic = hm.get("traffic")
-                        vpn1 = vpn1_map.get(h["hostid"])
+                        vpn1_status = vpn1_map.get(h["hostid"])
                         t_now = f"{traffic.current:.1f}" if traffic else "N/A"
                         t_avg = f"{traffic.avg:.1f}" if traffic else "N/A"
-                        vpn = "DOWN" if vpn1 == 0 else ("OK" if vpn1 == 1 else "?")
+                        vpn = "DOWN" if vpn1_status == 0 else ("OK" if vpn1_status == 1 else "?")
                         parts.append(f"- {h['host']}: {t_now} Mbps (was {t_avg}) | VPN: {vpn}")
 
                 if healthy:
@@ -359,13 +364,13 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 time_from = now - _parse_period(period)
 
                 # Get items for VPN protocol checks
+                vpn_keys = [k for k in (KEY_VPN_PRIMARY, KEY_VPN_SECONDARY) if k]
+                if not vpn_keys:
+                    return "No VPN check keys configured."
                 vpn_items = await client.call("item.get", {
                     "hostids": hostids,
                     "output": ["itemid", "hostid", "key_"],
-                    "filter": {"key_": [
-                        "vpn_primary_check[{HOST.IP}]",
-                        "vpn_secondary_check[{HOST.IP}]",
-                    ], "status": "0"},
+                    "filter": {"key_": vpn_keys, "status": "0"},
                 })
 
                 if not vpn_items:
@@ -383,7 +388,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 # Map itemid -> (hostid, protocol)
                 item_info: dict[str, tuple[str, str]] = {}
                 for i in vpn_items:
-                    proto = "vpn1" if "vpn1" in i["key_"] else "vpn2"
+                    proto = "vpn1" if KEY_VPN_PRIMARY and KEY_VPN_PRIMARY in i["key_"] else "vpn2"
                     item_info[i["itemid"]] = (i["hostid"], proto)
 
                 # Calculate uptime per host per protocol
@@ -409,11 +414,11 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     ctry = extract_country(hostname)
                     hu = host_uptime.get(hid, {})
 
-                    vpn1 = hu.get("vpn1", {"up": 0, "total": 0})
-                    vpn2 = hu.get("vpn2", {"up": 0, "total": 0})
+                    vpn1_data = hu.get("vpn1", {"up": 0, "total": 0})
+                    vpn2_data = hu.get("vpn2", {"up": 0, "total": 0})
 
-                    vpn1_pct = (vpn1["up"] / vpn1["total"] * 100) if vpn1["total"] > 0 else None
-                    vpn2_pct = (vpn2["up"] / vpn2["total"] * 100) if vpn2["total"] > 0 else None
+                    vpn1_pct = (vpn1_data["up"] / vpn1_data["total"] * 100) if vpn1_data["total"] > 0 else None
+                    vpn2_pct = (vpn2_data["up"] / vpn2_data["total"] * 100) if vpn2_data["total"] > 0 else None
 
                     overall = "HEALTHY"
                     if vpn1_pct is not None and vpn1_pct < 50:
@@ -424,7 +429,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     rows.append({
                         "host": hostname, "country": ctry,
                         "vpn1": vpn1_pct, "vpn2": vpn2_pct,
-                        "overall": overall, "hours": vpn1["total"],
+                        "overall": overall, "hours": vpn1_data["total"],
                     })
 
                 rows.sort(key=lambda r: (r["vpn1"] or 100))
@@ -507,20 +512,22 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
 
                 all_ids = [h["hostid"] for hs in countries.values() for h in hs]
 
+                async def _empty():
+                    return []
+
                 vpn1_items, vpn2_items, vpn3_items = await asyncio.gather(
                     client.call("item.get", {
                         "hostids": all_ids, "output": ["hostid", "lastvalue"],
-                        "filter": {"key_": "vpn_primary_check[{HOST.IP}]", "status": "0"},
-                    }),
+                        "filter": {"key_": KEY_VPN_PRIMARY, "status": "0"},
+                    }) if KEY_VPN_PRIMARY else _empty(),
                     client.call("item.get", {
                         "hostids": all_ids, "output": ["hostid", "lastvalue"],
-                        "filter": {"key_": "vpn_secondary_check[{HOST.IP}]", "status": "0"},
-                    }),
+                        "filter": {"key_": KEY_VPN_SECONDARY, "status": "0"},
+                    }) if KEY_VPN_SECONDARY else _empty(),
                     client.call("item.get", {
                         "hostids": all_ids, "output": ["hostid", "lastvalue"],
-                        "search": {"key_": "vpn3"}, "searchWildcardsEnabled": True,
-                        "filter": {"status": "0"},
-                    }),
+                        "filter": {"key_": KEY_VPN_TERTIARY, "status": "0"},
+                    }) if KEY_VPN_TERTIARY else _empty(),
                 )
 
                 vpn1_map = build_value_map(vpn1_items, lambda v: int(float(v)))
@@ -550,8 +557,8 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     vpn2_up = sum(1 for hid in hids if vpn2_map.get(hid) == 1)
                     vpn3_up = sum(1 for hid in hids if vpn3_map.get(hid, 0) >= 1)
 
-                    vpn_primary_checked = sum(1 for hid in hids if hid in vpn1_map)
-                    vpn_secondary_checked = sum(1 for hid in hids if hid in vpn2_map)
+                    vpn1_checked = sum(1 for hid in hids if hid in vpn1_map)
+                    vpn2_checked = sum(1 for hid in hids if hid in vpn2_map)
                     vpn3_checked = sum(1 for hid in hids if hid in vpn3_map)
 
                     def _status(up: int, checked: int) -> str:
@@ -564,8 +571,8 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                             return f"PARTIAL ({up}/{checked})"
                         return f"DOWN ({up}/{checked})"
 
-                    x_s = _status(vpn1_up, vpn_primary_checked)
-                    k_s = _status(vpn2_up, vpn_secondary_checked)
+                    x_s = _status(vpn1_up, vpn1_checked)
+                    k_s = _status(vpn2_up, vpn2_checked)
                     o_s = _status(vpn3_up, vpn3_checked)
 
                     # Recommendation

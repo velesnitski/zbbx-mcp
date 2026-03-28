@@ -8,7 +8,7 @@ import httpx
 
 from zbbx_mcp.classify import classify_host as _classify_host
 from zbbx_mcp.classify import detect_provider
-from zbbx_mcp.data import TRAFFIC_IN_KEYS, countries_for_region, extract_country
+from zbbx_mcp.data import KEY_CONNECTIONS, TRAFFIC_IN_KEYS, countries_for_region, extract_country
 from zbbx_mcp.resolver import InstanceResolver
 
 
@@ -56,11 +56,14 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     "output": ["hostid", "lastvalue"],
                     "filter": {"key_": TRAFFIC_IN_KEYS, "status": "0"},
                 })
+                async def _empty():
+                    return []
+
                 conn_task = client.call("item.get", {
                     "hostids": all_ids,
                     "output": ["hostid", "lastvalue"],
-                    "filter": {"key_": "vpn_connections", "status": "0"},
-                })
+                    "filter": {"key_": KEY_CONNECTIONS, "status": "0"},
+                }) if KEY_CONNECTIONS else _empty()
                 cpu_task = client.call("item.get", {
                     "hostids": all_ids,
                     "output": ["hostid", "lastvalue"],
@@ -278,6 +281,9 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 host_map = {h["hostid"]: h for h in hosts}
                 all_ids = list(host_map.keys())
 
+                async def _empty_list():
+                    return []
+
                 traffic_items, conn_items = await asyncio.gather(
                     client.call("item.get", {
                         "hostids": all_ids,
@@ -287,8 +293,8 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     client.call("item.get", {
                         "hostids": all_ids,
                         "output": ["hostid", "lastvalue"],
-                        "filter": {"key_": "vpn_connections", "status": "0"},
-                    }),
+                        "filter": {"key_": KEY_CONNECTIONS, "status": "0"},
+                    }) if KEY_CONNECTIONS else _empty_list(),
                 )
 
                 host_traffic: dict[str, float] = {}

@@ -11,6 +11,7 @@ import httpx
 from zbbx_mcp.classify import classify_host as _classify_host
 from zbbx_mcp.classify import detect_provider
 from zbbx_mcp.data import (
+    KEY_VPN_PRIMARY,
     build_value_map,
     extract_country,
     fetch_cpu_map,
@@ -125,12 +126,14 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 )
 
                 # VPN check
-                vpn_items = await client.call("item.get", {
-                    "hostids": all_ids,
-                    "output": ["hostid", "lastvalue"],
-                    "filter": {"key_": "vpn_primary_check[{HOST.IP}]", "status": "0"},
-                })
-                vpn_map = build_value_map(vpn_items, lambda v: int(float(v)))
+                vpn_map: dict[str, int] = {}
+                if KEY_VPN_PRIMARY:
+                    vpn_items = await client.call("item.get", {
+                        "hostids": all_ids,
+                        "output": ["hostid", "lastvalue"],
+                        "filter": {"key_": KEY_VPN_PRIMARY, "status": "0"},
+                    })
+                    vpn_map = build_value_map(vpn_items, lambda v: int(float(v)))
 
                                 by_country = group_by_country(hosts)
                 total_traffic = round(sum(traffic_map.values()) / 1000, 1)

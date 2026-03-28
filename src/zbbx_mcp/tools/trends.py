@@ -6,7 +6,7 @@ import httpx
 
 from zbbx_mcp.classify import classify_host as _classify_host
 from zbbx_mcp.classify import detect_provider
-from zbbx_mcp.data import extract_country, fetch_trends_batch
+from zbbx_mcp.data import KEY_VPN_PRIMARY, extract_country, fetch_trends_batch
 from zbbx_mcp.excel import BW_MAX
 from zbbx_mcp.resolver import InstanceResolver
 
@@ -376,11 +376,14 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()):
                     client, hostids, ["cpu", "traffic", "load"], period,
                 )
                 # Task 36: Fetch VPN health alongside trends
+                async def _empty():
+                    return []
+
                 vpn1_task = client.call("item.get", {
                     "hostids": hostids,
                     "output": ["hostid", "lastvalue"],
-                    "filter": {"key_": "vpn_primary_check[{HOST.IP}]", "status": "0"},
-                })
+                    "filter": {"key_": KEY_VPN_PRIMARY, "status": "0"},
+                }) if KEY_VPN_PRIMARY else _empty()
 
                 (trend_rows, _), vpn1_items = await asyncio.gather(
                     trend_rows_task, vpn1_task,
@@ -645,13 +648,16 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()):
                     return "No servers match the filters."
 
                 hostids = [h["hostid"] for h in filtered]
+                async def _empty_list():
+                    return []
+
                 (trend_rows, _), vpn1_items = await asyncio.gather(
                     fetch_trends_batch(client, hostids, ["cpu", "traffic"], period),
                     client.call("item.get", {
                         "hostids": hostids,
                         "output": ["hostid", "lastvalue"],
-                        "filter": {"key_": "vpn_primary_check[{HOST.IP}]", "status": "0"},
-                    }),
+                        "filter": {"key_": KEY_VPN_PRIMARY, "status": "0"},
+                    }) if KEY_VPN_PRIMARY else _empty_list(),
                     return_exceptions=True,
                 )
                 if isinstance(trend_rows, BaseException):

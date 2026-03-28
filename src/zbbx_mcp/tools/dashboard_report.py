@@ -9,6 +9,7 @@ import httpx
 
 from zbbx_mcp.classify import classify_host as _classify_host
 from zbbx_mcp.classify import detect_provider
+from zbbx_mcp.data import KEY_CONNECTIONS
 from zbbx_mcp.resolver import InstanceResolver
 
 
@@ -80,6 +81,9 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     return "No hosts resolved from dashboard graphs."
 
                 # Phase 2: host details + all metrics (parallel)
+                async def _empty():
+                    return []
+
                 tasks = [
                     client.call("host.get", {
                         "hostids": list(all_hostids),
@@ -105,8 +109,8 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     client.call("item.get", {
                         "hostids": list(all_hostids),
                         "output": ["hostid", "lastvalue"],
-                        "filter": {"key_": "vpn_connections", "status": "0"},
-                    }),
+                        "filter": {"key_": KEY_CONNECTIONS, "status": "0"},
+                    }) if KEY_CONNECTIONS else _empty(),
                     client.call("item.get", {
                         "hostids": list(all_hostids),
                         "output": ["hostid", "lastvalue"],

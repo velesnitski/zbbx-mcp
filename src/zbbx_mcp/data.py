@@ -7,6 +7,7 @@ All report tools use this instead of duplicating API call logic.
 from __future__ import annotations
 
 import asyncio
+import os
 import re
 import time as _time
 from dataclasses import dataclass, field
@@ -39,12 +40,15 @@ GB_BYTES = 1_073_741_824  # 1 GB in bytes
 
 # Zabbix API filter values used across many calls
 STATUS_ENABLED = "0"
-KEY_VPN_PRIMARY = "vpn_primary_check[{HOST.IP}]"
-KEY_VPN_SECONDARY = "vpn_secondary_check[{HOST.IP}]"
+# VPN health check item keys — configurable per deployment
+KEY_VPN_PRIMARY = os.environ.get("ZABBIX_VPN_CHECK_KEY", "")
+KEY_VPN_SECONDARY = os.environ.get("ZABBIX_VPN2_CHECK_KEY", "")
+KEY_VPN_TERTIARY = os.environ.get("ZABBIX_VPN3_CHECK_KEY", "")
+KEY_CONNECTIONS = os.environ.get("ZABBIX_CONNECTIONS_KEY", "")
+# Standard Zabbix agent keys
 KEY_CPU_IDLE = "system.cpu.util[,idle]"
 KEY_CPU_LOAD = "system.cpu.load[percpu,avg5]"
 KEY_MEM_AVAIL = "vm.memory.size[available]"
-KEY_CONNECTIONS = "vpn_connections"
 KEY_AGENT_VERSION = "agent.version"
 
 # Region → country code mapping for geo filtering
@@ -288,9 +292,9 @@ class ServerRow:
     bw_util_pct: float | None = None
     bw_tier: str = ""
     connections: float | None = None
-    vpn1: str = ""
+    vpn_primary: str = ""
     agent: str = ""
-    vpn2: str = ""
+    vpn_secondary: str = ""
     vpn_tertiary: str = ""
     active_problems: int = 0
     templates: str = ""
@@ -323,8 +327,8 @@ class ServerRow:
             "BW Util %": self.bw_util_pct,
             "BW Tier": self.bw_tier,
             "Connections": self.connections,
-            "VPN Primary": self.vpn1,
-            "VPN Secondary": self.vpn2,
+            "VPN Primary": self.vpn_primary,
+            "VPN Secondary": self.vpn_secondary,
             "VPN Tertiary": self.vpn_tertiary,
             "Agent": self.agent,
             "Problems": self.active_problems or "",
@@ -414,29 +418,29 @@ async def fetch_all_data(
         }) if all_graph_ids else asyncio.sleep(0)
     )
 
+    async def _noop():
+        return []
+
+    def _item_call(key):
+        if not key:
+            return _noop()
+        return client.call("item.get", {"hostids": all_ids, "output": ["hostid", "lastvalue"],
+                                         "filter": {"key_": key, "status": STATUS_ENABLED}})
+
     results = await asyncio.gather(
-        client.call("item.get", {"hostids": all_ids, "output": ["hostid", "lastvalue"],
-                                  "filter": {"key_": KEY_CPU_IDLE, "status": STATUS_ENABLED}}),
-        client.call("item.get", {"hostids": all_ids, "output": ["hostid", "lastvalue"],
-                                  "filter": {"key_": KEY_CPU_LOAD, "status": STATUS_ENABLED}}),
-        client.call("item.get", {"hostids": all_ids, "output": ["hostid", "lastvalue"],
-                                  "filter": {"key_": KEY_MEM_AVAIL, "status": STATUS_ENABLED}}),
-        client.call("item.get", {"hostids": all_ids, "output": ["hostid", "lastvalue"],
-                                  "filter": {"key_": KEY_CONNECTIONS, "status": STATUS_ENABLED}}),
+        _item_call(KEY_CPU_IDLE),
+        _item_call(KEY_CPU_LOAD),
+        _item_call(KEY_MEM_AVAIL),
+        _item_call(KEY_CONNECTIONS),
         # Traffic: filter by known physical interface keys
         client.call("item.get", {"hostids": all_ids, "output": ["hostid", "lastvalue"],
                                   "filter": {"key_": TRAFFIC_IN_KEYS, "status": STATUS_ENABLED}}),
         client.call("item.get", {"hostids": all_ids, "output": ["hostid", "lastvalue"],
                                   "filter": {"key_": TRAFFIC_OUT_KEYS, "status": STATUS_ENABLED}}),
-        client.call("item.get", {"hostids": all_ids, "output": ["hostid", "lastvalue"],
-                                  "filter": {"key_": KEY_AGENT_VERSION, "status": STATUS_ENABLED}}),
-        client.call("item.get", {"hostids": all_ids, "output": ["hostid", "lastvalue"],
-                                  "filter": {"key_": KEY_VPN_PRIMARY, "status": STATUS_ENABLED}}),
-        client.call("item.get", {"hostids": all_ids, "output": ["hostid", "lastvalue"],
-                                  "filter": {"key_": KEY_VPN_SECONDARY, "status": STATUS_ENABLED}}),
-        client.call("item.get", {"hostids": all_ids, "output": ["hostid", "lastvalue"],
-                                  "search": {"key_": "vpn3"}, "searchWildcardsEnabled": True,
-                                  "filter": {"status": STATUS_ENABLED}}),
+        _item_call(KEY_AGENT_VERSION),
+        _item_call(KEY_VPN_PRIMARY),
+        _item_call(KEY_VPN_SECONDARY),
+        _item_call(KEY_VPN_TERTIARY),
         client.call("usermacro.get", {"hostids": all_ids, "output": ["hostid", "macro", "value"],
                                        "filter": {"macro": ["{$COST_MONTH}", "{$BW_LIMIT}"]}}),
         client.call("host.get", {"hostids": all_ids, "output": ["hostid"],
@@ -616,8 +620,8 @@ async def fetch_all_data(
             bw_util_pct=round(in_mbps / (bw_limit_map.get(hid, BW_MAX)) * 100, 1) if in_mbps else None,
             bw_tier=classify_bandwidth(in_mbps),
             connections=conn_map.get(hid),
-            vpn1="OK" if vpn1_val == 1 else ("DOWN" if vpn1_val is not None else ""),
-            vpn2="OK" if vpn2_val == 1 else ("DOWN" if vpn2_val is not None else ""),
+            vpn_primary="OK" if vpn1_val == 1 else ("DOWN" if vpn1_val is not None else ""),
+            vpn_secondary="OK" if vpn2_val == 1 else ("DOWN" if vpn2_val is not None else ""),
             vpn_tertiary="OK" if vpn3_val and vpn3_val >= 1 else ("DOWN" if vpn3_val is not None else ""),
             agent=str(version) if isinstance(version, str) else "",
             templates=templates,
