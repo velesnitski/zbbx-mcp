@@ -1,5 +1,6 @@
 """Batch trend tools: historical metrics, dashboards, comparison, health, capacity."""
 
+import asyncio
 
 import httpx
 
@@ -371,7 +372,6 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()):
 
                 hostids = [h["hostid"] for h in filtered]
 
-                import asyncio
                 trend_rows_task = fetch_trends_batch(
                     client, hostids, ["cpu", "traffic", "load"], period,
                 )
@@ -619,7 +619,6 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()):
                 instance: Zabbix instance (optional)
             """
             try:
-                import asyncio as _aio
                 client = resolver.resolve(instance)
 
                 hosts = await client.call("host.get", {
@@ -646,7 +645,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()):
                     return "No servers match the filters."
 
                 hostids = [h["hostid"] for h in filtered]
-                (trend_rows, _), service1_items = await _aio.gather(
+                (trend_rows, _), service1_items = await asyncio.gather(
                     fetch_trends_batch(client, hostids, ["cpu", "traffic"], period),
                     client.call("item.get", {
                         "hostids": hostids,
