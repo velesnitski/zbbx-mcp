@@ -180,21 +180,28 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                         days = sorted(ct.items())
                         avg = sum(v for _, v in days) / len(days) / 1000 if days else 0
                         cd["avg_gbps"] = round(avg, 1)
+                        # Change = current vs avg
+                        if avg > 0:
+                            cd["change"] = round((cd["traffic_gbps"] - avg) / avg * 100)
+                        else:
+                            cd["change"] = 0
+
                         if len(days) >= 4 and avg >= 0.05:
                             q = max(len(days) // 4, 1)
                             older = sum(v for _, v in days[:q]) / q
                             recent = sum(v for _, v in days[-q:]) / q
                             if older > 0:
-                                pct = (recent - older) / older * 100
-                                cd["trend"] = "rising" if pct > 15 else "dropping" if pct < -15 else "stable"
-                                cd["change"] = round(pct)
+                                dir_pct = (recent - older) / older * 100
+                                cd["trend"] = "rising" if dir_pct > 15 else "dropping" if dir_pct < -15 else "stable"
                             else:
                                 cd["trend"] = "rising" if recent > 0 else "stable"
-                                cd["change"] = 0
                         else:
                             cd["trend"] = "stable"
-                            cd["change"] = 0
-                        if cd["traffic_gbps"] < 0.01 and cd.get("avg_gbps", 0) > 0.05:
+
+                        # Sanity: if current >> avg, can't be "dropping"
+                        if cd["traffic_gbps"] > avg * 2 and cd["trend"] == "dropping":
+                            cd["trend"] = "rising"
+                        if cd["traffic_gbps"] < 0.01 and avg > 0.05:
                             cd["trend"] = "dead"
                     else:
                         cd["avg_gbps"] = 0
@@ -376,6 +383,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                                 dead_servers = []
                 broken_servers = []
                 idle_servers = []
+                _SKIP_PRODUCTS = {"Monitoring", "Infrastructure", "Unknown"}
                 for h in hosts:
                     hid = h["hostid"]
                     traffic = traffic_map.get(hid, 0)
@@ -383,6 +391,8 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     vpn_val = vpn_map.get(hid)
                     hostname = h["host"]
                     prod, tier = _classify_host(h.get("groups", []))
+                    if prod in _SKIP_PRODUCTS:
+                        continue
                     ip = host_ip(h)
                     prov = detect_provider(ip) if ip else "?"
 
