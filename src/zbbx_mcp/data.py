@@ -25,6 +25,9 @@ __all__ = [
     "group_by_country", "host_ip",
     "TRAFFIC_IN_KEYS", "TRAFFIC_OUT_KEYS", "METRIC_KEYS", "GB_BYTES",
     "REGION_MAP", "CAPITAL_COORDS",
+    "STATUS_ENABLED", "KEY_VPN_PRIMARY", "KEY_VPN_SECONDARY",
+    "KEY_CPU_IDLE", "KEY_CPU_LOAD", "KEY_MEM_AVAIL",
+    "KEY_CONNECTIONS", "KEY_AGENT_VERSION",
 ]
 
 _COUNTRY_RE = re.compile(
@@ -33,6 +36,16 @@ _COUNTRY_RE = re.compile(
     re.IGNORECASE,
 )
 GB_BYTES = 1_073_741_824  # 1 GB in bytes
+
+# Zabbix API filter values used across many calls
+STATUS_ENABLED = "0"
+KEY_VPN_PRIMARY = "vpn_primary_check[{HOST.IP}]"
+KEY_VPN_SECONDARY = "vpn_secondary_check[{HOST.IP}]"
+KEY_CPU_IDLE = "system.cpu.util[,idle]"
+KEY_CPU_LOAD = "system.cpu.load[percpu,avg5]"
+KEY_MEM_AVAIL = "vm.memory.size[available]"
+KEY_CONNECTIONS = "vpn_connections"
+KEY_AGENT_VERSION = "agent.version"
 
 # Region → country code mapping for geo filtering
 REGION_MAP: dict[str, list[str]] = {
@@ -129,19 +142,30 @@ async def fetch_enabled_hosts(
     extra_output: list[str] | None = None,
 ) -> list[dict]:
     """Fetch all enabled hosts with optional groups/interfaces."""
+    # Use client-side cache for the common case (no extra_output)
+    cache_key = f"enabled_hosts:g={groups}:i={interfaces}"
+    if not extra_output:
+        cached = client._get_cached(cache_key, ttl=60.0)
+        if cached is not None:
+            return cached
+
     output = ["hostid", "host"]
     if extra_output:
         output.extend(extra_output)
     params: dict[str, Any] = {
         "output": output,
-        "filter": {"status": "0"},
+        "filter": {"status": STATUS_ENABLED},
         "sortfield": "host",
     }
     if groups:
         params["selectGroups"] = ["name"]
     if interfaces:
         params["selectInterfaces"] = ["ip"]
-    return await client.call("host.get", params)
+    result = await client.call("host.get", params)
+
+    if not extra_output:
+        client._set_cache(cache_key, result)
+    return result
 
 
 async def fetch_traffic_map(client: ZabbixClient, hostids: list[str]) -> dict[str, float]:
@@ -354,7 +378,7 @@ async def fetch_all_data(
                 "output": ["hostid", "host", "name", "status"],
                 "selectGroups": ["name"],
                 "selectInterfaces": ["ip"],
-                "filter": {"status": "0"},
+                "filter": {"status": STATUS_ENABLED},
             }),
         )
         client._set_cache("all_enabled_hosts", hosts)
@@ -392,27 +416,27 @@ async def fetch_all_data(
 
     results = await asyncio.gather(
         client.call("item.get", {"hostids": all_ids, "output": ["hostid", "lastvalue"],
-                                  "filter": {"key_": "system.cpu.util[,idle]", "status": "0"}}),
+                                  "filter": {"key_": KEY_CPU_IDLE, "status": STATUS_ENABLED}}),
         client.call("item.get", {"hostids": all_ids, "output": ["hostid", "lastvalue"],
-                                  "filter": {"key_": "system.cpu.load[percpu,avg5]", "status": "0"}}),
+                                  "filter": {"key_": KEY_CPU_LOAD, "status": STATUS_ENABLED}}),
         client.call("item.get", {"hostids": all_ids, "output": ["hostid", "lastvalue"],
-                                  "filter": {"key_": "vm.memory.size[available]", "status": "0"}}),
+                                  "filter": {"key_": KEY_MEM_AVAIL, "status": STATUS_ENABLED}}),
         client.call("item.get", {"hostids": all_ids, "output": ["hostid", "lastvalue"],
-                                  "filter": {"key_": "vpn_connections", "status": "0"}}),
+                                  "filter": {"key_": KEY_CONNECTIONS, "status": STATUS_ENABLED}}),
         # Traffic: filter by known physical interface keys
         client.call("item.get", {"hostids": all_ids, "output": ["hostid", "lastvalue"],
-                                  "filter": {"key_": TRAFFIC_IN_KEYS, "status": "0"}}),
+                                  "filter": {"key_": TRAFFIC_IN_KEYS, "status": STATUS_ENABLED}}),
         client.call("item.get", {"hostids": all_ids, "output": ["hostid", "lastvalue"],
-                                  "filter": {"key_": TRAFFIC_OUT_KEYS, "status": "0"}}),
+                                  "filter": {"key_": TRAFFIC_OUT_KEYS, "status": STATUS_ENABLED}}),
         client.call("item.get", {"hostids": all_ids, "output": ["hostid", "lastvalue"],
-                                  "filter": {"key_": "agent.version", "status": "0"}}),
+                                  "filter": {"key_": KEY_AGENT_VERSION, "status": STATUS_ENABLED}}),
         client.call("item.get", {"hostids": all_ids, "output": ["hostid", "lastvalue"],
-                                  "filter": {"key_": "vpn_primary_check[{HOST.IP}]", "status": "0"}}),
+                                  "filter": {"key_": KEY_VPN_PRIMARY, "status": STATUS_ENABLED}}),
         client.call("item.get", {"hostids": all_ids, "output": ["hostid", "lastvalue"],
-                                  "filter": {"key_": "vpn_secondary_check[{HOST.IP}]", "status": "0"}}),
+                                  "filter": {"key_": KEY_VPN_SECONDARY, "status": STATUS_ENABLED}}),
         client.call("item.get", {"hostids": all_ids, "output": ["hostid", "lastvalue"],
                                   "search": {"key_": "vpn3"}, "searchWildcardsEnabled": True,
-                                  "filter": {"status": "0"}}),
+                                  "filter": {"status": STATUS_ENABLED}}),
         client.call("usermacro.get", {"hostids": all_ids, "output": ["hostid", "macro", "value"],
                                        "filter": {"macro": ["{$COST_MONTH}", "{$BW_LIMIT}"]}}),
         client.call("host.get", {"hostids": all_ids, "output": ["hostid"],
@@ -468,13 +492,13 @@ async def fetch_all_data(
                     "hostids": missing_hosts,
                     "output": ["hostid", "lastvalue"],
                     "search": {"name": "Incoming network traffic"},
-                    "filter": {"status": "0"},
+                    "filter": {"status": STATUS_ENABLED},
                 }),
                 client.call("item.get", {
                     "hostids": missing_hosts,
                     "output": ["hostid", "lastvalue"],
                     "search": {"name": "Outgoing network traffic"},
-                    "filter": {"status": "0"},
+                    "filter": {"status": STATUS_ENABLED},
                 }),
                 return_exceptions=True,
             )
@@ -702,7 +726,7 @@ async def fetch_trends_batch(
         client.call("item.get", {
             "hostids": hostids,
             "output": ["itemid", "hostid", "key_", "lastvalue", "value_type"],
-            "filter": {"key_": all_keys, "status": "0"},
+            "filter": {"key_": all_keys, "status": STATUS_ENABLED},
         }),
     )
 
