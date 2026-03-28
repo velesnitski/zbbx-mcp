@@ -148,6 +148,7 @@ EXPECTED_TOOLS = {
     "get_fleet_risk_score",
     "get_sla_dashboard",
     "get_report_snapshot",
+    "get_peak_analysis",
 }
 
 
