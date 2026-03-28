@@ -1,6 +1,6 @@
 """Infrastructure cost and optimization report.
 
-Generates a multi-sheet Excel report matching the "Infrastructure Costs" format:
+Generates a multi-sheet Excel infrastructure cost report:
 - Sheet 1: Apps & Infra (servers with specs, costs, provider, product)
 - Sheet 2: Unused/Underloaded (decommission candidates with savings)
 - Sheet 3: Provider Summary (costs, server counts, decomm candidates)
