@@ -5,11 +5,15 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import time as _time
+from datetime import datetime, timezone
 
 import httpx
 
 from zbbx_mcp.classify import classify_host as _classify_host
+from zbbx_mcp.classify import detect_provider
 from zbbx_mcp.data import (
+    build_value_map,
     extract_country,
     fetch_cpu_map,
     fetch_enabled_hosts,
@@ -59,7 +63,6 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                         products.add(prod)
                     ip = host_ip(h)
                     if ip:
-                        from zbbx_mcp.classify import detect_provider
                         prov = detect_provider(ip)
                         if prov not in ("Unknown", "Other"):
                             providers.add(prov)
@@ -144,9 +147,8 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
 
                 def _agg(rows, recent: bool):
                     """Split daily data: recent=True for period B, False for A."""
-                    import time as _time
                     cutoff = _time.time() - days * 86400
-                    from datetime import datetime, timezone
+                    current_year = datetime.now(timezone.utc).year
 
                     traffic_by_host: dict[str, float] = {}
                     country_set: set[str] = set()
@@ -157,15 +159,14 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                         count = 0
                         for day_str, val in r.daily.items():
                             try:
-                                dt = datetime.strptime(day_str, "%b %d").replace(year=2026, tzinfo=timezone.utc)
+                                dt = datetime.strptime(day_str, "%b %d").replace(year=current_year, tzinfo=timezone.utc)
                             except ValueError:
                                 continue
-                            in_recent = dt.timestamp() >= cutoff
-                            if in_recent == recent:
+                            if (dt.timestamp() >= cutoff) == recent:
                                 total += val
                                 count += 1
                         if count > 0:
-                            traffic_by_host[r.hostid] = total / count  # avg Mbps per day
+                            traffic_by_host[r.hostid] = total / count
                         cc = extract_country(r.hostname)
                         if cc:
                             country_set.add(cc)
@@ -219,7 +220,6 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
             """
             try:
                 client = resolver.resolve(instance)
-                from zbbx_mcp.classify import detect_provider
 
                 hosts = await fetch_enabled_hosts(client)
                 by_country = group_by_country(hosts, region=region)
@@ -266,8 +266,9 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
 
                     # Traffic concentration
                     traffics = [traffic_map.get(h["hostid"], 0) for h in cc_hosts]
-                    if traffics and max(traffics) > 0:
-                        top_pct = max(traffics) / sum(traffics) * 100 if sum(traffics) > 0 else 0
+                    traffic_total = sum(traffics)
+                    if traffics and traffic_total > 0:
+                        top_pct = max(traffics) / traffic_total * 100
                         if top_pct > 80 and len(cc_hosts) > 1:
                             score += 15
                             risks.append("traffic concentrated")
@@ -318,8 +319,6 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
             """
             try:
                 client = resolver.resolve(instance)
-                from zbbx_mcp.data import build_value_map
-
                 hosts = await fetch_enabled_hosts(client)
 
                 # service primary check items
@@ -344,7 +343,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     if product and product.lower() not in (prod or "").lower():
                         continue
                     cc = extract_country(h["host"])
-                    if country and cc.lower() != country.lower():
+                    if country and cc and cc.lower() != country.lower():
                         continue
                     if not cc or not prod:
                         continue
@@ -403,8 +402,6 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
             """
             try:
                 client = resolver.resolve(instance)
-                from datetime import datetime, timezone
-
                 hosts = await fetch_enabled_hosts(client)
                 all_ids = [h["hostid"] for h in hosts]
 
