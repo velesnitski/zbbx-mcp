@@ -8,7 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ## [1.3.0] - 2026-03-27
 
 ### Added
-- **91 tools** — 7 new tools:
+- **96 tools** — 12 new tools:
   - `get_server_clusters`: detect host clusters from naming patterns, infer primary/secondary roles
   - `search_hosts_by_location`: compound query with country + group + product + traffic filter
   - `get_event_frequency`: flapping detection — count events per host/trigger with avg interval
@@ -16,7 +16,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   - `get_expansion_report`: regional coverage gap analysis with capacity headroom per country
   - `get_regional_density_map`: server density by country with traffic, CPU, datacenter info
   - `get_latency_estimate`: nearest server by geographic distance (haversine)
+  - `get_executive_dashboard`: single-call KPI summary for leadership (<2000 chars)
+  - `get_month_over_month`: compare two periods on traffic, CPU, countries
+  - `get_fleet_risk_score`: composite risk per country (provider, capacity, redundancy)
+  - `get_sla_dashboard`: uptime % by product/country weighted by traffic
+  - `get_report_snapshot`: save KPIs as JSON for historical comparison
 - `resolve_datacenter(ip)` — IP-to-datacenter-city resolution via CIDR ranges (zero API calls)
+- Executive summary section in HTML report with action badges and country traffic bars
 - `region` filter on `get_geo_traffic_trends`, `detect_traffic_drops`, `detect_traffic_anomalies` (LATAM/APAC/EMEA/NA/CIS/ALL)
 - `product` filter on `detect_geo_blocks`
 - `country` param on `search_hosts` with exact `extract_country()` match
