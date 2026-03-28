@@ -70,7 +70,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 # Growth: compare first vs last week of trend data
                 growth_by_country: dict[str, tuple[float, float]] = {}
                 for tr in trend_rows:
-                    cc = extract_country(tr.host)
+                    cc = extract_country(tr.hostname)
                     if not cc or not tr.daily:
                         continue
                     days = sorted(tr.daily.keys())
@@ -147,7 +147,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     traffic = sum(r.avg for r in rows if r.metric == "traffic") / 1_000_000_000 * 8
                     cpus = [100 - r.avg for r in rows if r.metric == "cpu" and r.avg > 0]
                     avg_cpu = sum(cpus) / len(cpus) if cpus else 0
-                    countries = len({extract_country(r.host) for r in rows if extract_country(r.host)})
+                    countries = len({extract_country(r.hostname) for r in rows if extract_country(r.hostname)})
                     return {"traffic_gbps": round(traffic, 1), "avg_cpu": round(avg_cpu, 1), "countries": countries}
 
                 a = _agg(rows_a)
