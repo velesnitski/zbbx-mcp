@@ -44,12 +44,8 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
         async def rollback_last(instance: str = "") -> str:
             """Undo the most recent write operation.
 
-            For creates: deletes the created object.
-            For updates: restores the previous state.
-            For deletes: re-creates the object from snapshot.
-
             Args:
-                instance: Zabbix instance name (optional, for multi-instance setups)
+                instance: Zabbix instance (optional)
             """
             try:
                 client = resolver.resolve(instance)
