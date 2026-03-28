@@ -96,7 +96,7 @@ Each `ZabbixClient` holds its own `RollbackLog` (bounded deque, max 50 entries).
 
 ### Test notes
 - `test_registration.py` — fast unit test; update `EXPECTED_TOOLS` and run this when adding/removing tools
-- `test_server.py` — spawns the real server as a subprocess and sends JSON-RPC messages over stdio; asserts exactly **88 tools** are registered
+- `test_server.py` — spawns the real server as a subprocess and sends JSON-RPC messages over stdio; asserts exactly **96 tools** are registered
 - Tests use `unittest.mock.patch.dict(os.environ, ..., clear=True)` to isolate config loading from the ambient environment
 
 ## Rules
