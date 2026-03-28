@@ -123,15 +123,15 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
 
         @mcp.tool()
         async def get_month_over_month(
-            period_a: str = "60d-30d",
-            period_b: str = "30d",
+            days: int = 30,
             instance: str = "",
         ) -> str:
-            """Compare two periods across key metrics — traffic, CPU, server count.
+            """Compare current vs previous period — traffic, CPU, countries.
+
+            Fetches 2x the period and splits into two halves for comparison.
 
             Args:
-                period_a: First period (default: 60d-30d, i.e. previous month)
-                period_b: Second period (default: 30d, i.e. current month)
+                days: Period length in days (default: 30 — compares last 30d vs prior 30d)
                 instance: Zabbix instance name (optional)
             """
             try:
@@ -139,19 +139,45 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 hosts = await fetch_enabled_hosts(client)
                 all_ids = [h["hostid"] for h in hosts]
 
-                # Fetch trends for both periods
-                rows_a, _ = await fetch_trends_batch(client, all_ids, ["cpu", "traffic"], period_a)
-                rows_b, _ = await fetch_trends_batch(client, all_ids, ["cpu", "traffic"], period_b)
+                # Fetch 2x period and split by daily data
+                full_period = f"{days * 2}d"
+                trend_rows, _ = await fetch_trends_batch(client, all_ids, ["cpu", "traffic"], full_period)
 
-                def _agg(rows):
-                    traffic = sum(r.avg for r in rows if r.metric == "traffic") / 1_000_000_000 * 8
-                    cpus = [100 - r.avg for r in rows if r.metric == "cpu" and r.avg > 0]
-                    avg_cpu = sum(cpus) / len(cpus) if cpus else 0
-                    countries = len({extract_country(r.hostname) for r in rows if extract_country(r.hostname)})
-                    return {"traffic_gbps": round(traffic, 1), "avg_cpu": round(avg_cpu, 1), "countries": countries}
+                import time as _time
+                cutoff = _time.time() - days * 86400
 
-                a = _agg(rows_a)
-                b = _agg(rows_b)
+                def _agg(rows, use_recent: bool):
+                    """Aggregate from daily data: recent=True for period B, False for A."""
+                    traffic_sum = 0.0
+                    cpu_vals = []
+                    country_set = set()
+                    for r in rows:
+                        if not r.daily:
+                            continue
+                        from datetime import datetime, timezone
+                        for day_str, val in r.daily.items():
+                            try:
+                                dt = datetime.strptime(day_str, "%b %d").replace(year=2026, tzinfo=timezone.utc)
+                                ts = dt.timestamp()
+                            except ValueError:
+                                continue
+                            in_recent = ts >= cutoff
+                            if in_recent != use_recent:
+                                continue
+                            if r.metric == "traffic":
+                                traffic_sum += val
+                            elif r.metric == "cpu":
+                                cpu_vals.append(100 - val if val > 0 else 0)
+                        cc = extract_country(r.hostname)
+                        if cc:
+                            country_set.add(cc)
+
+                    traffic_gbps = round(traffic_sum / 1000, 1) if traffic_sum else 0
+                    avg_cpu = round(sum(cpu_vals) / len(cpu_vals), 1) if cpu_vals else 0
+                    return {"traffic_gbps": traffic_gbps, "avg_cpu": avg_cpu, "countries": len(country_set)}
+
+                a = _agg(trend_rows, use_recent=False)
+                b = _agg(trend_rows, use_recent=True)
 
                 def _delta(va, vb):
                     if va == 0:
@@ -160,7 +186,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     return f"{pct:+.1f}%"
 
                 lines = [
-                    f"**Period comparison: {period_a} vs {period_b}**\n",
+                    f"**Period comparison: prior {days}d vs last {days}d**\n",
                     "| Metric | Period A | Period B | Delta |",
                     "|--------|----------|----------|-------|",
                     f"| Traffic Gbps | {a['traffic_gbps']} | {b['traffic_gbps']} | {_delta(a['traffic_gbps'], b['traffic_gbps'])} |",
