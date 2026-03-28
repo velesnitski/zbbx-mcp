@@ -391,6 +391,10 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 _SKIP_PRODUCTS = {"Monitoring", "Infrastructure", "Unknown"}
                 for h in hosts:
                     hid = h["hostid"]
+                    has_traffic = hid in traffic_map
+                    has_cpu = hid in cpu_map
+                    if not has_traffic and not has_cpu:
+                        continue  # no monitoring data — can't classify
                     traffic = traffic_map.get(hid, 0)
                     cpu = cpu_map.get(hid, 0)
                     vpn_val = vpn_map.get(hid)
@@ -401,11 +405,11 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     ip = host_ip(h)
                     prov = detect_provider(ip) if ip else "?"
 
-                    if traffic < 0.1 and cpu < 2:
+                    if has_traffic and traffic < 0.1 and cpu < 2:
                         dead_servers.append((hostname, prod, prov, cpu, traffic, vpn_val))
                     elif vpn_val == 0 and traffic < 5:
                         broken_servers.append((hostname, prod, prov, cpu, traffic))
-                    elif traffic < 5 and traffic > 0 and cpu < 10:
+                    elif has_traffic and traffic < 5 and traffic > 0 and cpu < 10:
                         idle_servers.append((hostname, prod, prov, cpu, traffic, vpn_val))
 
                 if dead_servers or broken_servers or idle_servers:
