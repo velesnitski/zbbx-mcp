@@ -459,10 +459,14 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     if reasons:
                         deep_dive_countries.append((cc, cd, reasons, cc_hosts))
 
+                # Sort deep dives: critical issues first, then by traffic
+                _REASON_PRIORITY = {"dead": 0, "VPN issues": 1, "traffic drop": 2, "no VPN checks": 3, "infra only": 3, "explosive growth": 4}
+                deep_dive_countries.sort(key=lambda x: (min(_REASON_PRIORITY.get(r, 5) for r in x[2]), -x[1]["traffic_gbps"]))
+
                 if deep_dive_countries:
                     html.append('<div class="section"><h2>Country Deep Dives</h2>')
                     html.append('<div class="desc">Countries requiring detailed analysis</div>')
-                    for cc, cd, reasons, cc_hosts in deep_dive_countries[:6]:
+                    for cc, cd, reasons, cc_hosts in deep_dive_countries[:8]:
                         name = _COUNTRY_NAMES.get(cc, cc)
                         reason_badges = " ".join(_badge("critical" if r in ("dead", "VPN issues") else "high" if r == "traffic drop" else "stable", r) for r in reasons)
 
