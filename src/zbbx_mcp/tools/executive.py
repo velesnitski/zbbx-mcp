@@ -444,3 +444,142 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 return result
             except (httpx.HTTPError, ValueError) as e:
                 return f"Error: {e}"
+
+    
+    if "get_peak_analysis" not in skip:
+
+        @mcp.tool()
+        async def get_peak_analysis(
+            country: str = "",
+            host_id: str = "",
+            period: str = "7d",
+            max_results: int = 10,
+            instance: str = "",
+        ) -> str:
+            """Peak vs off-peak traffic by hour-of-day from trend data.
+
+            Args:
+                country: Aggregate all servers in country (optional)
+                host_id: Single host ID or hostname (optional)
+                period: Lookback period (default: 7d)
+                max_results: Max countries/hosts (default: 10)
+                instance: Zabbix instance name (optional)
+            """
+            try:
+                client = resolver.resolve(instance)
+                from zbbx_mcp.data import TRAFFIC_IN_KEYS
+
+                # Resolve target hosts
+                if host_id:
+                    if not host_id.isdigit():
+                        lookup = await client.call("host.get", {
+                            "output": ["hostid", "host"],
+                            "filter": {"host": [host_id]},
+                        })
+                        if not lookup:
+                            return f"Host '{host_id}' not found."
+                        hosts = lookup
+                    else:
+                        hosts = [{"hostid": host_id, "host": host_id}]
+                else:
+                    hosts = await fetch_enabled_hosts(client, groups=False, interfaces=False)
+                    if country:
+                        hosts = [h for h in hosts if extract_country(h["host"]).lower() == country.lower()]
+
+                if not hosts:
+                    return "No hosts match the filter."
+
+                hids = [h["hostid"] for h in hosts]
+
+                # Get traffic item IDs
+                items = await client.call("item.get", {
+                    "hostids": hids,
+                    "output": ["itemid", "hostid", "key_"],
+                    "filter": {"key_": TRAFFIC_IN_KEYS, "status": "0"},
+                })
+
+                # Pick best (highest value) item per host
+                best_items: dict[str, str] = {}
+                for it in items:
+                    best_items.setdefault(it["hostid"], it["itemid"])
+                item_ids = list(best_items.values())
+
+                if not item_ids:
+                    return "No traffic items found."
+
+                # Parse period
+                days = int(period.rstrip("d")) if period.endswith("d") else 7
+                time_from = int(_time.time()) - days * 86400
+
+                # Fetch hourly trends
+                trends = await client.call("trend.get", {
+                    "itemids": item_ids,
+                    "time_from": time_from,
+                    "output": ["itemid", "clock", "value_avg", "value_max"],
+                    "limit": len(item_ids) * 24 * days,
+                })
+
+                if not trends:
+                    return f"No trend data for {period}."
+
+                if country or not host_id:
+                    # Aggregate by hour-of-day across all hosts
+                    hourly: dict[int, list[float]] = {h: [] for h in range(24)}
+                    hourly_max: dict[int, float] = {h: 0 for h in range(24)}
+                    for t in trends:
+                        dt = datetime.fromtimestamp(int(t["clock"]), tz=timezone.utc)
+                        hour = dt.hour
+                        avg = float(t.get("value_avg", 0)) * 8 / 1_000_000  # bytes/s → Mbps
+                        mx = float(t.get("value_max", 0)) * 8 / 1_000_000
+                        hourly[hour].append(avg)
+                        hourly_max[hour] = max(hourly_max[hour], mx)
+
+                    label = country.upper() if country else "Fleet"
+                    lines = [f"**Peak Analysis — {label}** ({len(hids)} servers, {period})\n"]
+                    lines.append("| Hour UTC | Avg Mbps | Peak Mbps | Samples |")
+                    lines.append("|----------|---------|----------|---------|")
+
+                    peak_hour, peak_val = 0, 0.0
+                    trough_hour, trough_val = 0, float("inf")
+                    for h in range(24):
+                        vals = hourly[h]
+                        if not vals:
+                            continue
+                        avg = sum(vals) / len(vals)
+                        mx = hourly_max[h]
+                        if avg > peak_val:
+                            peak_hour, peak_val = h, avg
+                        if avg < trough_val:
+                            trough_hour, trough_val = h, avg
+                        lines.append(f"| {h:02d}:00 | {avg:.0f} | {mx:.0f} | {len(vals)} |")
+
+                    ratio = round(peak_val / trough_val, 1) if trough_val > 0 else 0
+                    lines.append(f"\n**Peak:** {peak_hour:02d}:00 ({peak_val:.0f} Mbps) | "
+                                 f"**Trough:** {trough_hour:02d}:00 ({trough_val:.0f} Mbps) | "
+                                 f"**Ratio:** {ratio}x")
+
+                else:
+                    # Single host — show raw hourly
+                    hourly_vals: list[tuple[str, float, float]] = []
+                    for t in sorted(trends, key=lambda x: x["clock"]):
+                        dt = datetime.fromtimestamp(int(t["clock"]), tz=timezone.utc)
+                        avg = float(t.get("value_avg", 0)) * 8 / 1_000_000
+                        mx = float(t.get("value_max", 0)) * 8 / 1_000_000
+                        hourly_vals.append((dt.strftime("%m-%d %H:00"), avg, mx))
+
+                    lines = [f"**Peak Analysis — {host_id}** ({period})\n"]
+                    lines.append("| Time | Avg Mbps | Peak Mbps |")
+                    lines.append("|------|---------|----------|")
+                    # Show last 48 hours max to keep token-efficient
+                    for ts, avg, mx in hourly_vals[-48:]:
+                        lines.append(f"| {ts} | {avg:.0f} | {mx:.0f} |")
+
+                    if hourly_vals:
+                        avgs = [v[1] for v in hourly_vals]
+                        lines.append(f"\n**Avg:** {sum(avgs)/len(avgs):.0f} Mbps | "
+                                     f"**Peak:** {max(avgs):.0f} Mbps | "
+                                     f"**Min:** {min(avgs):.0f} Mbps")
+
+                return "\n".join(lines)
+            except (httpx.HTTPError, ValueError) as e:
+                return f"Error: {e}"
