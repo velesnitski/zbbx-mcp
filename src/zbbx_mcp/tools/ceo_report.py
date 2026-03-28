@@ -201,9 +201,11 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                         else:
                             cd["trend"] = "stable"
 
-                        # Sanity: if current >> avg, can't be "dropping"
-                        if cd["traffic_gbps"] > avg * 2 and cd["trend"] == "dropping":
+                        # Sanity: trend label must not contradict change direction
+                        if cd["traffic_gbps"] > avg * 1.5 and cd["trend"] == "dropping":
                             cd["trend"] = "rising"
+                        elif cd["change"] > 0 and cd["trend"] == "dropping":
+                            cd["trend"] = "stable"
                         if cd["traffic_gbps"] < 0.01 and avg > 0.05:
                             cd["trend"] = "dead"
                     else:
