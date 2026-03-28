@@ -733,7 +733,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                         "traffic_gbps": round(total_mbps / 1000, 2),
                         "density_mbps": round(density, 1),
                         "providers": len(providers),
-                        "status": "OVERLOADED" if density > 500 else "OK" if density > 50 else "LOW",
+                        "status": "OVERLOADED" if density > 3000 else "HIGH" if density > 1500 else "OK" if density > 50 else "LOW",
                     })
 
                 missing = sorted(region_codes - set(by_country.keys()))
