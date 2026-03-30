@@ -151,6 +151,7 @@ EXPECTED_TOOLS = {
     "get_sla_dashboard",
     "get_report_snapshot",
     "get_peak_analysis",
+    "get_product_audit",
     # ceo_report.py
     "generate_ceo_report",
 }
