@@ -1,10 +1,6 @@
+import zbbx_mcp.excel as _excel
 from zbbx_mcp.excel import (
     BW_RED,
-    DARK_RED_FILL,
-    GREEN_FILL,
-    LIGHT_GREEN_FILL,
-    ORANGE_FILL,
-    RED_FILL,
     bandwidth_fill,
     classify_bandwidth,
     cpu_fill,
@@ -32,25 +28,25 @@ class TestClassifyBandwidth:
 class TestBandwidthFill:
     def test_over_max(self):
         fill, font = bandwidth_fill(850.0)
-        assert fill == DARK_RED_FILL
+        assert fill == _excel.DARK_RED_FILL
         assert font is not None
 
     def test_red(self):
         fill, font = bandwidth_fill(700.0)
-        assert fill == RED_FILL
+        assert fill == _excel.RED_FILL
         assert font is None
 
     def test_orange(self):
         fill, _ = bandwidth_fill(550.0)
-        assert fill == ORANGE_FILL
+        assert fill == _excel.ORANGE_FILL
 
     def test_green(self):
         fill, _ = bandwidth_fill(300.0)
-        assert fill == GREEN_FILL
+        assert fill == _excel.GREEN_FILL
 
     def test_light_green(self):
         fill, _ = bandwidth_fill(50.0)
-        assert fill == LIGHT_GREEN_FILL
+        assert fill == _excel.LIGHT_GREEN_FILL
 
     def test_none(self):
         fill, font = bandwidth_fill(None)
@@ -59,14 +55,17 @@ class TestBandwidthFill:
 
 
 class TestCpuFill:
+    def test_critical(self):
+        assert cpu_fill(90.0) == _excel.RED_FILL
+
     def test_high(self):
-        assert cpu_fill(85.0) == RED_FILL
+        assert cpu_fill(80.0) == _excel.RED_FILL
 
     def test_medium(self):
-        assert cpu_fill(60.0) == ORANGE_FILL
+        assert cpu_fill(50.0) == _excel.ORANGE_FILL
 
     def test_low(self):
-        assert cpu_fill(5.0) == GREEN_FILL
+        assert cpu_fill(5.0) == _excel.GREEN_FILL
 
     def test_normal(self):
         assert cpu_fill(30.0) is None
