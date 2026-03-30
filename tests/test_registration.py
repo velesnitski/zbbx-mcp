@@ -96,6 +96,7 @@ EXPECTED_TOOLS = {
     "get_underloaded_servers",
     "get_provider_summary",
     "get_unknown_providers",
+    "identify_providers",
     # report.py
     "generate_server_report",
     # infra_report.py

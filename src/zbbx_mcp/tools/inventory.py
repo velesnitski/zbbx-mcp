@@ -632,3 +632,106 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()):
                 return "\n".join(lines)
             except (httpx.HTTPError, ValueError) as e:
                 return f"Error: {e}"
+
+    if "identify_providers" not in skip:
+
+        @mcp.tool()
+        async def identify_providers(
+            min_servers: int = 2,
+            max_results: int = 20,
+            instance: str = "",
+        ) -> str:
+            """Auto-identify unclassified providers via reverse DNS lookup.
+
+            Args:
+                min_servers: Minimum servers per /16 to investigate (default: 2)
+                max_results: Maximum prefixes to resolve (default: 20)
+                instance: Zabbix instance name (optional)
+            """
+            import asyncio as _aio
+            import socket
+
+            try:
+                client = resolver.resolve(instance)
+                hosts = await client.call("host.get", {
+                    "output": ["hostid", "host"],
+                    "selectInterfaces": ["ip"],
+                    "filter": {"status": "0"},
+                })
+
+                # Group "Other" IPs by /16
+                prefixes: dict[str, dict] = {}
+                for h in hosts:
+                    ip = ""
+                    for iface in h.get("interfaces", []):
+                        if iface.get("ip") and iface["ip"] != "127.0.0.1":
+                            ip = iface["ip"]
+                            break
+                    if not ip or detect_provider(ip) != "Other":
+                        continue
+                    parts = ip.split(".")
+                    pfx = f"{parts[0]}.{parts[1]}.0.0/16"
+                    entry = prefixes.setdefault(pfx, {"count": 0, "ips": []})
+                    entry["count"] += 1
+                    if len(entry["ips"]) < 2:
+                        entry["ips"].append(ip)
+
+                # Filter by min_servers, sort by count
+                targets = sorted(
+                    [(pfx, d) for pfx, d in prefixes.items() if d["count"] >= min_servers],
+                    key=lambda x: -x[1]["count"],
+                )[:max_results]
+
+                if not targets:
+                    return f"No unclassified prefixes with {min_servers}+ servers."
+
+                # Reverse DNS lookups (async batched)
+                def _rdns(ip: str) -> str:
+                    try:
+                        hostname = socket.gethostbyaddr(ip)[0]
+                        # Extract domain: take last 2-3 parts
+                        parts = hostname.split(".")
+                        if len(parts) >= 3:
+                            return ".".join(parts[-3:])
+                        return hostname
+                    except (socket.herror, socket.gaierror, OSError):
+                        return ""
+
+                loop = _aio.get_event_loop()
+                rdns_tasks = []
+                for pfx, data in targets:
+                    for ip in data["ips"][:1]:  # one lookup per prefix
+                        rdns_tasks.append((pfx, ip, loop.run_in_executor(None, _rdns, ip)))
+
+                results = []
+                for pfx, ip, task in rdns_tasks:
+                    rdns = await task
+                    results.append((pfx, prefixes[pfx]["count"], ip, rdns))
+
+                # Group by rDNS domain to suggest provider names
+                domain_groups: dict[str, list] = {}
+                for pfx, count, _ip, rdns in results:
+                    key = rdns if rdns else "no-rdns"
+                    domain_groups.setdefault(key, []).append((pfx, count))
+
+                lines = [f"**Provider identification** ({len(results)} prefixes)\n"]
+                lines.append("| /16 Prefix | Servers | Sample rDNS | Suggested Add |")
+                lines.append("|-----------|---------|-------------|---------------|")
+                for pfx, count, _ip, rdns in sorted(results, key=lambda x: -x[1]):
+                    suggest = f'"{pfx}"' if count >= 3 else "low count"
+                    lines.append(f"| {pfx} | {count} | {rdns or 'no rDNS'} | {suggest} |")
+
+                # Summary: group by rDNS domain
+                if domain_groups:
+                    lines.append("\n**Suggested CIDR additions:**")
+                    for domain in sorted(domain_groups, key=lambda d: -sum(c for _, c in domain_groups[d])):
+                        pfxs = domain_groups[domain]
+                        total = sum(c for _, c in pfxs)
+                        if total < 3 or domain == "no-rdns":
+                            continue
+                        cidr_list = ", ".join(f'"{p}"' for p, _ in pfxs)
+                        lines.append(f'- **{domain}** ({total} servers): [{cidr_list}]')
+
+                return "\n".join(lines)
+            except (httpx.HTTPError, ValueError) as e:
+                return f"Error: {e}"
