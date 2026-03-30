@@ -668,8 +668,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                         cat = "ACTIVE"
 
                     # Dashboard lookup
-                    dash_info = dash_map.get(hid)
-                    dash = dash_info[0] if dash_info else "-"
+                    dash = dash_map.get(hid, "-")
 
                     matched.append({
                         "host": hostname, "cc": cc,

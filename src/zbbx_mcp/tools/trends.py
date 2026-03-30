@@ -708,8 +708,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()):
                         reason = f"Traffic {traffic_avg} Mbps, CPU {cpu_avg}%"
 
                     if category:
-                        dash_info = dash_map.get(hid)
-                        dash = dash_info[0] if dash_info else "-"
+                        dash = dash_map.get(hid, "-")
                         candidates.append({
                             "host": h["host"], "ip": ip, "category": category, "reason": reason,
                             "product": h.get("_prod", ""), "tier": h.get("_tier", ""),

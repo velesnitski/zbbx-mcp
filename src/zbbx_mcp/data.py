@@ -232,23 +232,26 @@ async def fetch_traffic_map(client: ZabbixClient, hostids: list[str]) -> dict[st
     return result
 
 
-async def fetch_host_dashboards(client: ZabbixClient) -> dict[str, tuple[str, int, str]]:
-    """Build host_id → (dashboard_name, page_index, dashboard_id) lookup. One API call."""
+async def fetch_host_dashboards(client: ZabbixClient) -> dict[str, str]:
+    """Build host_id → 'Dashboard - Page' label lookup. One API call."""
     dashboards = await client.call("dashboard.get", {
         "output": ["dashboardid", "name"],
         "selectPages": "extend",
     })
-    result: dict[str, tuple[str, int, str]] = {}
+    result: dict[str, str] = {}
     for d in dashboards:
-        did = d["dashboardid"]
         dname = d.get("name", "?")
-        for pi, page in enumerate(d.get("pages", [])):
+        # Strip common prefix (product name + separator) for compact display
+        short = dname.split(" - ", 1)[-1] if " - " in dname else dname
+        for _pi, page in enumerate(d.get("pages", [])):
+            pname = page.get("name", "").strip()
+            label = f"{short} - {pname}" if pname else short
             for w in page.get("widgets", []):
                 for f in w.get("fields", []):
                     if f.get("type") == "3":  # host reference
                         hid = f["value"]
                         if hid not in result:
-                            result[hid] = (dname, pi, did)
+                            result[hid] = label
     return result
 
 
