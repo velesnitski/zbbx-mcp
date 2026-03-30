@@ -410,37 +410,30 @@ class TestProductHiding:
         monkeypatch.setenv("ZABBIX_HIDE_PRODUCTS", "Legacy,OldProduct")
         # Reset cache so it re-reads env
         import zbbx_mcp.data as _data
-        _data._HIDE_PRODUCTS_CACHE = None
         assert _data.is_hidden_product("Legacy") is True
         assert _data.is_hidden_product("legacy") is True  # case insensitive
         assert _data.is_hidden_product("OldProduct") is True
         assert _data.is_hidden_product("ActiveProduct") is False
         assert _data.is_hidden_product("AnotherProduct") is False
-        _data._HIDE_PRODUCTS_CACHE = None  # cleanup
 
     def test_is_hidden_empty_env(self, monkeypatch):
         """Nothing hidden when env var is empty."""
         monkeypatch.setenv("ZABBIX_HIDE_PRODUCTS", "")
         import zbbx_mcp.data as _data
-        _data._HIDE_PRODUCTS_CACHE = None
         assert _data.is_hidden_product("Legacy") is False
         assert _data.is_hidden_product("anything") is False
-        _data._HIDE_PRODUCTS_CACHE = None
 
     def test_is_hidden_unset_env(self, monkeypatch):
         """Nothing hidden when env var is not set."""
         monkeypatch.delenv("ZABBIX_HIDE_PRODUCTS", raising=False)
         import zbbx_mcp.data as _data
-        _data._HIDE_PRODUCTS_CACHE = None
         assert _data.is_hidden_product("Legacy") is False
-        _data._HIDE_PRODUCTS_CACHE = None
 
     def test_group_by_country_excludes_hidden(self, monkeypatch):
         """group_by_country should skip hosts with hidden products."""
         monkeypatch.setenv("ZABBIX_HIDE_PRODUCTS", "Legacy")
         monkeypatch.setenv("ZABBIX_PRODUCT_MAP", "")  # use raw group names
         import zbbx_mcp.data as _data
-        _data._HIDE_PRODUCTS_CACHE = None
 
         hosts = [
             {"hostid": "1", "host": "srv-de01", "groups": [{"name": "good_product"}]},
@@ -452,13 +445,11 @@ class TestProductHiding:
         assert len(result.get("DE", [])) == 1
         assert result["DE"][0]["hostid"] == "1"
         assert "NL" in result
-        _data._HIDE_PRODUCTS_CACHE = None
 
     def test_fleet_composition_filter(self, monkeypatch):
         """Simulate CEO report fleet composition: hidden + non-service excluded."""
         monkeypatch.setenv("ZABBIX_HIDE_PRODUCTS", "Legacy")
         import zbbx_mcp.data as _data
-        _data._HIDE_PRODUCTS_CACHE = None
 
         _NON_service = {"Monitoring", "Infrastructure", "Unknown"}
 
@@ -483,7 +474,6 @@ class TestProductHiding:
         assert "Monitoring" not in product_counts
         assert "Infrastructure" not in product_counts
         assert "Unknown" not in product_counts
-        _data._HIDE_PRODUCTS_CACHE = None
 
     def test_ceo_report_two_step_filter(self, monkeypatch):
         """Simulate the actual CEO report flow: service_hosts then fleet composition.
@@ -494,7 +484,6 @@ class TestProductHiding:
         monkeypatch.setenv("ZABBIX_HIDE_PRODUCTS", "Legacy")
         monkeypatch.setenv("ZABBIX_PRODUCT_MAP", "")
         import zbbx_mcp.data as _data
-        _data._HIDE_PRODUCTS_CACHE = None
 
         _NON_service = {"Monitoring", "Infrastructure", "Unknown"}
 
@@ -537,4 +526,3 @@ class TestProductHiding:
         assert total_from_header == total_from_composition, \
             f"Header says {total_from_header} but composition sums to {total_from_composition}"
 
-        _data._HIDE_PRODUCTS_CACHE = None
