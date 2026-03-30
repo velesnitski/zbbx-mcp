@@ -656,7 +656,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                         cat = "NO DATA"
                     elif traffic < 0.1 and cpu < 2:
                         cat = "DEAD"
-                    elif service_val == 0:
+                    elif service_val == 0 and traffic < 2:
                         cat = "service DOWN"
                     elif traffic < 5:
                         cat = "IDLE"
