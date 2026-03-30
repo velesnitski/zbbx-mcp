@@ -45,10 +45,21 @@ KEY_service_PRIMARY = os.environ.get("ZABBIX_service_CHECK_KEY", "")
 KEY_service_SECONDARY = os.environ.get("ZABBIX_service2_CHECK_KEY", "")
 KEY_service_TERTIARY = os.environ.get("ZABBIX_service3_CHECK_KEY", "")
 KEY_CONNECTIONS = os.environ.get("ZABBIX_CONNECTIONS_KEY", "")
-# Products to hide from all reports (comma-separated)
-HIDE_PRODUCTS: frozenset[str] = frozenset(
-    p.strip() for p in os.environ.get("ZABBIX_HIDE_PRODUCTS", "").split(",") if p.strip()
-)
+# Products to hide from all reports (comma-separated, read lazily)
+_HIDE_PRODUCTS_CACHE: frozenset[str] | None = None
+
+
+def _get_hide_products() -> frozenset[str]:
+    global _HIDE_PRODUCTS_CACHE
+    if _HIDE_PRODUCTS_CACHE is None:
+        _HIDE_PRODUCTS_CACHE = frozenset(
+            p.strip() for p in os.environ.get("ZABBIX_HIDE_PRODUCTS", "").split(",") if p.strip()
+        )
+    return _HIDE_PRODUCTS_CACHE
+
+
+# Keep for backward compat
+HIDE_PRODUCTS = _get_hide_products()
 # Standard Zabbix agent keys
 KEY_CPU_IDLE = "system.cpu.util[,idle]"
 KEY_CPU_LOAD = "system.cpu.load[percpu,avg5]"
@@ -217,9 +228,10 @@ async def fetch_cpu_map(client: ZabbixClient, hostids: list[str]) -> dict[str, f
 
 def is_hidden_product(product: str) -> bool:
     """Check if a product should be hidden from reports."""
-    if not HIDE_PRODUCTS:
+    hide = _get_hide_products()
+    if not hide:
         return False
-    return product.lower() in {p.lower() for p in HIDE_PRODUCTS}
+    return product.lower() in {p.lower() for p in hide}
 
 
 def group_by_country(
