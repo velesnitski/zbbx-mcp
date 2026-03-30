@@ -5,6 +5,41 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.5.0] - 2026-03-30
+
+### Added
+- **100 tools** — 14 new tools since v1.3.0:
+  - `generate_ceo_report`: CEO-grade HTML report with fleet KPIs, executive summary alerts, traffic redistribution analysis, country deep dives, capacity planning, risk assessment, provider distribution, expansion opportunities, shutdown candidates, strategic recommendations, and status legend
+  - `get_peak_analysis`: peak vs off-peak traffic by hour-of-day from trend data
+  - `get_unknown_providers`: group unclassified server IPs by /16 prefix
+  - `identify_providers`: auto-detect unknown hosting providers via reverse DNS
+- `ZABBIX_HIDE_PRODUCTS` env var to globally filter products from all reports
+- `ZABBIX_service_CHECK_KEY`, `ZABBIX_service2_CHECK_KEY`, `ZABBIX_service3_CHECK_KEY` — configurable service health check item keys
+- `ZABBIX_CONNECTIONS_KEY` — configurable connection count item key
+- 93 hosting providers (368 CIDR ranges) in IP classification database
+- Datacenter city resolution via CIDR ranges (`resolve_datacenter`)
+- Region filters on geo/traffic tools (LATAM, APAC, EMEA, NA, CIS)
+- UK → GB country code normalization
+- Traffic redistribution analysis in CEO report (where traffic goes when servers go down)
+- Status legend section in CEO report explaining all severity labels
+- Country deep dives with auto-detection (dead, blocked, growth, no service checks)
+
+### Changed
+- service check keys fully configurable via env vars (no hardcoded item keys)
+- Traffic unit fix: removed incorrect *8 multiplier (values are bits/sec)
+- Trend sanity: change < -30% forces "dropping", change > +30% forces "rising"
+- CEO report uses TrendRow.avg/current for consistent same-source data
+- Dead server detection requires actual traffic monitoring data
+- Provider distribution skips hosts without IP
+- Expansion thresholds: OVERLOADED at 3000 Mbps/server, HIGH at 1500
+
+### Fixed
+- Germany "Rising -13%" — negative change now overrides "rising" to "stable"
+- Italy "Stable -47%" — large decline now overrides "stable" to "dropping"
+- Dead server count 104 → ~9 (was counting hosts without monitoring data)
+- CEO report change % was mixing snapshot vs trend data sources
+- HTML report 30d Zabbix 500 — batched trend fetch in 200-host chunks
+
 ## [1.4.0] - 2026-03-28
 
 ### Added
