@@ -183,22 +183,51 @@ async def fetch_enabled_hosts(
 
 
 async def fetch_traffic_map(client: ZabbixClient, hostids: list[str]) -> dict[str, float]:
-    """Fetch max inbound traffic (Mbps) per host. Returns {hostid: mbps}."""
+    """Fetch max inbound traffic (Mbps) per host. Returns {hostid: mbps}.
+
+    Uses tag-based discovery (Application: Network interfaces) to find ALL
+    physical NIC items, with fallback to TRAFFIC_IN_KEYS for older Zabbix.
+    """
     if not hostids:
         return {}
-    items = await client.call("item.get", {
-        "hostids": hostids,
-        "output": ["hostid", "lastvalue"],
-        "filter": {"key_": TRAFFIC_IN_KEYS},
-    })
+
+    # Try tag-based discovery first (Zabbix 6.4+) — catches all NIC types
+    try:
+        items = await client.call("item.get", {
+            "hostids": hostids,
+            "output": ["hostid", "lastvalue", "key_"],
+            "tags": [{"tag": "Application", "value": "Network interfaces", "operator": "1"}],
+            "filter": {"status": STATUS_ENABLED},
+            "search": {"key_": "net.if.in["},
+            "searchWildcardsEnabled": True,
+        })
+    except Exception:
+        items = []
+
+    # Fallback: hardcoded NIC keys (for Zabbix < 6.4 or if tags not configured)
+    if not items:
+        items = await client.call("item.get", {
+            "hostids": hostids,
+            "output": ["hostid", "lastvalue", "key_"],
+            "filter": {"key_": TRAFFIC_IN_KEYS},
+        })
+
+    # Filter out virtual interfaces (tun, docker, veth, br-, lo, unbound, squid)
+    _VIRTUAL = ("tun", "docker", "veth", "br-", "lo", "unbound", "squid", "ppp")
+
     result: dict[str, float] = {}
     for it in items:
         try:
+            key = it.get("key_", "")
+            # Extract interface name from net.if.in[iface]
+            iface = key.split("[")[1].rstrip("]") if "[" in key else ""
+            if any(iface.startswith(v) for v in _VIRTUAL):
+                continue
             mbps = float(it.get("lastvalue", 0)) / 1_000_000
             hid = it["hostid"]
             if hid not in result or mbps > result[hid]:
                 result[hid] = mbps
-        except (ValueError, TypeError):
+        except (ValueError, TypeError, IndexError):
             pass
     return result
 
