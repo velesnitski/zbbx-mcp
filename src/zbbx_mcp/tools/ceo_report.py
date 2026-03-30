@@ -11,8 +11,6 @@ import httpx
 from zbbx_mcp.classify import classify_host as _classify_host
 from zbbx_mcp.classify import detect_provider
 from zbbx_mcp.data import (
-    KEY_service_PRIMARY,
-    build_value_map,
     extract_country,
     fetch_cpu_map,
     fetch_enabled_hosts,
@@ -128,15 +126,9 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     fetch_cpu_map(client, all_ids),
                 )
 
-                # service check
-                service_map: dict[str, int] = {}
-                if KEY_service_PRIMARY:
-                    service_items = await client.call("item.get", {
-                        "hostids": all_ids,
-                        "output": ["hostid", "lastvalue"],
-                        "filter": {"key_": KEY_service_PRIMARY, "status": "0"},
-                    })
-                    service_map = build_value_map(service_items, lambda v: int(float(v)))
+                # service check (all configured protocols)
+                from zbbx_mcp.data import fetch_service_status
+                service_map = await fetch_service_status(client, all_ids)
 
                                 _NON_service = {"Monitoring", "Infrastructure", "Unknown"}
                 service_hosts = [h for h in hosts
@@ -166,12 +158,13 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 for cc, cc_hosts in by_country.items():
                     traffic = sum(traffic_map.get(h["hostid"], 0) for h in cc_hosts)
                     cpus = [cpu_map[h["hostid"]] for h in cc_hosts if h["hostid"] in cpu_map]
-                    service_up = sum(1 for h in cc_hosts if service_map.get(h["hostid"]) == 1)
+                    service_up = sum(1 for h in cc_hosts if service_map.get(h["hostid"], 0) >= 1)
+                    service_partial = sum(1 for h in cc_hosts if service_map.get(h["hostid"]) == -1)
                     service_total = sum(1 for h in cc_hosts if h["hostid"] in service_map)
                     country_data[cc] = {
                         "servers": len(cc_hosts), "traffic_gbps": round(traffic / 1000, 1),
                         "avg_cpu": round(sum(cpus) / len(cpus), 1) if cpus else 0,
-                        "service_up": service_up, "service_total": service_total,
+                        "service_up": service_up, "service_partial": service_partial, "service_total": service_total,
                     }
 
                 # Aggregate trends by country using TrendRow.avg and .current

@@ -674,7 +674,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()):
 
                     cpu_avg = cpu.avg if cpu else None
                     traffic_avg = traffic.avg if traffic else None
-                    service = "DOWN" if service1_val == 0 else ("OK" if service1_val == 1 else "")
+                    service = "DOWN" if service1_val == 0 else ("PARTIAL" if service1_val == -1 else ("OK" if service1_val == 1 else ""))
 
                     category = None
                     reason = ""
