@@ -168,7 +168,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                         "vpn_up": vpn_up, "vpn_total": vpn_total,
                     }
 
-                # Aggregate trends by country
+                # Aggregate trends by country (convert to Mbps to match traffic_map)
                 country_trends: dict[str, dict[str, float]] = {}
                 for tr in trend_rows:
                     cc = extract_country(tr.hostname)
@@ -183,15 +183,20 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     ct = country_trends.get(cc, {})
                     if ct:
                         days = sorted(ct.items())
-                        avg = sum(v for _, v in days) / len(days) / 1000 if days else 0
-                        cd["avg_gbps"] = round(avg, 1)
-                        # Change = current vs avg
-                        if avg > 0:
-                            cd["change"] = round((cd["traffic_gbps"] - avg) / avg * 100)
+                        # Daily values are in same unit as TrendRow — use /1000 for Gbps
+                        avg_raw = sum(v for _, v in days) / len(days) if days else 0
+                        avg_gbps = avg_raw / 1000
+                        cd["avg_gbps"] = round(avg_gbps, 1)
+                        # Change: use trend avg vs trend avg (not current snapshot)
+                        # to avoid snapshot-vs-average unit mismatch
+                        if len(days) >= 2:
+                            recent_days = days[-min(7, len(days)):]
+                            recent_avg = sum(v for _, v in recent_days) / len(recent_days) / 1000
+                            cd["change"] = round((recent_avg - avg_gbps) / avg_gbps * 100) if avg_gbps > 0 else 0
                         else:
                             cd["change"] = 0
 
-                        if len(days) >= 4 and avg >= 0.05:
+                        if len(days) >= 4 and avg_gbps >= 0.05:
                             q = max(len(days) // 4, 1)
                             older = sum(v for _, v in days[:q]) / q
                             recent = sum(v for _, v in days[-q:]) / q
@@ -204,11 +209,11 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                             cd["trend"] = "stable"
 
                         # Sanity: trend label must not contradict change direction
-                        if cd["traffic_gbps"] > avg * 1.5 and cd["trend"] == "dropping":
+                        if cd["traffic_gbps"] > avg_gbps * 1.5 and cd["trend"] == "dropping":
                             cd["trend"] = "rising"
                         elif cd["change"] > 0 and cd["trend"] == "dropping":
                             cd["trend"] = "stable"
-                        if cd["traffic_gbps"] < 0.01 and avg > 0.05:
+                        if cd["traffic_gbps"] < 0.01 and avg_gbps > 0.05:
                             cd["trend"] = "dead"
                     else:
                         cd["avg_gbps"] = 0
