@@ -22,7 +22,7 @@ from zbbx_mcp.excel import BW_MAX, classify_bandwidth
 __all__ = [
     "ServerRow", "extract_country", "fetch_all_data", "fetch_trends_batch",
     "build_value_map", "build_max_map", "countries_for_region",
-    "fetch_enabled_hosts", "fetch_traffic_map", "fetch_cpu_map",
+    "fetch_enabled_hosts", "fetch_traffic_map", "fetch_cpu_map", "fetch_host_dashboards",
     "group_by_country", "host_ip", "is_hidden_product", "HIDE_PRODUCTS",
     "TRAFFIC_IN_KEYS", "TRAFFIC_OUT_KEYS", "METRIC_KEYS", "GB_BYTES",
     "REGION_MAP", "CAPITAL_COORDS",
@@ -229,6 +229,26 @@ async def fetch_traffic_map(client: ZabbixClient, hostids: list[str]) -> dict[st
                 result[hid] = mbps
         except (ValueError, TypeError, IndexError):
             pass
+    return result
+
+
+async def fetch_host_dashboards(client: ZabbixClient) -> dict[str, tuple[str, int, str]]:
+    """Build host_id → (dashboard_name, page_index, dashboard_id) lookup. One API call."""
+    dashboards = await client.call("dashboard.get", {
+        "output": ["dashboardid", "name"],
+        "selectPages": "extend",
+    })
+    result: dict[str, tuple[str, int, str]] = {}
+    for d in dashboards:
+        did = d["dashboardid"]
+        dname = d.get("name", "?")
+        for pi, page in enumerate(d.get("pages", [])):
+            for w in page.get("widgets", []):
+                for f in w.get("fields", []):
+                    if f.get("type") == "3":  # host reference
+                        hid = f["value"]
+                        if hid not in result:
+                            result[hid] = (dname, pi, did)
     return result
 
 
