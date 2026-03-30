@@ -730,17 +730,29 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()):
                 parts = [
                     f"**Shutdown Candidates ({period}): {len(candidates)} of {len(filtered)} servers**\n",
                     " | ".join(f"{k}: {v}" for k, v in sorted(counts.items(), key=lambda x: order.get(x[0], 9))),
-                    "",
-                    "| Category | Server | IP | Product | Dashboard | CPU% | Traffic | service | Reason |",
-                    "|----------|--------|----|---------|-----------|------|---------|-----|--------|",
                 ]
-                for c in candidates:
-                    cpu_s = f"{c['cpu_avg']:.1f}" if c["cpu_avg"] is not None else "N/A"
-                    t_s = f"{c['traffic_avg']:.1f}" if c["traffic_avg"] is not None else "N/A"
-                    parts.append(
-                        f"| {c['category']} | {c['host']} | {c.get('ip', '')} | {c['product']}/{c['tier']} | "
-                        f"{c['dash']} | {cpu_s}% | {t_s} Mbps | {c['service']} | {c['reason']} |"
-                    )
+
+                # Check if all on same dashboard (or all orphaned)
+                dashes = {c["dash"] for c in candidates}
+                if dashes == {"-"}:
+                    parts.append("All orphaned (not on any dashboard)")
+
+                # Compact output: group by category, list names with key metric
+                for cat in ["DEAD", "ZOMBIE", "BROKEN", "IDLE"]:
+                    group = [c for c in candidates if c["category"] == cat]
+                    if not group:
+                        continue
+                    if cat == "DEAD":
+                        names = ", ".join(c["host"] for c in group)
+                        parts.append(f"\n**DEAD ({len(group)}):** {names}")
+                    else:
+                        entries = []
+                        for c in group:
+                            t = f"{c['traffic_avg']:.1f}" if c["traffic_avg"] is not None else "?"
+                            service = " service DOWN" if c["service"] == "DOWN" else ""
+                            d = f" [{c['dash']}]" if c["dash"] != "-" else ""
+                            entries.append(f"{c['host']} ({t} Mbps{service}{d})")
+                        parts.append(f"\n**{cat} ({len(group)}):** {', '.join(entries)}")
 
                 return "\n".join(parts)
             except (httpx.HTTPError, ValueError) as e:
