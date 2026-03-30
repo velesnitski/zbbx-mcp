@@ -586,3 +586,108 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 return "\n".join(lines)
             except (httpx.HTTPError, ValueError) as e:
                 return f"Error: {e}"
+
+    
+    if "get_product_audit" not in skip:
+
+        @mcp.tool()
+        async def get_product_audit(
+            product: str = "",
+            instance: str = "",
+        ) -> str:
+            """Audit servers for a product — categorize as active, dead, infra, or idle.
+
+            Args:
+                product: Product name to audit (required)
+                instance: Zabbix instance name (optional)
+            """
+            if not product:
+                return "product is required."
+            try:
+                client = resolver.resolve(instance)
+                hosts = await fetch_enabled_hosts(client, extra_output=["status"])
+                all_ids = [h["hostid"] for h in hosts]
+
+                traffic_map, cpu_map = await asyncio.gather(
+                    fetch_traffic_map(client, all_ids),
+                    fetch_cpu_map(client, all_ids),
+                )
+
+                service_map: dict[str, int] = {}
+                if KEY_service_PRIMARY:
+                    service_items = await client.call("item.get", {
+                        "hostids": all_ids,
+                        "output": ["hostid", "lastvalue"],
+                        "filter": {"key_": KEY_service_PRIMARY, "status": "0"},
+                    })
+                    service_map = build_value_map(service_items, lambda v: int(float(v)))
+
+                matched = []
+                for h in hosts:
+                    prod, tier = _classify_host(h.get("groups", []))
+                    if not prod or product.lower() not in prod.lower():
+                        continue
+                    hid = h["hostid"]
+                    traffic = traffic_map.get(hid, 0)
+                    cpu = cpu_map.get(hid, 0)
+                    service_val = service_map.get(hid)
+                    ip = host_ip(h)
+                    prov = detect_provider(ip) if ip else "?"
+                    cc = extract_country(h["host"])
+
+                    # Categorize
+                    if prod == "Infrastructure" or prod == "Monitoring":
+                        cat = "INFRA"
+                    elif hid not in traffic_map:
+                        cat = "NO DATA"
+                    elif traffic < 0.1 and cpu < 2:
+                        cat = "DEAD"
+                    elif service_val == 0:
+                        cat = "service DOWN"
+                    elif traffic < 5:
+                        cat = "IDLE"
+                    else:
+                        cat = "ACTIVE"
+
+                    matched.append({
+                        "host": h["host"], "cc": cc,
+                        "prov": prov, "traffic": traffic, "cpu": cpu,
+                        "service": service_val, "cat": cat,
+                    })
+
+                if not matched:
+                    return f"No servers found for '{product}'."
+
+                cats: dict[str, int] = {}
+                for m in matched:
+                    cats[m["cat"]] = cats.get(m["cat"], 0) + 1
+
+                total_traffic = sum(m["traffic"] for m in matched)
+                countries = len({m["cc"] for m in matched if m["cc"]})
+
+                lines = [
+                    f"**Product Audit: {product}** ({len(matched)} servers)\n",
+                    f"Traffic: {total_traffic / 1000:.1f} Gbps | Countries: {countries}\n",
+                    "| Category | Count |",
+                    "|----------|-------|",
+                ]
+                for cat in ["ACTIVE", "IDLE", "service DOWN", "DEAD", "NO DATA", "INFRA"]:
+                    if cat in cats:
+                        lines.append(f"| {cat} | {cats[cat]} |")
+
+                for cat in ["INFRA", "DEAD", "service DOWN", "IDLE", "ACTIVE"]:
+                    servers = [m for m in matched if m["cat"] == cat]
+                    if not servers:
+                        continue
+                    lines.append(f"\n**{cat}** ({len(servers)})")
+                    lines.append("| Server | Country | Provider | Traffic | CPU | service |")
+                    lines.append("|--------|---------|---------|---------|-----|-----|")
+                    for s in sorted(servers, key=lambda x: -x["traffic"])[:12]:
+                        service_str = "DOWN" if s["service"] == 0 else ("OK" if s["service"] == 1 else "-")
+                        lines.append(f"| {s['host']} | {s['cc'] or '-'} | {s['prov']} | {s['traffic']:.1f} | {s['cpu']}% | {service_str} |")
+                    if len(servers) > 12:
+                        lines.append(f"*+{len(servers) - 12} more*")
+
+                return "\n".join(lines)
+            except (httpx.HTTPError, ValueError) as e:
+                return f"Error: {e}"
