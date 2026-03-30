@@ -571,3 +571,64 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()):
                 return f"**Provider Summary: {total} servers**\n\n" + "\n".join(parts)
             except (httpx.HTTPError, ValueError) as e:
                 return f"Error: {e}"
+
+    if "get_unknown_providers" not in skip:
+
+        @mcp.tool()
+        async def get_unknown_providers(
+            max_results: int = 20,
+            instance: str = "",
+        ) -> str:
+            """Show unclassified server IPs grouped by /16 prefix for provider identification.
+
+            Args:
+                max_results: Maximum /16 groups to show (default: 20)
+                instance: Zabbix instance name (optional)
+            """
+            try:
+                client = resolver.resolve(instance)
+                hosts = await client.call("host.get", {
+                    "output": ["hostid", "host"],
+                    "selectInterfaces": ["ip"],
+                    "selectGroups": ["name"],
+                    "filter": {"status": "0"},
+                })
+
+                prefixes: dict[str, dict] = {}
+                for h in hosts:
+                    ip = ""
+                    for iface in h.get("interfaces", []):
+                        if iface.get("ip") and iface["ip"] != "127.0.0.1":
+                            ip = iface["ip"]
+                            break
+                    if not ip:
+                        continue
+                    if detect_provider(ip) != "Other":
+                        continue
+                    parts = ip.split(".")
+                    prefix = f"{parts[0]}.{parts[1]}.0.0/16"
+                    entry = prefixes.setdefault(prefix, {"count": 0, "sample": ip, "hosts": []})
+                    entry["count"] += 1
+                    if len(entry["hosts"]) < 3:
+                        prod, _ = _classify_host(h.get("groups", []))
+                        entry["hosts"].append(f"{h['host']} ({prod})")
+
+                if not prefixes:
+                    return "No unclassified servers."
+
+                sorted_pfx = sorted(prefixes.items(), key=lambda x: -x[1]["count"])[:max_results]
+                total_other = sum(p["count"] for p in prefixes.values())
+
+                lines = [f"**{total_other} unclassified servers** in {len(prefixes)} /16 prefixes\n"]
+                lines.append("| /16 Prefix | Servers | Sample IP | Hosts |")
+                lines.append("|-----------|---------|-----------|-------|")
+                for pfx, data in sorted_pfx:
+                    hosts_str = ", ".join(data["hosts"])
+                    lines.append(f"| {pfx} | {data['count']} | {data['sample']} | {hosts_str} |")
+
+                if len(prefixes) > max_results:
+                    lines.append(f"\n*{len(prefixes) - max_results} more prefixes omitted*")
+
+                return "\n".join(lines)
+            except (httpx.HTTPError, ValueError) as e:
+                return f"Error: {e}"
