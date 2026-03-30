@@ -60,7 +60,7 @@ You should see `zabbix` listed when Claude starts. Try asking: *"Show current pr
 
 ## What it does
 
-**98 tools** across 34 modules:
+**100 tools** across 34 modules:
 
 | Category | Tools |
 |----------|-------|
@@ -78,7 +78,7 @@ You should see `zabbix` listed when Claude starts. Try asking: *"Show current pr
 | **Scripts** | `get_scripts`, `execute_script` |
 | **Services & SLA** | `get_services`, `get_sla` |
 | **Macros** | `get_host_macros`, `get_global_macros`, `set_host_macro`, `delete_host_macro` |
-| **Inventory** | `get_server_map`, `get_product_summary`, `get_server_load`, `get_high_cpu_servers`, `get_underloaded_servers`, `get_provider_summary` |
+| **Inventory** | `get_server_map`, `get_product_summary`, `get_server_load`, `get_high_cpu_servers`, `get_underloaded_servers`, `get_provider_summary`, `get_unknown_providers`, `identify_providers` |
 | **Rollback** | `get_rollback_history`, `rollback_last`, `rollback_by_index` |
 | **Alerts** | `get_alerts`, `get_alert_summary` |
 | **Users** | `get_users` |
@@ -128,6 +128,11 @@ get_traffic_report(country="us")
 | `ZABBIX_COMPACT_TOOLS` | No | Trim tool descriptions to save tokens (default: `true`). Set `false` for full descriptions |
 | `ZABBIX_COMPACT` | No | Strip markdown from tool responses for ~40% token savings. Set `true` to enable |
 | `ZABBIX_RESPONSE_BUDGET` | No | Max chars per tool response (default: `6000`). Set `0` to disable truncation |
+| `ZABBIX_VPN_CHECK_KEY` | No | Zabbix item key for primary VPN health check (empty = skip VPN monitoring) |
+| `ZABBIX_VPN2_CHECK_KEY` | No | Zabbix item key for secondary VPN health check |
+| `ZABBIX_VPN3_CHECK_KEY` | No | Zabbix item key for tertiary VPN health check |
+| `ZABBIX_CONNECTIONS_KEY` | No | Zabbix item key for connection count metric |
+| `ZABBIX_HIDE_PRODUCTS` | No | Comma-separated product names to hide from all reports |
 | `ZABBIX_LOG_FILE` | No | Error log path (default: `~/.zbbx-mcp/zbbx-mcp.log`) |
 | `ZABBIX_ANALYTICS_FILE` | No | Analytics log path (default: `~/.zbbx-mcp/analytics.log`) |
 
