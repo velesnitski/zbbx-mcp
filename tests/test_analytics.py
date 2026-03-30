@@ -484,3 +484,57 @@ class TestProductHiding:
         assert "Infrastructure" not in product_counts
         assert "Unknown" not in product_counts
         _data._HIDE_PRODUCTS_CACHE = None
+
+    def test_ceo_report_two_step_filter(self, monkeypatch):
+        """Simulate the actual CEO report flow: service_hosts then fleet composition.
+
+        This catches the real bug where fleet composition iterated `hosts`
+        instead of `service_hosts`, leaking hidden products into the report.
+        """
+        monkeypatch.setenv("ZABBIX_HIDE_PRODUCTS", "Legacy")
+        monkeypatch.setenv("ZABBIX_PRODUCT_MAP", "")
+        import zbbx_mcp.data as _data
+        _data._HIDE_PRODUCTS_CACHE = None
+
+        _NON_service = {"Monitoring", "Infrastructure", "Unknown"}
+
+        # Simulate all hosts from Zabbix
+        all_hosts = [
+            {"hostid": "1", "host": "srv-de01", "groups": [{"name": "Activeservice"}]},
+            {"hostid": "2", "host": "srv-de02", "groups": [{"name": "Activeservice"}]},
+            {"hostid": "3", "host": "srv-nl01", "groups": [{"name": "Activeservice"}]},
+            {"hostid": "4", "host": "srv-us01", "groups": [{"name": "Legacy"}]},
+            {"hostid": "5", "host": "srv-us02", "groups": [{"name": "Legacy"}]},
+            {"hostid": "6", "host": "monitor-1", "groups": [{"name": "Monitoring"}]},
+            {"hostid": "7", "host": "infra-1", "groups": [{"name": "Infrastructure"}]},
+        ]
+
+        # Step 1: Build service_hosts (same as CEO report line 144-146)
+        service_hosts = [
+            h for h in all_hosts
+            if not _data.is_hidden_product(classify_host(h.get("groups", []))[0])
+            and classify_host(h.get("groups", []))[0] not in _NON_service
+        ]
+
+        assert len(service_hosts) == 3, f"Expected 3 service hosts, got {len(service_hosts)}"
+
+        # Step 2: Build fleet composition from service_hosts (NOT all_hosts!)
+        product_counts: dict[str, int] = {}
+        for h in service_hosts:  # Must be service_hosts, not all_hosts
+            prod, _ = classify_host(h.get("groups", []))
+            if prod:
+                product_counts[prod] = product_counts.get(prod, 0) + 1
+
+        assert "Activeservice" in product_counts
+        assert product_counts["Activeservice"] == 3
+        assert "Legacy" not in product_counts, "Legacy leaked into fleet composition!"
+        assert "Monitoring" not in product_counts
+        assert "Infrastructure" not in product_counts
+
+        # Step 3: Verify header KPI matches fleet composition
+        total_from_header = len(service_hosts)
+        total_from_composition = sum(product_counts.values())
+        assert total_from_header == total_from_composition, \
+            f"Header says {total_from_header} but composition sums to {total_from_composition}"
+
+        _data._HIDE_PRODUCTS_CACHE = None
