@@ -423,7 +423,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
 
                     if traffic < 0.1 and cpu < 2:
                         dead_servers.append((hostname, prod, prov, cpu, traffic, service_val))
-                    elif service_val == 0 and traffic < 5:
+                    elif service_val == 0 and traffic < 2:
                         broken_servers.append((hostname, prod, prov, cpu, traffic))
                     elif traffic < 5 and traffic > 0 and cpu < 10:
                         idle_servers.append((hostname, prod, prov, cpu, traffic, service_val))
