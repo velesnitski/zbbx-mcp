@@ -18,6 +18,7 @@ from zbbx_mcp.data import (
     extract_country,
     fetch_cpu_map,
     fetch_enabled_hosts,
+    fetch_host_dashboards,
     fetch_traffic_map,
     fetch_trends_batch,
     group_by_country,
@@ -620,6 +621,9 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     })
                     service_map = build_value_map(service_items, lambda v: int(float(v)))
 
+                # Dashboard lookup
+                dash_map = await fetch_host_dashboards(client)
+
                 # Build cluster primary lookup: base hostname → primary's traffic
                 # Pattern: "srv01" is primary, "srv01 node3" is secondary
                 primary_traffic: dict[str, float] = {}
@@ -663,10 +667,14 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     else:
                         cat = "ACTIVE"
 
+                    # Dashboard lookup
+                    dash_info = dash_map.get(hid)
+                    dash = dash_info[0] if dash_info else "-"
+
                     matched.append({
                         "host": hostname, "cc": cc,
                         "prov": prov, "traffic": traffic, "cpu": cpu,
-                        "service": service_val, "cat": cat,
+                        "service": service_val, "cat": cat, "dash": dash,
                     })
 
                 if not matched:
@@ -694,11 +702,11 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     if not servers:
                         continue
                     lines.append(f"\n**{cat}** ({len(servers)})")
-                    lines.append("| Server | Country | Provider | Traffic | CPU | service |")
-                    lines.append("|--------|---------|---------|---------|-----|-----|")
+                    lines.append("| Server | Country | Dashboard | Traffic | CPU | service |")
+                    lines.append("|--------|---------|-----------|---------|-----|-----|")
                     for s in sorted(servers, key=lambda x: -x["traffic"])[:12]:
                         service_str = "DOWN" if s["service"] == 0 else ("OK" if s["service"] == 1 else "-")
-                        lines.append(f"| {s['host']} | {s['cc'] or '-'} | {s['prov']} | {s['traffic']:.1f} | {s['cpu']}% | {service_str} |")
+                        lines.append(f"| {s['host']} | {s['cc'] or '-'} | {s['dash']} | {s['traffic']:.1f} | {s['cpu']}% | {service_str} |")
                     if len(servers) > 12:
                         lines.append(f"*+{len(servers) - 12} more*")
 

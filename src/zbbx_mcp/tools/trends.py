@@ -6,7 +6,7 @@ import httpx
 
 from zbbx_mcp.classify import classify_host as _classify_host
 from zbbx_mcp.classify import detect_provider
-from zbbx_mcp.data import KEY_service_PRIMARY, extract_country, fetch_trends_batch
+from zbbx_mcp.data import KEY_service_PRIMARY, extract_country, fetch_host_dashboards, fetch_trends_batch
 from zbbx_mcp.excel import BW_MAX
 from zbbx_mcp.resolver import InstanceResolver
 
@@ -671,6 +671,8 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()):
                     except (ValueError, TypeError, KeyError):
                         pass
 
+                dash_map = await fetch_host_dashboards(client)
+
                 host_metrics: dict[str, dict] = {}
                 for r in trend_rows:
                     host_metrics.setdefault(r.hostid, {})[r.metric] = r
@@ -706,11 +708,14 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()):
                         reason = f"Traffic {traffic_avg} Mbps, CPU {cpu_avg}%"
 
                     if category:
+                        dash_info = dash_map.get(hid)
+                        dash = dash_info[0] if dash_info else "-"
                         candidates.append({
                             "host": h["host"], "ip": ip, "category": category, "reason": reason,
                             "product": h.get("_prod", ""), "tier": h.get("_tier", ""),
                             "provider": detect_provider(ip) if ip else "",
                             "cpu_avg": cpu_avg, "traffic_avg": traffic_avg, "service": service,
+                            "dash": dash,
                         })
 
                 if not candidates:
@@ -727,15 +732,15 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()):
                     f"**Shutdown Candidates ({period}): {len(candidates)} of {len(filtered)} servers**\n",
                     " | ".join(f"{k}: {v}" for k, v in sorted(counts.items(), key=lambda x: order.get(x[0], 9))),
                     "",
-                    "| Category | Server | IP | Product | Provider | CPU% | Traffic | service | Reason |",
-                    "|----------|--------|----|---------|----------|------|---------|-----|--------|",
+                    "| Category | Server | IP | Product | Dashboard | CPU% | Traffic | service | Reason |",
+                    "|----------|--------|----|---------|-----------|------|---------|-----|--------|",
                 ]
                 for c in candidates:
                     cpu_s = f"{c['cpu_avg']:.1f}" if c["cpu_avg"] is not None else "N/A"
                     t_s = f"{c['traffic_avg']:.1f}" if c["traffic_avg"] is not None else "N/A"
                     parts.append(
                         f"| {c['category']} | {c['host']} | {c.get('ip', '')} | {c['product']}/{c['tier']} | "
-                        f"{c['provider']} | {cpu_s}% | {t_s} Mbps | {c['service']} | {c['reason']} |"
+                        f"{c['dash']} | {cpu_s}% | {t_s} Mbps | {c['service']} | {c['reason']} |"
                     )
 
                 return "\n".join(parts)
