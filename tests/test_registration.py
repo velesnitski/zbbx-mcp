@@ -39,6 +39,7 @@ EXPECTED_TOOLS = {
     # dashboards.py
     "get_dashboards",
     "get_dashboard_detail",
+    "find_host_dashboard",
     # items.py
     "create_item",
     "update_item",
