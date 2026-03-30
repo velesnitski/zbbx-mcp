@@ -387,11 +387,10 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 html.append('</tbody></table></div>')
 
                                 product_counts: dict[str, dict] = {}
-                for h in hosts:
+                for h in service_hosts:
                     prod, tier = _classify_host(h.get("groups", []))
-                    if prod and prod not in _NON_service and not is_hidden_product(prod):
-                        key = prod
-                        pc = product_counts.setdefault(key, {"total": 0, "tiers": {}})
+                    if prod:
+                        pc = product_counts.setdefault(prod, {"total": 0, "tiers": {}})
                         pc["total"] += 1
                         pc["tiers"][tier] = pc["tiers"].get(tier, 0) + 1
 
