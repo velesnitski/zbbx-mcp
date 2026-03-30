@@ -168,15 +168,16 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                         "vpn_up": vpn_up, "vpn_total": vpn_total,
                     }
 
-                # Aggregate trends by country using TrendRow.avg (proper mean)
-                # and daily data for trend direction
-                country_avg: dict[str, float] = {}  # cc -> sum of TrendRow.avg (Mbps)
-                country_daily: dict[str, dict[str, float]] = {}  # cc -> {day: sum}
+                # Aggregate trends by country using TrendRow.avg and .current
+                country_avg: dict[str, float] = {}   # cc -> sum of avg Mbps
+                country_now: dict[str, float] = {}   # cc -> sum of current Mbps
+                country_daily: dict[str, dict[str, float]] = {}
                 for tr in trend_rows:
                     cc = extract_country(tr.hostname)
                     if not cc or tr.metric != "traffic":
                         continue
-                    country_avg[cc] = country_avg.get(cc, 0) + tr.avg  # TrendRow.avg is Mbps
+                    country_avg[cc] = country_avg.get(cc, 0) + tr.avg
+                    country_now[cc] = country_now.get(cc, 0) + tr.current
                     if tr.daily:
                         ct = country_daily.setdefault(cc, {})
                         for day, val in tr.daily.items():
@@ -184,13 +185,16 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
 
                 # Compute trend direction + change per country
                 for cc, cd in country_data.items():
-                    avg_mbps = country_avg.get(cc, 0)
-                    avg_gbps = avg_mbps / 1000
+                    avg_gbps = country_avg.get(cc, 0) / 1000
+                    now_gbps = country_now.get(cc, 0) / 1000
                     cd["avg_gbps"] = round(avg_gbps, 1)
+                    # Override traffic_gbps with trend-sourced current for consistency
+                    if now_gbps > 0:
+                        cd["traffic_gbps"] = round(now_gbps, 1)
 
-                    # Change: current snapshot vs trend avg (both in Gbps)
+                    # Change: current vs avg from same data source
                     if avg_gbps > 0:
-                        cd["change"] = round((cd["traffic_gbps"] - avg_gbps) / avg_gbps * 100)
+                        cd["change"] = round((now_gbps - avg_gbps) / avg_gbps * 100)
                     else:
                         cd["change"] = 0
 
