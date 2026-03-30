@@ -168,34 +168,35 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                         "service_up": service_up, "service_total": service_total,
                     }
 
-                # Aggregate trends by country (convert to Mbps to match traffic_map)
-                country_trends: dict[str, dict[str, float]] = {}
+                # Aggregate trends by country using TrendRow.avg (proper mean)
+                # and daily data for trend direction
+                country_avg: dict[str, float] = {}  # cc -> sum of TrendRow.avg (Mbps)
+                country_daily: dict[str, dict[str, float]] = {}  # cc -> {day: sum}
                 for tr in trend_rows:
                     cc = extract_country(tr.hostname)
-                    if not cc or tr.metric != "traffic" or not tr.daily:
+                    if not cc or tr.metric != "traffic":
                         continue
-                    ct = country_trends.setdefault(cc, {})
-                    for day, val in tr.daily.items():
-                        ct[day] = ct.get(day, 0) + val
+                    country_avg[cc] = country_avg.get(cc, 0) + tr.avg  # TrendRow.avg is Mbps
+                    if tr.daily:
+                        ct = country_daily.setdefault(cc, {})
+                        for day, val in tr.daily.items():
+                            ct[day] = ct.get(day, 0) + val
 
                 # Compute trend direction + change per country
                 for cc, cd in country_data.items():
-                    ct = country_trends.get(cc, {})
+                    avg_mbps = country_avg.get(cc, 0)
+                    avg_gbps = avg_mbps / 1000
+                    cd["avg_gbps"] = round(avg_gbps, 1)
+
+                    # Change: current snapshot vs trend avg (both in Gbps)
+                    if avg_gbps > 0:
+                        cd["change"] = round((cd["traffic_gbps"] - avg_gbps) / avg_gbps * 100)
+                    else:
+                        cd["change"] = 0
+
+                    ct = country_daily.get(cc, {})
                     if ct:
                         days = sorted(ct.items())
-                        # Daily values are in same unit as TrendRow — use /1000 for Gbps
-                        avg_raw = sum(v for _, v in days) / len(days) if days else 0
-                        avg_gbps = avg_raw / 1000
-                        cd["avg_gbps"] = round(avg_gbps, 1)
-                        # Change: use trend avg vs trend avg (not current snapshot)
-                        # to avoid snapshot-vs-average unit mismatch
-                        if len(days) >= 2:
-                            recent_days = days[-min(7, len(days)):]
-                            recent_avg = sum(v for _, v in recent_days) / len(recent_days) / 1000
-                            cd["change"] = round((recent_avg - avg_gbps) / avg_gbps * 100) if avg_gbps > 0 else 0
-                        else:
-                            cd["change"] = 0
-
                         if len(days) >= 4 and avg_gbps >= 0.05:
                             q = max(len(days) // 4, 1)
                             older = sum(v for _, v in days[:q]) / q
@@ -207,18 +208,16 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                                 cd["trend"] = "rising" if recent > 0 else "stable"
                         else:
                             cd["trend"] = "stable"
-
-                        # Sanity: trend label must not contradict change direction
-                        if cd["traffic_gbps"] > avg_gbps * 1.5 and cd["trend"] == "dropping":
-                            cd["trend"] = "rising"
-                        elif cd["change"] > 0 and cd["trend"] == "dropping":
-                            cd["trend"] = "stable"
-                        if cd["traffic_gbps"] < 0.01 and avg_gbps > 0.05:
-                            cd["trend"] = "dead"
                     else:
-                        cd["avg_gbps"] = 0
                         cd["trend"] = "stable"
-                        cd["change"] = 0
+
+                    # Sanity: trend label must not contradict change direction
+                    if cd["traffic_gbps"] > avg_gbps * 1.5 and cd["trend"] == "dropping":
+                        cd["trend"] = "rising"
+                    elif cd["change"] > 0 and cd["trend"] == "dropping":
+                        cd["trend"] = "stable"
+                    if cd["traffic_gbps"] < 0.01 and avg_gbps > 0.05:
+                        cd["trend"] = "dead"
 
                 sorted_countries = sorted(country_data.items(), key=lambda x: -x[1]["traffic_gbps"])
                 top_countries = sorted_countries[:18]
