@@ -215,11 +215,14 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     else:
                         cd["trend"] = "stable"
 
-                    # Sanity: trend label must not contradict change direction
-                    if cd["change"] < -10 and cd["trend"] == "rising" or cd["change"] > 0 and cd["trend"] == "dropping":
-                        cd["trend"] = "stable"
-                    elif cd["traffic_gbps"] > avg_gbps * 1.5 and cd["trend"] == "dropping":
+                    # Sanity: trend label must match change direction
+                    change = cd["change"]
+                    if change < -30 and cd["trend"] in ("stable", "rising"):
+                        cd["trend"] = "dropping"
+                    elif change > 30 and cd["trend"] in ("stable", "dropping"):
                         cd["trend"] = "rising"
+                    elif change < -10 and cd["trend"] == "rising" or change > 0 and cd["trend"] == "dropping":
+                        cd["trend"] = "stable"
                     if cd["traffic_gbps"] < 0.01 and avg_gbps > 0.05:
                         cd["trend"] = "dead"
 
@@ -553,7 +556,9 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                                 prov_counts: dict[str, int] = {}
                 for h in hosts:
                     ip = host_ip(h)
-                    p = detect_provider(ip) if ip else "Unknown"
+                    if not ip:
+                        continue  # skip hosts without IP (monitoring endpoints)
+                    p = detect_provider(ip)
                     prov_counts[p] = prov_counts.get(p, 0) + 1
                 prov_sorted = sorted(prov_counts.items(), key=lambda x: -x[1])
                 prov_total = sum(c for _, c in prov_sorted)
