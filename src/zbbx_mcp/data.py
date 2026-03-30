@@ -184,7 +184,7 @@ async def fetch_traffic_map(client: ZabbixClient, hostids: list[str]) -> dict[st
     result: dict[str, float] = {}
     for it in items:
         try:
-            mbps = float(it.get("lastvalue", 0)) * 8 / 1_000_000
+            mbps = float(it.get("lastvalue", 0)) / 1_000_000
             hid = it["hostid"]
             if hid not in result or mbps > result[hid]:
                 result[hid] = mbps
