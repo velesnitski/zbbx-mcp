@@ -168,3 +168,70 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 return "\n".join(parts)
             except (httpx.HTTPError, ValueError) as e:
                 return f"Error querying Zabbix: {e}"
+
+    if "find_host_dashboard" not in skip:
+
+        @mcp.tool()
+        async def find_host_dashboard(
+            host_id: str,
+            instance: str = "",
+        ) -> str:
+            """Find which dashboard(s) contain a host.
+
+            Args:
+                host_id: Host ID or hostname
+                instance: Zabbix instance name (optional)
+            """
+            try:
+                client = resolver.resolve(instance)
+
+                # Resolve hostname to ID if needed
+                if not host_id.isdigit():
+                    lookup = await client.call("host.get", {
+                        "output": ["hostid", "host"],
+                        "filter": {"host": [host_id]},
+                    })
+                    if not lookup:
+                        lookup = await client.call("host.get", {
+                            "output": ["hostid", "host"],
+                            "search": {"host": host_id},
+                            "searchWildcardsEnabled": True,
+                            "limit": 1,
+                        })
+                    if not lookup:
+                        return f"Host '{host_id}' not found."
+                    resolved_id = lookup[0]["hostid"]
+                    hostname = lookup[0]["host"]
+                else:
+                    resolved_id = host_id
+                    hosts = await client.call("host.get", {
+                        "hostids": [host_id],
+                        "output": ["host"],
+                    })
+                    hostname = hosts[0]["host"] if hosts else host_id
+
+                # Get all dashboards with pages+widgets
+                dashboards = await client.call("dashboard.get", {
+                    "output": ["dashboardid", "name"],
+                    "selectPages": "extend",
+                })
+
+                found = []
+                for d in dashboards:
+                    for pi, page in enumerate(d.get("pages", [])):
+                        for w in page.get("widgets", []):
+                            for f in w.get("fields", []):
+                                if f.get("type") == "3" and f.get("value") == resolved_id:
+                                    page_name = page.get("name", f"Page {pi + 1}")
+                                    found.append(f"**{d['name']}** — {page_name} (id: {d['dashboardid']}, page: {pi})")
+                                    break
+
+                if not found:
+                    return f"Host **{hostname}** (ID: {resolved_id}) not found on any dashboard."
+
+                lines = [f"Host **{hostname}** (ID: {resolved_id}) found on:\n"]
+                for f in found:
+                    lines.append(f"- {f}")
+                return "\n".join(lines)
+            except (httpx.HTTPError, ValueError) as e:
+                return f"Error: {e}"
