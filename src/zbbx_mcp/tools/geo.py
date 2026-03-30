@@ -279,11 +279,11 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                         # Too little traffic for meaningful trend
                         trend = "stable" if avg_gbps < 0.05 else cd.get("trend", "stable")
                     # Sanity: trend label must match change direction
-                    if change < -30 and trend in ("stable", "rising"):
+                    if change <= -30 and trend in ("stable", "rising"):
                         trend = "dropping"
-                    elif change > 30 and trend in ("stable", "dropping"):
+                    elif change >= 30 and trend in ("stable", "dropping"):
                         trend = "rising"
-                    elif change < -10 and trend == "rising" or change > 0 and trend == "dropping":
+                    elif change <= -10 and trend == "rising" or change > 0 and trend == "dropping":
                         trend = "stable"
                     if cd["current"] < 1 and cd["avg"] > 10:
                         trend = "dead"
