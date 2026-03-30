@@ -138,18 +138,23 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     })
                     vpn_map = build_value_map(vpn_items, lambda v: int(float(v)))
 
-                                by_country = group_by_country(hosts)
-                total_traffic = round(sum(traffic_map.values()) / 1000, 1)
-                avg_cpu = round(sum(cpu_map.values()) / len(cpu_map), 1) if cpu_map else 0
-                total_servers = len(hosts)
+                                _NON_VPN = {"Monitoring", "Infrastructure", "Unknown"}
+                vpn_hosts = [h for h in hosts
+                             if not is_hidden_product(_classify_host(h.get("groups", []))[0])
+                             and _classify_host(h.get("groups", []))[0] not in _NON_VPN]
+
+                by_country = group_by_country(hosts)
+                total_traffic = round(sum(traffic_map.get(h["hostid"], 0) for h in vpn_hosts) / 1000, 1)
+                vpn_cpus = [cpu_map[h["hostid"]] for h in vpn_hosts if h["hostid"] in cpu_map]
+                avg_cpu = round(sum(vpn_cpus) / len(vpn_cpus), 1) if vpn_cpus else 0
+                total_servers = len(vpn_hosts)
                 total_countries = len(by_country)
 
                 products = set()
                 providers = set()
-                for h in hosts:
+                for h in vpn_hosts:
                     prod, _ = _classify_host(h.get("groups", []))
-                    if prod and prod != "Unknown":
-                        products.add(prod)
+                    products.add(prod)
                     ip = host_ip(h)
                     if ip:
                         p = detect_provider(ip)
@@ -384,7 +389,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                                 product_counts: dict[str, dict] = {}
                 for h in hosts:
                     prod, tier = _classify_host(h.get("groups", []))
-                    if prod and prod != "Unknown" and not is_hidden_product(prod):
+                    if prod and prod not in _NON_VPN and not is_hidden_product(prod):
                         key = prod
                         pc = product_counts.setdefault(key, {"total": 0, "tiers": {}})
                         pc["total"] += 1
