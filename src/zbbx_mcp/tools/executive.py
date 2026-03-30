@@ -656,6 +656,8 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                         cat = "DEAD"
                     elif vpn_val == 0 and traffic < 2:
                         cat = "VPN DOWN"
+                    elif vpn_val == -1:
+                        cat = "DEGRADED"
                     elif traffic < 5:
                         cat = "IDLE"
                     else:
@@ -686,11 +688,11 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     "| Category | Count |",
                     "|----------|-------|",
                 ]
-                for cat in ["ACTIVE", "CLUSTER", "IDLE", "VPN DOWN", "DEAD", "NO DATA", "INFRA"]:
+                for cat in ["ACTIVE", "DEGRADED", "CLUSTER", "IDLE", "VPN DOWN", "DEAD", "NO DATA", "INFRA"]:
                     if cat in cats:
                         lines.append(f"| {cat} | {cats[cat]} |")
 
-                for cat in ["INFRA", "DEAD", "NO DATA", "VPN DOWN", "IDLE", "CLUSTER", "ACTIVE"]:
+                for cat in ["INFRA", "DEAD", "NO DATA", "VPN DOWN", "DEGRADED", "IDLE", "CLUSTER", "ACTIVE"]:
                     servers = [m for m in matched if m["cat"] == cat]
                     if not servers:
                         continue
@@ -698,7 +700,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     lines.append("| Server | Country | Dashboard | Traffic | CPU | VPN |")
                     lines.append("|--------|---------|-----------|---------|-----|-----|")
                     for s in sorted(servers, key=lambda x: -x["traffic"])[:12]:
-                        vpn_str = "DOWN" if s["vpn"] == 0 else ("OK" if s["vpn"] == 1 else "-")
+                        vpn_str = "DOWN" if s["vpn"] == 0 else ("PARTIAL" if s["vpn"] == -1 else ("OK" if s["vpn"] == 1 else "-"))
                         lines.append(f"| {s['host']} | {s['cc'] or '-'} | {s['dash']} | {s['traffic']:.1f} | {s['cpu']}% | {vpn_str} |")
                     if len(servers) > 12:
                         lines.append(f"*+{len(servers) - 12} more*")

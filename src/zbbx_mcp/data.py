@@ -259,9 +259,10 @@ async def fetch_vpn_status(client: ZabbixClient, hostids: list[str]) -> dict[str
     """Fetch combined VPN status per host. Checks all configured VPN keys.
 
     Returns {hostid: status} where:
-      1 = at least one protocol works (OK)
-      0 = all configured protocols DOWN
-      None (missing key) = host not in result
+      1 = all protocols OK
+     -1 = PARTIAL (some OK, some DOWN)
+      0 = all DOWN
+      (missing) = no VPN checks configured for this host
     """
     if not hostids:
         return {}
@@ -275,22 +276,28 @@ async def fetch_vpn_status(client: ZabbixClient, hostids: list[str]) -> dict[str
         "filter": {"key_": keys, "status": STATUS_ENABLED},
     })
 
-    # Per host: track if ANY check passes
-    host_any_ok: dict[str, bool] = {}
-    host_has_check: set[str] = set()
+    # Per host: count OK and total checks
+    host_ok: dict[str, int] = {}
+    host_total: dict[str, int] = {}
     for it in items:
         hid = it["hostid"]
-        host_has_check.add(hid)
+        host_total[hid] = host_total.get(hid, 0) + 1
         try:
-            val = int(float(it.get("lastvalue", 0)))
-            if val == 1:
-                host_any_ok[hid] = True
+            if int(float(it.get("lastvalue", 0))) == 1:
+                host_ok[hid] = host_ok.get(hid, 0) + 1
         except (ValueError, TypeError):
             pass
 
     result: dict[str, int] = {}
-    for hid in host_has_check:
-        result[hid] = 1 if host_any_ok.get(hid) else 0
+    for hid in host_total:
+        ok = host_ok.get(hid, 0)
+        total = host_total[hid]
+        if ok == total:
+            result[hid] = 1       # all OK
+        elif ok > 0:
+            result[hid] = -1      # PARTIAL
+        else:
+            result[hid] = 0       # all DOWN
     return result
 
 

@@ -11,8 +11,6 @@ import httpx
 from zbbx_mcp.classify import classify_host as _classify_host
 from zbbx_mcp.classify import detect_provider
 from zbbx_mcp.data import (
-    KEY_VPN_PRIMARY,
-    build_value_map,
     extract_country,
     fetch_cpu_map,
     fetch_enabled_hosts,
@@ -128,15 +126,9 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     fetch_cpu_map(client, all_ids),
                 )
 
-                # VPN check
-                vpn_map: dict[str, int] = {}
-                if KEY_VPN_PRIMARY:
-                    vpn_items = await client.call("item.get", {
-                        "hostids": all_ids,
-                        "output": ["hostid", "lastvalue"],
-                        "filter": {"key_": KEY_VPN_PRIMARY, "status": "0"},
-                    })
-                    vpn_map = build_value_map(vpn_items, lambda v: int(float(v)))
+                # VPN check (all configured protocols)
+                from zbbx_mcp.data import fetch_vpn_status
+                vpn_map = await fetch_vpn_status(client, all_ids)
 
                                 _NON_VPN = {"Monitoring", "Infrastructure", "Unknown"}
                 vpn_hosts = [h for h in hosts
@@ -166,12 +158,13 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 for cc, cc_hosts in by_country.items():
                     traffic = sum(traffic_map.get(h["hostid"], 0) for h in cc_hosts)
                     cpus = [cpu_map[h["hostid"]] for h in cc_hosts if h["hostid"] in cpu_map]
-                    vpn_up = sum(1 for h in cc_hosts if vpn_map.get(h["hostid"]) == 1)
+                    vpn_up = sum(1 for h in cc_hosts if vpn_map.get(h["hostid"], 0) >= 1)
+                    vpn_partial = sum(1 for h in cc_hosts if vpn_map.get(h["hostid"]) == -1)
                     vpn_total = sum(1 for h in cc_hosts if h["hostid"] in vpn_map)
                     country_data[cc] = {
                         "servers": len(cc_hosts), "traffic_gbps": round(traffic / 1000, 1),
                         "avg_cpu": round(sum(cpus) / len(cpus), 1) if cpus else 0,
-                        "vpn_up": vpn_up, "vpn_total": vpn_total,
+                        "vpn_up": vpn_up, "vpn_partial": vpn_partial, "vpn_total": vpn_total,
                     }
 
                 # Aggregate trends by country using TrendRow.avg and .current

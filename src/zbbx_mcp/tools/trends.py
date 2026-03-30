@@ -674,7 +674,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()):
 
                     cpu_avg = cpu.avg if cpu else None
                     traffic_avg = traffic.avg if traffic else None
-                    vpn = "DOWN" if vpn1_val == 0 else ("OK" if vpn1_val == 1 else "")
+                    vpn = "DOWN" if vpn1_val == 0 else ("PARTIAL" if vpn1_val == -1 else ("OK" if vpn1_val == 1 else ""))
 
                     category = None
                     reason = ""
