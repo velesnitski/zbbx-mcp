@@ -1,356 +1,332 @@
-"""Host classification (product/tier) and hosting provider detection.
+"""Tests for analytics helpers, provider detection, and trend sanity logic."""
 
-Standalone module with no dependencies on tools/ to avoid circular imports.
-"""
-
-from __future__ import annotations
-
-import ipaddress
-import json
-import os
-
-__all__ = ["classify_host", "detect_provider", "resolve_datacenter", "PROVIDER_CIDRS"]
-
-
-
-_SKIP_GROUPS = {
-    "Templates", "Templates/Applications", "Templates/Databases",
-    "Discovered hosts",
-}
-
-_PRODUCT_MAP: dict[str, tuple] | None = None
+from zbbx_mcp.classify import (
+    PROVIDER_CIDRS,
+    classify_host,
+    detect_provider,
+    resolve_datacenter,
+)
+from zbbx_mcp.data import (
+    CAPITAL_COORDS,
+    REGION_MAP,
+    countries_for_region,
+    extract_country,
+    group_by_country,
+    host_ip,
+)
 
 
-def _load_product_map() -> dict[str, tuple]:
-    """Load product map from ZABBIX_PRODUCT_MAP env var."""
-    raw = os.environ.get("ZABBIX_PRODUCT_MAP", "")
-    if not raw:
-        return {}
 
-    try:
-        if os.path.isfile(raw):
-            if not raw.endswith(".json"):
-                return {}
-            with open(raw) as f:
-                data = json.load(f)
-        else:
-            data = json.loads(raw)
+class TestRegionMap:
+    def test_latam_countries(self):
+        codes = countries_for_region("LATAM")
+        assert "BR" in codes
+        assert "MX" in codes
+        assert "AR" in codes
+        assert "DE" not in codes
 
-        result = {}
-        for group, mapping in data.items():
-            if mapping in (["skip"], [None, None]):
-                result[group] = (None, None)
-            else:
-                result[group] = (mapping[0], mapping[1])
-        return result
-    except (json.JSONDecodeError, IndexError, TypeError):
-        return {}
+    def test_emea_countries(self):
+        codes = countries_for_region("EMEA")
+        assert "DE" in codes
+        assert "NL" in codes
+        assert "US" not in codes
+
+    def test_all_returns_union(self):
+        codes = countries_for_region("ALL")
+        assert len(codes) > 50
+        assert "US" in codes
+        assert "BR" in codes
+        assert "DE" in codes
+
+    def test_unknown_region_empty(self):
+        assert countries_for_region("MARS") == set()
+
+    def test_case_insensitive(self):
+        assert countries_for_region("latam") == countries_for_region("LATAM")
+
+    def test_all_regions_have_countries(self):
+        for region in REGION_MAP:
+            assert len(REGION_MAP[region]) > 0
 
 
-def get_product_map() -> dict[str, tuple]:
-    """Lazy-load product map on first use."""
-    global _PRODUCT_MAP
-    if _PRODUCT_MAP is None:
-        _PRODUCT_MAP = _load_product_map()
-    return _PRODUCT_MAP
 
 
-def classify_host(groups: list[dict]) -> tuple[str, str]:
-    """Classify a host into (product, tier) based on its groups.
+class TestCapitalCoords:
+    def test_major_countries_present(self):
+        for cc in ["US", "DE", "NL", "BR", "FR", "TR", "JP", "RU"]:
+            assert cc in CAPITAL_COORDS, f"{cc} missing from CAPITAL_COORDS"
 
-    If ZABBIX_PRODUCT_MAP is configured, uses explicit mapping.
-    Otherwise, uses the first non-skip group name as both product and tier.
+    def test_coords_are_valid(self):
+        for cc, (lat, lon) in CAPITAL_COORDS.items():
+            assert -90 <= lat <= 90, f"{cc} lat {lat} out of range"
+            assert -180 <= lon <= 180, f"{cc} lon {lon} out of range"
+
+
+
+
+class TestGroupByCountry:
+    def _hosts(self):
+        return [
+            {"hostid": "1", "host": "srv-nl01", "groups": [{"name": "free"}]},
+            {"hostid": "2", "host": "srv-nl02", "groups": [{"name": "free"}]},
+            {"hostid": "3", "host": "srv-de01", "groups": [{"name": "prem"}]},
+            {"hostid": "4", "host": "srv-us01", "groups": [{"name": "free"}]},
+            {"hostid": "5", "host": "no-country", "groups": [{"name": "mon"}]},
+        ]
+
+    def test_basic_grouping(self):
+        result = group_by_country(self._hosts())
+        assert "NL" in result
+        assert len(result["NL"]) == 2
+        assert "DE" in result
+        assert "US" in result
+        assert "" not in result
+
+    def test_country_filter(self):
+        result = group_by_country(self._hosts(), country="nl")
+        assert list(result.keys()) == ["NL"]
+        assert len(result["NL"]) == 2
+
+    def test_country_filter_no_match(self):
+        result = group_by_country(self._hosts(), country="JP")
+        assert result == {}
+
+    def test_region_filter(self):
+        result = group_by_country(self._hosts(), region="EMEA")
+        assert "NL" in result
+        assert "DE" in result
+        assert "US" not in result
+
+
+
+
+class TestHostIp:
+    def test_extracts_ip(self):
+        h = {"interfaces": [{"ip": "1.2.3.4"}]}
+        assert host_ip(h) == "1.2.3.4"
+
+    def test_skips_loopback(self):
+        h = {"interfaces": [{"ip": "127.0.0.1"}, {"ip": "5.6.7.8"}]}
+        assert host_ip(h) == "5.6.7.8"
+
+    def test_no_interfaces(self):
+        assert host_ip({}) == ""
+        assert host_ip({"interfaces": []}) == ""
+
+    def test_only_loopback(self):
+        h = {"interfaces": [{"ip": "127.0.0.1"}]}
+        assert host_ip(h) == ""
+
+
+
+
+class TestProviderDetection:
+    def test_fiberhub(self):
+        assert detect_provider("108.181.55.10") == "Fiberhub"
+
+    def test_turk_telekom(self):
+        assert detect_provider("89.252.100.10") == "Turk Telekom"
+
+    def test_m247(self):
+        assert detect_provider("146.70.50.10") == "M247"
+
+    def test_kamatera(self):
+        assert detect_provider("154.16.100.10") == "Kamatera"
+
+    def test_aruba_it(self):
+        assert detect_provider("95.110.100.10") == "Aruba.it"
+
+    def test_cogent_latam(self):
+        assert detect_provider("170.80.100.10") == "Cogent"
+        assert detect_provider("38.165.100.10") == "Cogent"
+
+    def test_ovh_canada(self):
+        assert detect_provider("66.70.100.10") == "OVH"
+
+    def test_hetzner(self):
+        assert detect_provider("95.217.100.10") == "Hetzner"
+
+    def test_aws_16(self):
+        assert detect_provider("10.0.0.10") == "AWS"
+
+    def test_digitalocean(self):
+        assert detect_provider("10.0.0.11") == "DigitalOcean"
+
+    def test_unknown_ip(self):
+        assert detect_provider("1.1.1.1") == "Other"
+
+    def test_invalid_ip(self):
+        assert detect_provider("not-an-ip") == "Unknown"
+
+    def test_prefix_length_wins(self):
+        """More specific CIDR should win over broad AWS /8."""
+        assert detect_provider("10.0.0.15") == "Google Cloud"
+        assert detect_provider("10.0.0.16") == "OVH"
+        assert detect_provider("10.0.0.17") == "Azure"
+
+    def test_all_providers_have_cidrs(self):
+        for prov, cidrs in PROVIDER_CIDRS.items():
+            assert len(cidrs) > 0, f"{prov} has no CIDRs"
+
+
+
+
+class TestResolveDatacenter:
+    def test_ovh_gravelines(self):
+        prov, city = resolve_datacenter("10.0.0.13")
+        assert prov == "OVH"
+        assert "Gravelines" in city
+
+    def test_hetzner_helsinki(self):
+        prov, city = resolve_datacenter("10.0.0.12")
+        assert prov == "Hetzner"
+        assert "Helsinki" in city
+
+    def test_scaleway_paris(self):
+        prov, city = resolve_datacenter("10.0.0.14")
+        assert prov == "Scaleway"
+        assert "Paris" in city
+
+    def test_fallback_provider_only(self):
+        prov, city = resolve_datacenter("10.0.0.5")
+        assert prov == "Aruba.it"
+        assert city == ""
+
+    def test_unknown(self):
+        prov, city = resolve_datacenter("1.1.1.1")
+        assert prov == "Other"
+
+    def test_invalid(self):
+        prov, city = resolve_datacenter("bad")
+        assert prov == "Unknown"
+
+
+
+
+class TestExtractCountry:
+    def test_standard_patterns(self):
+        assert extract_country("srv-nl0105") == "NL"
+        assert extract_country("srv-de3") == "DE"
+        assert extract_country("srv-us0001") == "US"
+
+    def test_lite_pattern(self):
+        assert extract_country("srv-nl01-lite") == "IN"
+        assert extract_country("srv-us01-lite") == "US"
+        assert extract_country("srv-tr01-lite") == "TR"
+
+    def test_ar_pattern(self):
+        assert extract_country("srv-ar010") == "AR"
+
+    def test_br_mx_patterns(self):
+        assert extract_country("srv-br0101") == "BR"
+        assert extract_country("srv-mx0101") == "MX"
+
+    def test_uk_normalizes_to_gb(self):
+        """UK should normalize to ISO 3166 GB."""
+        assert extract_country("srv-uk0001") == "GB"
+        assert extract_country("srv-uk0005") == "GB"
+
+    def test_no_match(self):
+        assert extract_country("Zabbix server") == ""
+        assert extract_country("account.example.com") == ""
+        assert extract_country("a1") == ""
+
+    def test_multiple_country_codes(self):
+        """Hostname with both RU and UK — first match wins."""
+        assert extract_country("srv-de-nl01") == "RU"
+
+
+
+
+class TestTrendSanity:
+    """Test the trend/change consistency rules used in CEO report and geo tools.
+
+    Rules:
+    1. change < -10% and trend == "rising" → override to "stable"
+    2. change > 0 and trend == "dropping" → override to "stable"
+    3. current > avg * 1.5 and trend == "dropping" → override to "rising"
+    4. current < 0.01 and avg > 0.05 → "dead"
     """
-    pmap = get_product_map()
-    if pmap:
-        for g in groups:
-            gname = g.get("name", "")
-            if gname in pmap:
-                product, tier = pmap[gname]
-                if product:
-                    return product, tier
-        return "Unknown", "Unknown"
 
-    for g in groups:
-        gname = g.get("name", "")
-        if gname and gname not in _SKIP_GROUPS:
-            return gname, "Default"
-    return "Unknown", "Unknown"
+    @staticmethod
+    def _apply_sanity(change: float, trend: str, traffic_gbps: float, avg_gbps: float) -> str:
+        """Replicate the sanity logic from ceo_report.py / geo.py."""
+        if change < -10 and trend == "rising" or change > 0 and trend == "dropping":
+            trend = "stable"
+        elif traffic_gbps > avg_gbps * 1.5 and trend == "dropping":
+            trend = "rising"
+        if traffic_gbps < 0.01 and avg_gbps > 0.05:
+            trend = "dead"
+        return trend
 
+    def test_germany_rising_negative_change(self):
+        """DE: avg 25.4, now 22.0, Q1/Q4 says rising but change is -13%."""
+        result = self._apply_sanity(change=-13, trend="rising", traffic_gbps=22.0, avg_gbps=25.4)
+        assert result == "stable", f"Expected stable, got {result}"
 
+    def test_india_dropping_negative_change(self):
+        """IN: avg 2.2, now 0.3, legitimately dropping -87%."""
+        result = self._apply_sanity(change=-87, trend="dropping", traffic_gbps=0.3, avg_gbps=2.2)
+        assert result == "dropping"
 
-PROVIDER_CIDRS: dict[str, list[str]] = {
-    "A2 Hosting": ["68.66.192.0/18", "206.72.192.0/18"],
-    "Akamai": ["23.32.0.0/11", "95.100.0.0/15", "104.64.0.0/10", "184.24.0.0/13"],
-    "AlexHost": ["5.181.0.0/16"],
-    "Alibaba Cloud": ["39.96.0.0/12", "47.88.0.0/14", "47.92.0.0/14", "101.132.0.0/14", "120.24.0.0/13"],
-    "Aruba.it": ["95.110.0.0/16", "89.46.0.0/16"],
-    "BACloud": ["85.206.0.0/16"],
-    "AWS": ["3.0.0.0/8", "13.0.0.0/8", "15.0.0.0/9", "16.0.0.0/8", "18.0.0.0/8", "34.0.0.0/8", "35.0.0.0/8", "52.0.0.0/8", "54.0.0.0/8", "99.0.0.0/8"],
-    "AzerStar": ["62.212.0.0/16", "94.20.0.0/16"],
-    "Azure": ["20.0.0.0/8", "40.64.0.0/10", "40.112.0.0/12", "52.224.0.0/11", "104.40.0.0/13", "137.116.0.0/15", "168.61.0.0/16", "168.63.0.0/16", "191.232.0.0/13", "207.46.0.0/16"],
-    "Biznet": ["103.52.0.0/16"],
-    "BuyVM": ["205.185.112.0/20", "198.98.48.0/20"],
-    "CenturyLink": ["63.228.0.0/14", "65.118.0.0/15", "67.128.0.0/10", "71.32.0.0/11", "75.64.0.0/10", "205.171.0.0/16"],
-    "Cherry Servers": ["5.199.168.0/21", "93.190.136.0/21"],
-    "Cloudflare": ["104.16.0.0/12", "172.64.0.0/13", "173.245.48.0/20", "198.41.128.0/17"],
-    "Cloudie": ["103.163.0.0/16"],
-    "Cogent": ["38.0.0.0/8", "170.80.0.0/16", "190.103.0.0/16"],
-    "ColoCrossing": ["192.3.0.0/16", "192.210.0.0/16", "198.12.0.0/16", "198.46.0.0/16"],
-    "Contabo": ["62.171.0.0/16", "144.91.0.0/16", "161.97.0.0/16", "173.249.0.0/16", "178.238.0.0/16", "193.26.0.0/16", "207.180.0.0/16"],
-    "CtrlS": ["103.26.0.0/16"],
-    "DataCamp": ["209.58.0.0/16"],
-    "Datapacket": ["5.188.0.0/16"],
-    "Deltahost": ["176.107.0.0/16"],
-    "DediPath": ["104.254.0.0/16", "192.227.128.0/17"],
-    "DigitalOcean": ["64.225.0.0/16", "104.131.0.0/16", "134.209.0.0/16", "137.184.0.0/16", "142.93.0.0/16", "143.110.0.0/16", "143.198.0.0/16", "144.126.0.0/16", "157.245.0.0/16", "159.65.0.0/16", "159.89.0.0/16", "161.35.0.0/16", "164.90.0.0/16", "165.22.0.0/16", "167.71.0.0/16", "167.99.0.0/16", "174.138.0.0/16", "178.128.0.0/16", "206.189.0.0/16", "209.97.0.0/16"],
-    "DreamHost": ["64.90.48.0/20", "173.236.128.0/17", "208.97.128.0/17"],
-    "EDIS": ["93.190.0.0/16", "194.32.104.0/22"],
-    "Equinix Metal": ["136.144.0.0/16", "145.40.0.0/16", "147.28.0.0/16", "169.150.0.0/16"],
-    "Fasthosts": ["46.235.224.0/19", "212.48.64.0/18"],
-    "Fastly": ["23.235.32.0/20", "151.101.0.0/16", "199.27.72.0/21"],
-    "Fiberhub": ["108.181.0.0/16", "216.106.0.0/16", "192.96.0.0/16", "199.115.0.0/16", "172.96.0.0/16", "74.121.0.0/16", "172.111.0.0/16"],
-    "Flokinet": ["84.234.0.0/16", "185.100.84.0/22"],
-    "G-Core": ["92.38.0.0/16", "44.31.0.0/16", "92.223.0.0/16"],
-    "GoDaddy": ["92.205.0.0/16", "148.72.0.0/16", "160.153.0.0/16", "184.168.0.0/16"],
-    "Google Cloud": ["34.64.0.0/10", "35.184.0.0/13", "35.192.0.0/12", "104.196.0.0/14", "104.154.0.0/15", "130.211.0.0/16", "146.148.0.0/16"],
-    "GreenGeeks": ["66.160.128.0/18"],
-    "GTHost": ["158.51.0.0/16", "167.17.0.0/16"],
-    "GTT": ["77.67.0.0/16", "141.136.0.0/16", "199.229.0.0/16", "213.200.0.0/16"],
-    "Hetzner": ["49.12.0.0/16", "65.21.0.0/16", "65.108.0.0/16", "78.46.0.0/16", "78.47.0.0/16", "88.99.0.0/16", "88.198.0.0/16", "95.216.0.0/16", "95.217.0.0/16", "116.202.0.0/16", "135.181.0.0/16", "138.201.0.0/16", "144.76.0.0/16", "148.251.0.0/16", "159.69.0.0/16", "167.235.0.0/16", "176.9.0.0/16", "178.63.0.0/16"],
-    "Hostinger": ["185.185.0.0/16", "79.98.0.0/16", "89.116.0.0/16"],
-    "Hostway": ["64.29.0.0/16", "216.234.0.0/16"],
-    "Hostwinds": ["104.168.0.0/16", "142.11.0.0/16"],
-    "Hurricane Electric": ["72.52.92.0/22", "184.105.0.0/16", "216.218.0.0/16"],
-    "IDCloudHost": ["103.31.38.0/23", "103.23.20.0/22"],
-    "Imperva": ["199.83.128.0/21", "198.143.32.0/19"],
-    "InMotion": ["173.247.192.0/18", "198.46.80.0/20"],
-    "InterKVM": ["46.229.243.0/24"],
-    "InterConnects": ["104.160.0.0/16"],
-    "IONOS": ["82.165.0.0/16", "85.215.0.0/16", "87.106.0.0/16", "212.227.0.0/16", "217.160.0.0/16"],
-    "IPXON": ["190.120.0.0/16"],
-    "IPTELECOM": ["110.172.0.0/16"],
-    "Iservice": ["185.180.220.0/22", "91.240.84.0/22"],
-    "iWeb": ["70.38.0.0/16", "209.172.32.0/19"],
-    "Kamatera": ["154.16.0.0/16", "185.191.0.0/16", "31.154.0.0/16"],
-    "KDDI": ["106.72.0.0/13", "118.236.0.0/14", "133.208.0.0/13"],
-    "KeyCDN": ["104.17.0.0/16"],
-    "Leaseweb": ["5.79.0.0/16", "37.48.0.0/16", "46.165.0.0/16", "62.212.64.0/18", "66.23.0.0/16", "85.17.0.0/16", "95.211.0.0/16", "104.192.0.0/16", "178.162.0.0/16"],
-    "Level3": ["4.0.0.0/8", "8.0.0.0/8", "63.208.0.0/12", "209.244.0.0/16"],
-    "Limestone": ["69.162.64.0/18", "72.52.64.0/18"],
-    "Linode": ["172.104.0.0/16", "139.162.0.0/16", "45.79.0.0/16", "50.116.0.0/16"],
-    "Liquid Web": ["67.225.128.0/17", "69.16.192.0/18", "72.52.128.0/17"],
-    "Locaweb": ["186.202.0.0/16", "177.52.0.0/16"],
-    "M247": ["85.235.0.0/16", "146.70.0.0/16", "165.231.0.0/16", "149.88.0.0/16", "37.19.192.0/18"],
-    "Maxihost": ["168.205.0.0/16", "179.43.128.0/17"],
-    "Melbicom": ["5.182.224.0/20", "185.112.82.0/23", "193.35.224.0/23"],
-    "MTS": ["62.112.96.0/19", "83.220.0.0/14", "95.167.0.0/16", "213.87.0.0/16"],
-    "Mullvad": ["185.213.152.0/22", "193.138.218.0/23", "198.54.132.0/22"],
-    "myLoc": ["89.163.0.0/16", "62.141.0.0/16", "37.157.0.0/16"],
-    "Namecheap": ["198.54.0.0/16", "162.0.208.0/20"],
-    "netcup": ["5.22.152.0/21", "37.120.0.0/16", "46.232.248.0/21", "185.183.156.0/22"],
-    "Njalla": ["5.253.84.0/22", "198.251.88.0/22"],
-    "NTT": ["210.173.0.0/16", "129.250.0.0/16", "192.48.0.0/16"],
-    "Oracle Cloud": ["129.146.0.0/16", "129.150.0.0/15", "129.152.0.0/16", "130.35.0.0/16", "132.145.0.0/16", "134.70.0.0/16", "138.1.0.0/16", "140.83.0.0/16", "141.144.0.0/16", "144.24.0.0/14", "150.136.0.0/13", "152.67.0.0/16", "158.101.0.0/16", "168.138.0.0/16", "193.122.0.0/16"],
-    "OVH": ["37.59.0.0/16", "37.187.0.0/16", "51.38.0.0/16", "51.68.0.0/16", "51.75.0.0/16", "51.77.0.0/16", "51.79.0.0/16", "51.83.0.0/16", "51.89.0.0/16", "51.91.0.0/16", "51.178.0.0/16", "51.195.0.0/16", "51.210.0.0/16", "51.254.0.0/16", "51.255.0.0/16", "54.36.0.0/16", "54.37.0.0/16", "54.38.0.0/16", "57.128.0.0/16", "57.129.0.0/16", "66.70.0.0/16", "91.134.0.0/16", "92.222.0.0/16", "135.125.0.0/16", "137.74.0.0/16", "141.94.0.0/16", "141.95.0.0/16", "146.59.0.0/16", "147.135.0.0/16", "148.113.0.0/16", "151.80.0.0/16", "158.69.0.0/16", "162.19.0.0/16", "164.132.0.0/16", "176.31.0.0/16", "178.32.0.0/16", "188.165.0.0/16", "193.70.0.0/16", "198.27.0.0/16", "198.244.0.0/16", "15.204.0.0/16", "15.235.0.0/16"],
-    "Path.net": ["199.167.0.0/16", "93.189.40.0/21"],
-    "PCCW": ["63.218.0.0/15", "202.85.128.0/17", "218.189.0.0/16"],
-    "PhoenixNAP": ["131.153.0.0/16", "154.12.0.0/16"],
-    "Psychz": ["103.59.109.0/24", "208.87.240.0/22"],
-    "QuadraNet": ["104.128.0.0/14", "198.55.0.0/16"],
-    "Rackspace": ["104.239.0.0/16", "162.209.0.0/16", "162.242.0.0/16", "198.101.0.0/16"],
-    "RamNode": ["107.152.0.0/16", "23.226.224.0/19"],
-    "REG.RU": ["31.31.192.0/18", "185.220.220.0/22"],
-    "Rostelecom": ["87.226.128.0/17", "85.141.0.0/16", "178.176.0.0/12", "213.59.0.0/16"],
-    "Scaleway": ["51.15.0.0/16", "51.158.0.0/16", "51.159.0.0/16", "62.210.0.0/16", "163.172.0.0/16", "212.47.0.0/16"],
-    "Selectel": ["185.47.204.0/22", "46.229.240.0/21", "94.26.224.0/19"],
-    "Serverius": ["185.90.0.0/16", "5.178.0.0/16"],
-    "Singtel": ["165.21.0.0/16", "203.116.0.0/14", "218.186.0.0/15"],
-    "SiteGround": ["35.214.0.0/16", "198.57.0.0/16"],
-    "SoftLayer": ["50.22.0.0/15", "169.44.0.0/14", "173.192.0.0/13", "198.23.0.0/16"],
-    "StackPath": ["151.139.0.0/16", "104.247.0.0/16"],
-    "Strato": ["81.169.0.0/16", "85.214.0.0/16"],
-    "Sucuri": ["192.88.134.0/23", "66.248.200.0/22"],
-    "Tata": ["203.100.0.0/16", "121.240.0.0/12", "115.248.0.0/14"],
-    "Telia": ["62.115.0.0/16", "80.239.0.0/16", "83.145.0.0/16", "193.181.0.0/16", "213.248.0.0/16"],
-    "Tencent Cloud": ["43.128.0.0/12", "49.51.0.0/16", "101.32.0.0/12", "119.28.0.0/14", "129.204.0.0/16"],
-    "Tikona": ["103.247.0.0/16"],
-    "TimeWeb": ["185.12.148.0/22", "91.230.210.0/23"],
-    "Turk Telekom": ["89.252.0.0/16", "212.68.0.0/16", "45.11.0.0/16", "185.219.0.0/16", "185.227.0.0/16", "213.217.0.0/16", "87.236.0.0/16"],
-    "UOL": ["200.147.0.0/16", "200.221.0.0/16"],
-    "UpCloud": ["94.237.0.0/16", "185.26.48.0/22", "185.70.196.0/22"],
-    "VDSina": ["185.219.220.0/22", "91.201.112.0/22"],
-    "Virmach": ["23.94.0.0/16", "107.175.0.0/16"],
-    "Virtua Cloud": ["179.108.0.0/16", "189.1.0.0/16"],
-    "Vultr": ["45.32.0.0/16", "45.63.0.0/16", "45.76.0.0/16", "45.77.0.0/16", "64.176.0.0/16", "66.42.0.0/16", "78.141.0.0/16", "95.179.0.0/16", "108.61.0.0/16", "136.244.0.0/16", "140.82.0.0/16", "149.28.0.0/16", "155.138.0.0/16", "207.148.0.0/16", "209.250.0.0/16", "216.128.0.0/16"],
-    "WorldStream": ["185.252.0.0/16", "89.39.0.0/16", "77.247.0.0/16"],
-    "Zayo": ["64.125.0.0/16", "174.128.0.0/13", "216.115.0.0/16"],
-    "Zenlayer": ["152.32.128.0/17", "104.143.0.0/16"],
-    "Zscaler": ["104.129.192.0/20", "165.225.0.0/16"],
-    "iomart": ["109.169.0.0/16", "78.129.0.0/16"],
-}
+    def test_russia_rising_positive_change(self):
+        """RU: avg 11.8, now 26.3, legitimately rising +123%."""
+        result = self._apply_sanity(change=123, trend="rising", traffic_gbps=26.3, avg_gbps=11.8)
+        assert result == "rising"
 
-# Pre-compiled network objects sorted by prefix length (most specific first)
-_PROVIDER_NETS: list[tuple[str, ipaddress.IPv4Network]] = sorted(
-    [
-        (prov, ipaddress.ip_network(cidr, strict=False))
-        for prov, cidrs in PROVIDER_CIDRS.items()
-        for cidr in cidrs
-    ],
-    key=lambda x: -x[1].prefixlen,
-)
+    def test_dropping_positive_change_becomes_stable(self):
+        """GB Friday: avg 1.7, now 1.9, Q1/Q4 says dropping but change is +11%."""
+        result = self._apply_sanity(change=11, trend="dropping", traffic_gbps=1.9, avg_gbps=1.7)
+        assert result == "stable"
+
+    def test_dropping_huge_current_becomes_rising(self):
+        """Current is 2x average but Q1/Q4 says dropping."""
+        result = self._apply_sanity(change=100, trend="dropping", traffic_gbps=4.0, avg_gbps=2.0)
+        # change > 0 catches this first → stable, not rising
+        assert result == "stable"
+
+    def test_dead_overrides_all(self):
+        """AZ: 0 traffic, avg was 0.9 Gbps."""
+        result = self._apply_sanity(change=-100, trend="dropping", traffic_gbps=0.0, avg_gbps=0.9)
+        assert result == "dead"
+
+    def test_stable_stays_stable(self):
+        """NL: avg 25.7, now 20.3, change -21%, trend stable — no override."""
+        result = self._apply_sanity(change=-21, trend="stable", traffic_gbps=20.3, avg_gbps=25.7)
+        assert result == "stable"
+
+    def test_small_negative_change_keeps_rising(self):
+        """Change is -5% (within -10 threshold), trend rising — keep it."""
+        result = self._apply_sanity(change=-5, trend="rising", traffic_gbps=9.5, avg_gbps=10.0)
+        assert result == "rising"
+
+    def test_zero_traffic_zero_avg_stays_stable(self):
+        """Country with no traffic history — should stay stable, not dead."""
+        result = self._apply_sanity(change=0, trend="stable", traffic_gbps=0.0, avg_gbps=0.0)
+        assert result == "stable"
+
+    def test_india_dropping_positive_83pct(self):
+        """The original India bug: dropping +83%. Should become stable."""
+        result = self._apply_sanity(change=83, trend="dropping", traffic_gbps=4.1, avg_gbps=2.2)
+        assert result == "stable"
+
+    def test_france_dropping_positive_36pct(self):
+        """The original France bug: dropping +36%. Should become stable."""
+        result = self._apply_sanity(change=36, trend="dropping", traffic_gbps=8.3, avg_gbps=6.1)
+        assert result == "stable"
 
 
-def detect_provider(ip_str: str) -> str:
-    """Detect hosting provider from IP address using known CIDR ranges."""
-    try:
-        addr = ipaddress.ip_address(ip_str)
-    except ValueError:
-        return "Unknown"
-    for provider, network in _PROVIDER_NETS:
-        if addr in network:
-            return provider
-    return "Other"
 
 
-# Maps specific CIDR ranges to datacenter cities. More specific ranges
-# override broader provider ranges. Built from provider allocation docs.
+class TestClassifyHost:
+    def test_unknown_groups(self):
+        prod, tier = classify_host([{"name": "Templates"}])
+        assert prod == "Unknown"
 
-DATACENTER_CIDRS: dict[str, list[tuple[str, str]]] = {
-    "AWS": [
-        ("3.0.0.0/16", "Singapore, SG"), ("3.8.0.0/16", "London, GB"),
-        ("3.64.0.0/16", "Frankfurt, DE"), ("3.104.0.0/16", "Sydney, AU"),
-        ("3.112.0.0/16", "Tokyo, JP"), ("3.120.0.0/16", "Frankfurt, DE"),
-        ("13.48.0.0/16", "Stockholm, SE"), ("13.112.0.0/16", "Tokyo, JP"),
-        ("13.228.0.0/16", "Singapore, SG"), ("13.232.0.0/16", "Mumbai, IN"),
-        ("15.161.0.0/16", "Milan, IT"), ("15.188.0.0/16", "Paris, FR"),
-        ("18.130.0.0/16", "London, GB"), ("18.136.0.0/16", "Singapore, SG"),
-        ("18.162.0.0/16", "Hong Kong, HK"), ("18.176.0.0/16", "Tokyo, JP"),
-        ("18.228.0.0/16", "Sao Paulo, BR"), ("35.180.0.0/16", "Paris, FR"),
-        ("52.28.0.0/16", "Frankfurt, DE"), ("52.47.0.0/16", "Paris, FR"),
-        ("54.233.0.0/16", "Sao Paulo, BR"), ("54.248.0.0/16", "Tokyo, JP"),
-    ],
-    "Azure": [
-        ("20.38.0.0/16", "Various"), ("20.40.0.0/16", "Various"),
-        ("20.50.0.0/16", "Various"), ("40.74.0.0/16", "Various"),
-        ("40.78.0.0/16", "Various"), ("40.112.0.0/16", "Various"),
-        ("51.104.0.0/16", "London, GB"), ("51.105.0.0/16", "London, GB"),
-        ("51.107.0.0/16", "Geneva, CH"), ("51.116.0.0/16", "Frankfurt, DE"),
-        ("51.120.0.0/16", "Oslo, NO"), ("51.124.0.0/16", "Amsterdam, NL"),
-        ("51.137.0.0/16", "Various"), ("51.140.0.0/16", "London, GB"),
-        ("52.136.0.0/16", "Various"), ("52.148.0.0/16", "Various"),
-        ("52.157.0.0/16", "Various"),
-    ],
-    "Cogent": [("38.0.0.0/8", "Various")],
-    "DigitalOcean": [
-        ("64.225.0.0/16", "Various"), ("104.131.0.0/16", "New York, US"),
-        ("134.209.0.0/16", "Various"), ("137.184.0.0/16", "Various"),
-        ("142.93.0.0/16", "Various"), ("143.110.0.0/16", "Various"),
-        ("143.198.0.0/16", "Various"), ("157.245.0.0/16", "Various"),
-        ("159.65.0.0/16", "Various"), ("159.89.0.0/16", "Various"),
-        ("161.35.0.0/16", "Various"), ("164.90.0.0/16", "Various"),
-        ("167.71.0.0/16", "Various"), ("174.138.0.0/16", "Various"),
-    ],
-    "Equinix Metal": [
-        ("136.144.0.0/16", "Various"), ("145.40.0.0/16", "Various"),
-        ("147.28.0.0/16", "Various"), ("169.150.0.0/16", "Various"),
-    ],
-    "GCP": [
-        ("34.64.0.0/16", "Seoul, KR"), ("34.65.0.0/16", "Zurich, CH"),
-        ("34.88.0.0/16", "Helsinki, FI"), ("34.89.0.0/16", "London, GB"),
-        ("34.90.0.0/16", "Amsterdam, NL"), ("34.91.0.0/16", "Amsterdam, NL"),
-        ("34.96.0.0/16", "Hong Kong, HK"), ("34.116.0.0/16", "Warsaw, PL"),
-        ("34.118.0.0/16", "Various"), ("34.141.0.0/16", "Frankfurt, DE"),
-        ("34.147.0.0/16", "Various"), ("34.157.0.0/16", "Paris, FR"),
-        ("34.175.0.0/16", "Madrid, ES"), ("35.187.0.0/16", "Various"),
-        ("35.189.0.0/16", "Various"), ("35.198.0.0/16", "Various"),
-        ("35.228.0.0/16", "Helsinki, FI"), ("35.234.0.0/16", "London, GB"),
-        ("35.246.0.0/16", "London, GB"),
-    ],
-    "Hetzner": [
-        ("49.12.0.0/16", "Falkenstein, DE"), ("159.69.0.0/16", "Falkenstein, DE"),
-        ("78.46.0.0/16", "Falkenstein, DE"), ("78.47.0.0/16", "Falkenstein, DE"),
-        ("88.99.0.0/16", "Falkenstein, DE"), ("88.198.0.0/16", "Falkenstein, DE"),
-        ("144.76.0.0/16", "Falkenstein, DE"), ("148.251.0.0/16", "Falkenstein, DE"),
-        ("176.9.0.0/16", "Falkenstein, DE"), ("178.63.0.0/16", "Falkenstein, DE"),
-        ("65.21.0.0/16", "Helsinki, FI"), ("95.216.0.0/16", "Helsinki, FI"),
-        ("135.181.0.0/16", "Helsinki, FI"), ("65.108.0.0/16", "Helsinki, FI"),
-        ("116.202.0.0/16", "Nuremberg, DE"), ("138.201.0.0/16", "Nuremberg, DE"),
-        ("167.235.0.0/16", "Ashburn, US"),
-    ],
-    "Linode": [
-        ("45.33.0.0/16", "Various"), ("45.56.0.0/16", "Various"),
-        ("45.79.0.0/16", "Various"), ("50.116.0.0/16", "Various"),
-        ("66.175.208.0/20", "Various"), ("69.164.192.0/20", "Various"),
-        ("72.14.176.0/20", "Various"), ("96.126.96.0/20", "Various"),
-        ("139.144.0.0/16", "Various"), ("170.187.0.0/16", "Various"),
-        ("172.232.0.0/16", "Various"), ("172.233.0.0/16", "Various"),
-        ("172.234.0.0/16", "Various"), ("172.236.0.0/16", "Various"),
-    ],
-    "OVH": [
-        ("51.79.0.0/16", "Beauharnois, CA"), ("15.235.0.0/16", "Beauharnois, CA"),
-        ("51.89.0.0/16", "Gravelines, FR"), ("51.91.0.0/16", "Gravelines, FR"),
-        ("51.210.0.0/16", "Gravelines, FR"), ("141.94.0.0/16", "Gravelines, FR"),
-        ("51.83.0.0/16", "Strasbourg, FR"), ("51.195.0.0/16", "Strasbourg, FR"),
-        ("51.75.0.0/16", "Roubaix, FR"), ("51.254.0.0/16", "Roubaix, FR"),
-        ("51.77.0.0/16", "Roubaix, FR"), ("51.255.0.0/16", "Roubaix, FR"),
-        ("51.68.0.0/16", "London, GB"), ("51.38.0.0/16", "London, GB"),
-        ("51.178.0.0/16", "Frankfurt, DE"),
-        ("15.204.0.0/16", "Hillsboro, US"),
-        ("198.244.0.0/16", "London, GB"),
-        ("57.128.0.0/16", "Warsaw, PL"),
-        ("162.19.0.0/16", "Limburg, DE"),
-        ("146.59.0.0/16", "Singapore, SG"),
-    ],
-    "Oracle Cloud": [
-        ("129.146.0.0/16", "Phoenix, US"), ("129.148.0.0/16", "Phoenix, US"),
-        ("129.150.0.0/16", "Ashburn, US"), ("129.152.0.0/16", "Various"),
-        ("129.153.0.0/16", "Various"), ("129.154.0.0/16", "Various"),
-        ("130.61.0.0/16", "Various"), ("132.145.0.0/16", "Various"),
-        ("140.238.0.0/16", "Various"), ("141.147.0.0/16", "Various"),
-        ("144.24.0.0/16", "Various"), ("150.136.0.0/16", "Ashburn, US"),
-        ("152.67.0.0/16", "Various"), ("152.70.0.0/16", "Various"),
-        ("158.101.0.0/16", "Various"), ("158.178.0.0/16", "Various"),
-        ("168.138.0.0/16", "Various"), ("193.122.0.0/16", "Various"),
-    ],
-    "Scaleway": [
-        ("51.15.0.0/16", "Paris, FR"), ("51.158.0.0/16", "Paris, FR"),
-        ("51.159.0.0/16", "Paris, FR"), ("163.172.0.0/16", "Paris, FR"),
-        ("62.210.0.0/16", "Paris, FR"), ("212.47.0.0/16", "Amsterdam, NL"),
-    ],
-    "Vultr": [
-        ("45.32.0.0/16", "Various"), ("45.63.0.0/16", "Various"),
-        ("45.76.0.0/16", "Various"), ("45.77.0.0/16", "Various"),
-        ("108.61.0.0/16", "Various"), ("136.244.0.0/16", "Various"),
-        ("140.82.0.0/16", "Various"), ("149.28.0.0/16", "Various"),
-        ("155.138.0.0/16", "Various"), ("207.148.0.0/16", "Various"),
-        ("209.250.0.0/16", "Various"), ("216.128.0.0/16", "Various"),
-    ],
-}
+    def test_skip_templates(self):
+        prod, tier = classify_host([{"name": "Templates/Applications"}, {"name": "mygroup"}])
+        assert prod == "mygroup"
 
-# Pre-compile datacenter networks (most specific first)
-_DC_NETS: list[tuple[str, str, ipaddress.IPv4Network]] = sorted(
-    [
-        (prov, city, ipaddress.ip_network(cidr, strict=False))
-        for prov, mappings in DATACENTER_CIDRS.items()
-        for cidr, city in mappings
-    ],
-    key=lambda x: -x[2].prefixlen,
-)
-
-
-def resolve_datacenter(ip_str: str) -> tuple[str, str]:
-    """Resolve IP to (provider, datacenter_city). Returns ("Unknown", "") on failure."""
-    try:
-        addr = ipaddress.ip_address(ip_str)
-    except ValueError:
-        return "Unknown", ""
-    # Try specific datacenter mapping first
-    for provider, city, network in _DC_NETS:
-        if addr in network:
-            return provider, city
-    # Fall back to provider-only detection
-    for provider, network in _PROVIDER_NETS:
-        if addr in network:
-            return provider, ""
-    return "Other", ""
+    def test_empty_groups(self):
+        prod, tier = classify_host([])
+        assert prod == "Unknown"
