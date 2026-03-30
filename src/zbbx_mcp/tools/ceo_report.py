@@ -20,6 +20,7 @@ from zbbx_mcp.data import (
     fetch_trends_batch,
     group_by_country,
     host_ip,
+    is_hidden_product,
 )
 from zbbx_mcp.resolver import InstanceResolver
 
@@ -383,7 +384,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                                 product_counts: dict[str, dict] = {}
                 for h in hosts:
                     prod, tier = _classify_host(h.get("groups", []))
-                    if prod and prod != "Unknown":
+                    if prod and prod != "Unknown" and not is_hidden_product(prod):
                         key = prod
                         pc = product_counts.setdefault(key, {"total": 0, "tiers": {}})
                         pc["total"] += 1
