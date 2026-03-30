@@ -398,3 +398,89 @@ class TestClassifyHost:
     def test_empty_groups(self):
         prod, tier = classify_host([])
         assert prod == "Unknown"
+
+
+
+
+class TestProductHiding:
+    """Test ZABBIX_HIDE_PRODUCTS filtering used in CEO report."""
+
+    def test_is_hidden_with_env(self, monkeypatch):
+        """Hidden product detected when env var is set."""
+        monkeypatch.setenv("ZABBIX_HIDE_PRODUCTS", "Legacy,OldProduct")
+        # Reset cache so it re-reads env
+        import zbbx_mcp.data as _data
+        _data._HIDE_PRODUCTS_CACHE = None
+        assert _data.is_hidden_product("Legacy") is True
+        assert _data.is_hidden_product("legacy") is True  # case insensitive
+        assert _data.is_hidden_product("OldProduct") is True
+        assert _data.is_hidden_product("ActiveProduct") is False
+        assert _data.is_hidden_product("AnotherProduct") is False
+        _data._HIDE_PRODUCTS_CACHE = None  # cleanup
+
+    def test_is_hidden_empty_env(self, monkeypatch):
+        """Nothing hidden when env var is empty."""
+        monkeypatch.setenv("ZABBIX_HIDE_PRODUCTS", "")
+        import zbbx_mcp.data as _data
+        _data._HIDE_PRODUCTS_CACHE = None
+        assert _data.is_hidden_product("Legacy") is False
+        assert _data.is_hidden_product("anything") is False
+        _data._HIDE_PRODUCTS_CACHE = None
+
+    def test_is_hidden_unset_env(self, monkeypatch):
+        """Nothing hidden when env var is not set."""
+        monkeypatch.delenv("ZABBIX_HIDE_PRODUCTS", raising=False)
+        import zbbx_mcp.data as _data
+        _data._HIDE_PRODUCTS_CACHE = None
+        assert _data.is_hidden_product("Legacy") is False
+        _data._HIDE_PRODUCTS_CACHE = None
+
+    def test_group_by_country_excludes_hidden(self, monkeypatch):
+        """group_by_country should skip hosts with hidden products."""
+        monkeypatch.setenv("ZABBIX_HIDE_PRODUCTS", "Legacy")
+        monkeypatch.setenv("ZABBIX_PRODUCT_MAP", "")  # use raw group names
+        import zbbx_mcp.data as _data
+        _data._HIDE_PRODUCTS_CACHE = None
+
+        hosts = [
+            {"hostid": "1", "host": "srv-de01", "groups": [{"name": "good_product"}]},
+            {"hostid": "2", "host": "srv-de02", "groups": [{"name": "Legacy"}]},
+            {"hostid": "3", "host": "srv-nl01", "groups": [{"name": "good_product"}]},
+        ]
+        result = _data.group_by_country(hosts)
+        # DE should have 1 host (not 2 — Legacy host excluded)
+        assert len(result.get("DE", [])) == 1
+        assert result["DE"][0]["hostid"] == "1"
+        assert "NL" in result
+        _data._HIDE_PRODUCTS_CACHE = None
+
+    def test_fleet_composition_filter(self, monkeypatch):
+        """Simulate CEO report fleet composition: hidden + non-VPN excluded."""
+        monkeypatch.setenv("ZABBIX_HIDE_PRODUCTS", "Legacy")
+        import zbbx_mcp.data as _data
+        _data._HIDE_PRODUCTS_CACHE = None
+
+        _NON_VPN = {"Monitoring", "Infrastructure", "Unknown"}
+
+        hosts_data = [
+            ("VPNProduct", "Free"),
+            ("VPNProduct", "Premium"),
+            ("Legacy", "VPN"),
+            ("Legacy", "VPN"),
+            ("Monitoring", "WHOIS"),
+            ("Infrastructure", "Tunnel"),
+            ("Unknown", "Unknown"),
+        ]
+
+        product_counts: dict[str, int] = {}
+        for prod, tier in hosts_data:
+            if prod and prod not in _NON_VPN and not _data.is_hidden_product(prod):
+                product_counts[prod] = product_counts.get(prod, 0) + 1
+
+        assert "VPNProduct" in product_counts
+        assert product_counts["VPNProduct"] == 2
+        assert "Legacy" not in product_counts, "Legacy should be hidden"
+        assert "Monitoring" not in product_counts
+        assert "Infrastructure" not in product_counts
+        assert "Unknown" not in product_counts
+        _data._HIDE_PRODUCTS_CACHE = None
