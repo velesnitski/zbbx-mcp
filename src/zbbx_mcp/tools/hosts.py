@@ -274,10 +274,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
             max_results: int = 30,
             instance: str = "",
         ) -> str:
-            """Detect server clusters from naming patterns.
-
-            Hosts sharing a base name form a cluster (e.g. 'srv-us1', 'srv-us1 us2').
-            Groups them and infers primary/secondary roles.
+            """Detect server clusters and infer primary/secondary roles.
 
             Args:
                 group: Filter by host group name (optional)

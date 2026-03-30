@@ -198,9 +198,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()):
             max_results: int = 50,
             instance: str = "",
         ) -> str:
-            """Get server load metrics (CPU, memory, network) sorted by utilization.
-
-            Use this to find overloaded or underloaded servers.
+            """Server load (CPU, memory, network) sorted by utilization.
 
             Args:
                 product: Filter by product name (optional)
@@ -541,9 +539,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()):
             product: str = "",
             instance: str = "",
         ) -> str:
-            """Show server distribution across hosting providers (OVH, Scaleway, Hetzner, AWS, etc.).
-
-            Detects provider from IP address using known CIDR ranges.
+            """Server distribution across hosting providers.
 
             Args:
                 product: Filter by product name (optional)

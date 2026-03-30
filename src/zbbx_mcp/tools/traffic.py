@@ -256,9 +256,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
             max_results: int = 50,
             instance: str = "",
         ) -> str:
-            """Get traffic report for servers sorted by bandwidth.
-
-            Shows traffic, connections, bandwidth per client, and peer comparison.
+            """Traffic report with connections and bandwidth per client.
 
             Args:
                 group: Filter by Zabbix host group (optional)
