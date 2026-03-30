@@ -150,6 +150,43 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()):
             except (httpx.HTTPError, ValueError) as e:
                 return f"Error: {e}"
 
+    if "generate_product_map" not in skip:
+
+        @mcp.tool()
+        async def generate_product_map(instance: str = "") -> str:
+            """Generate a starter product_map.json from Zabbix host groups.
+
+            Args:
+                instance: Zabbix instance name (optional)
+            """
+            import json
+
+            try:
+                client = resolver.resolve(instance)
+                groups = await client.call("hostgroup.get", {
+                    "output": ["groupid", "name"],
+                    "selectHosts": ["hostid"],
+                })
+
+                skip_names = {"Templates", "Templates/Applications", "Templates/Databases", "Discovered hosts"}
+                result = {}
+                for g in sorted(groups, key=lambda x: -len(x.get("hosts", []))):
+                    name = g["name"]
+                    count = len(g.get("hosts", []))
+                    if name in skip_names or count == 0:
+                        continue
+                    result[name] = [name, "Default"]
+
+                output = json.dumps(result, indent=2, ensure_ascii=False)
+                return (
+                    f"**Starter product_map.json** ({len(result)} groups)\n\n"
+                    f"```json\n{output}\n```\n\n"
+                    f"Edit the values: `[\"ProductName\", \"Tier\"]` or `[\"skip\"]` to hide.\n"
+                    f"Save as `product_map.json` and set `ZABBIX_PRODUCT_MAP=/path/to/product_map.json`."
+                )
+            except (httpx.HTTPError, ValueError) as e:
+                return f"Error: {e}"
+
     if "get_server_load" not in skip:
 
         @mcp.tool()
