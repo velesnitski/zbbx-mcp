@@ -233,7 +233,7 @@ class TestExtractCountry:
 
     def test_multiple_country_codes(self):
         """Multiple country codes in hostname — first wins."""
-        assert extract_country("srv-de01") == "RU"
+        assert extract_country("srv-de01") == "DE"
 
 
 
