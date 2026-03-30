@@ -22,7 +22,7 @@ from zbbx_mcp.excel import BW_MAX, classify_bandwidth
 __all__ = [
     "ServerRow", "extract_country", "fetch_all_data", "fetch_trends_batch",
     "build_value_map", "build_max_map", "countries_for_region",
-    "fetch_enabled_hosts", "fetch_traffic_map", "fetch_cpu_map", "fetch_host_dashboards",
+    "fetch_enabled_hosts", "fetch_traffic_map", "fetch_cpu_map", "fetch_service_status", "fetch_host_dashboards",
     "group_by_country", "host_ip", "is_hidden_product", "HIDE_PRODUCTS",
     "TRAFFIC_IN_KEYS", "TRAFFIC_OUT_KEYS", "METRIC_KEYS", "GB_BYTES",
     "REGION_MAP", "CAPITAL_COORDS",
@@ -252,6 +252,45 @@ async def fetch_host_dashboards(client: ZabbixClient) -> dict[str, str]:
                         hid = f["value"]
                         if hid not in result:
                             result[hid] = label
+    return result
+
+
+async def fetch_service_status(client: ZabbixClient, hostids: list[str]) -> dict[str, int]:
+    """Fetch combined service status per host. Checks all configured service keys.
+
+    Returns {hostid: status} where:
+      1 = at least one protocol works (OK)
+      0 = all configured protocols DOWN
+      None (missing key) = host not in result
+    """
+    if not hostids:
+        return {}
+    keys = [k for k in (KEY_service_PRIMARY, KEY_service_SECONDARY, KEY_service_TERTIARY) if k]
+    if not keys:
+        return {}
+
+    items = await client.call("item.get", {
+        "hostids": hostids,
+        "output": ["hostid", "lastvalue", "key_"],
+        "filter": {"key_": keys, "status": STATUS_ENABLED},
+    })
+
+    # Per host: track if ANY check passes
+    host_any_ok: dict[str, bool] = {}
+    host_has_check: set[str] = set()
+    for it in items:
+        hid = it["hostid"]
+        host_has_check.add(hid)
+        try:
+            val = int(float(it.get("lastvalue", 0)))
+            if val == 1:
+                host_any_ok[hid] = True
+        except (ValueError, TypeError):
+            pass
+
+    result: dict[str, int] = {}
+    for hid in host_has_check:
+        result[hid] = 1 if host_any_ok.get(hid) else 0
     return result
 
 
