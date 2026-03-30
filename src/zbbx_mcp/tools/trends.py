@@ -651,25 +651,11 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()):
                 async def _empty_list():
                     return []
 
-                (trend_rows, _), service1_items = await asyncio.gather(
-                    fetch_trends_batch(client, hostids, ["cpu", "traffic"], period),
-                    client.call("item.get", {
-                        "hostids": hostids,
-                        "output": ["hostid", "lastvalue"],
-                        "filter": {"key_": KEY_service_PRIMARY, "status": "0"},
-                    }) if KEY_service_PRIMARY else _empty_list(),
-                    return_exceptions=True,
-                )
-                if isinstance(trend_rows, BaseException):
-                    trend_rows = []
-                service1_items = service1_items if isinstance(service1_items, list) else []
+                from zbbx_mcp.data import fetch_service_status
 
-                service1_map: dict[str, int] = {}
-                for item in service1_items:
-                    try:
-                        service1_map[item["hostid"]] = int(float(item["lastvalue"]))
-                    except (ValueError, TypeError, KeyError):
-                        pass
+                trend_result = await fetch_trends_batch(client, hostids, ["cpu", "traffic"], period)
+                trend_rows = trend_result[0] if not isinstance(trend_result[0], BaseException) else []
+                service1_map = await fetch_service_status(client, hostids)
 
                 dash_map = await fetch_host_dashboards(client)
 
