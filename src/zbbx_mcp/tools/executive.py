@@ -612,14 +612,8 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     fetch_cpu_map(client, all_ids),
                 )
 
-                service_map: dict[str, int] = {}
-                if KEY_service_PRIMARY:
-                    service_items = await client.call("item.get", {
-                        "hostids": all_ids,
-                        "output": ["hostid", "lastvalue"],
-                        "filter": {"key_": KEY_service_PRIMARY, "status": "0"},
-                    })
-                    service_map = build_value_map(service_items, lambda v: int(float(v)))
+                from zbbx_mcp.data import fetch_service_status
+                service_map = await fetch_service_status(client, all_ids)
 
                 # Dashboard lookup
                 dash_map = await fetch_host_dashboards(client)
