@@ -132,8 +132,6 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
         ) -> str:
             """Compare current vs previous period — traffic, CPU, countries.
 
-            Fetches 2x the period and splits into two halves for comparison.
-
             Args:
                 days: Period length in days (default: 30 — compares last 30d vs prior 30d)
                 instance: Zabbix instance name (optional)

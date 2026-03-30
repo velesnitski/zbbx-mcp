@@ -490,10 +490,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
             min_servers: int = 2,
             instance: str = "",
         ) -> str:
-            """Show which service protocol works in which country.
-
-            Aggregates service protocol check status per country.
-            Helps determine: "user in country X should use protocol Y."
+            """service health status matrix by country.
 
             Args:
                 min_servers: Minimum servers per country to include (default: 2)
@@ -612,9 +609,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
             min_servers: int = 2,
             instance: str = "",
         ) -> str:
-            """Show when traffic disruptions started per country, using daily trend data.
-
-            Finds the day traffic dropped to near-zero for each affected country.
+            """Timeline of traffic disruption start dates per country.
 
             Args:
                 period: How far back to look (default: 30d)
@@ -789,9 +784,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
             max_results: int = 40,
             instance: str = "",
         ) -> str:
-            """Server density by country — count, traffic, CPU, provider mix.
-
-            Highlights countries with only 1 server (no redundancy).
+            """Server density by country with traffic, CPU, provider mix.
 
             Args:
                 region: LATAM, APAC, EMEA, NA, CIS, ALL (default: ALL)
