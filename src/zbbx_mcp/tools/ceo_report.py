@@ -223,11 +223,11 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
 
                     # Sanity: trend label must match change direction
                     change = cd["change"]
-                    if change < -30 and cd["trend"] in ("stable", "rising"):
+                    if change <= -30 and cd["trend"] in ("stable", "rising"):
                         cd["trend"] = "dropping"
-                    elif change > 30 and cd["trend"] in ("stable", "dropping"):
+                    elif change >= 30 and cd["trend"] in ("stable", "dropping"):
                         cd["trend"] = "rising"
-                    elif change < -10 and cd["trend"] == "rising" or change > 0 and cd["trend"] == "dropping":
+                    elif change <= -10 and cd["trend"] == "rising" or change > 0 and cd["trend"] == "dropping":
                         cd["trend"] = "stable"
                     if cd["traffic_gbps"] < 0.01 and avg_gbps > 0.05:
                         cd["trend"] = "dead"
