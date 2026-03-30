@@ -656,6 +656,8 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                         cat = "DEAD"
                     elif service_val == 0 and traffic < 2:
                         cat = "service DOWN"
+                    elif service_val == -1:
+                        cat = "DEGRADED"
                     elif traffic < 5:
                         cat = "IDLE"
                     else:
@@ -686,11 +688,11 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     "| Category | Count |",
                     "|----------|-------|",
                 ]
-                for cat in ["ACTIVE", "CLUSTER", "IDLE", "service DOWN", "DEAD", "NO DATA", "INFRA"]:
+                for cat in ["ACTIVE", "DEGRADED", "CLUSTER", "IDLE", "service DOWN", "DEAD", "NO DATA", "INFRA"]:
                     if cat in cats:
                         lines.append(f"| {cat} | {cats[cat]} |")
 
-                for cat in ["INFRA", "DEAD", "NO DATA", "service DOWN", "IDLE", "CLUSTER", "ACTIVE"]:
+                for cat in ["INFRA", "DEAD", "NO DATA", "service DOWN", "DEGRADED", "IDLE", "CLUSTER", "ACTIVE"]:
                     servers = [m for m in matched if m["cat"] == cat]
                     if not servers:
                         continue
@@ -698,7 +700,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     lines.append("| Server | Country | Dashboard | Traffic | CPU | service |")
                     lines.append("|--------|---------|-----------|---------|-----|-----|")
                     for s in sorted(servers, key=lambda x: -x["traffic"])[:12]:
-                        service_str = "DOWN" if s["service"] == 0 else ("OK" if s["service"] == 1 else "-")
+                        service_str = "DOWN" if s["service"] == 0 else ("PARTIAL" if s["service"] == -1 else ("OK" if s["service"] == 1 else "-"))
                         lines.append(f"| {s['host']} | {s['cc'] or '-'} | {s['dash']} | {s['traffic']:.1f} | {s['cpu']}% | {service_str} |")
                     if len(servers) > 12:
                         lines.append(f"*+{len(servers) - 12} more*")
