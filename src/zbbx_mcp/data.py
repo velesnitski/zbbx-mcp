@@ -212,8 +212,8 @@ async def fetch_traffic_map(client: ZabbixClient, hostids: list[str]) -> dict[st
             "filter": {"key_": TRAFFIC_IN_KEYS},
         })
 
-    # Filter out virtual interfaces (tun, docker, veth, br-, lo, unbound, squid)
-    _VIRTUAL = ("tun", "docker", "veth", "br-", "lo", "unbound", "squid", "ppp")
+    # Filter out virtual/tunnel interfaces — keep only physical NICs (eth, eno, enp, ens, bond, ppp)
+    _PHYSICAL = ("eth", "eno", "enp", "ens", "bond", "ppp")
 
     result: dict[str, float] = {}
     for it in items:
@@ -221,7 +221,7 @@ async def fetch_traffic_map(client: ZabbixClient, hostids: list[str]) -> dict[st
             key = it.get("key_", "")
             # Extract interface name from net.if.in[iface]
             iface = key.split("[")[1].rstrip("]") if "[" in key else ""
-            if any(iface.startswith(v) for v in _VIRTUAL):
+            if not any(iface.startswith(p) for p in _PHYSICAL):
                 continue
             mbps = float(it.get("lastvalue", 0)) / 1_000_000
             hid = it["hostid"]
