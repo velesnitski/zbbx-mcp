@@ -612,14 +612,8 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     fetch_cpu_map(client, all_ids),
                 )
 
-                vpn_map: dict[str, int] = {}
-                if KEY_VPN_PRIMARY:
-                    vpn_items = await client.call("item.get", {
-                        "hostids": all_ids,
-                        "output": ["hostid", "lastvalue"],
-                        "filter": {"key_": KEY_VPN_PRIMARY, "status": "0"},
-                    })
-                    vpn_map = build_value_map(vpn_items, lambda v: int(float(v)))
+                from zbbx_mcp.data import fetch_vpn_status
+                vpn_map = await fetch_vpn_status(client, all_ids)
 
                 # Dashboard lookup
                 dash_map = await fetch_host_dashboards(client)

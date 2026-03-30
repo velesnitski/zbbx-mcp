@@ -651,25 +651,11 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()):
                 async def _empty_list():
                     return []
 
-                (trend_rows, _), vpn1_items = await asyncio.gather(
-                    fetch_trends_batch(client, hostids, ["cpu", "traffic"], period),
-                    client.call("item.get", {
-                        "hostids": hostids,
-                        "output": ["hostid", "lastvalue"],
-                        "filter": {"key_": KEY_VPN_PRIMARY, "status": "0"},
-                    }) if KEY_VPN_PRIMARY else _empty_list(),
-                    return_exceptions=True,
-                )
-                if isinstance(trend_rows, BaseException):
-                    trend_rows = []
-                vpn1_items = vpn1_items if isinstance(vpn1_items, list) else []
+                from zbbx_mcp.data import fetch_vpn_status
 
-                vpn1_map: dict[str, int] = {}
-                for item in vpn1_items:
-                    try:
-                        vpn1_map[item["hostid"]] = int(float(item["lastvalue"]))
-                    except (ValueError, TypeError, KeyError):
-                        pass
+                trend_result = await fetch_trends_batch(client, hostids, ["cpu", "traffic"], period)
+                trend_rows = trend_result[0] if not isinstance(trend_result[0], BaseException) else []
+                vpn1_map = await fetch_vpn_status(client, hostids)
 
                 dash_map = await fetch_host_dashboards(client)
 
