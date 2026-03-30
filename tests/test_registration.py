@@ -97,6 +97,7 @@ EXPECTED_TOOLS = {
     "get_provider_summary",
     "get_unknown_providers",
     "identify_providers",
+    "generate_product_map",
     # report.py
     "generate_server_report",
     # infra_report.py
