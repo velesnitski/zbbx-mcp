@@ -464,7 +464,7 @@ class TestProductHiding:
         ]
 
         product_counts: dict[str, int] = {}
-        for prod, tier in hosts_data:
+        for prod, _tier in hosts_data:
             if prod and prod not in _NON_service and not _data.is_hidden_product(prod):
                 product_counts[prod] = product_counts.get(prod, 0) + 1
 
