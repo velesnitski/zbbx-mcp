@@ -23,7 +23,7 @@ __all__ = [
     "ServerRow", "extract_country", "fetch_all_data", "fetch_trends_batch",
     "build_value_map", "build_max_map", "countries_for_region",
     "fetch_enabled_hosts", "fetch_traffic_map", "fetch_cpu_map",
-    "group_by_country", "host_ip",
+    "group_by_country", "host_ip", "is_hidden_product", "HIDE_PRODUCTS",
     "TRAFFIC_IN_KEYS", "TRAFFIC_OUT_KEYS", "METRIC_KEYS", "GB_BYTES",
     "REGION_MAP", "CAPITAL_COORDS",
     "STATUS_ENABLED", "KEY_service_PRIMARY", "KEY_service_SECONDARY",
@@ -45,6 +45,10 @@ KEY_service_PRIMARY = os.environ.get("ZABBIX_service_CHECK_KEY", "")
 KEY_service_SECONDARY = os.environ.get("ZABBIX_service2_CHECK_KEY", "")
 KEY_service_TERTIARY = os.environ.get("ZABBIX_service3_CHECK_KEY", "")
 KEY_CONNECTIONS = os.environ.get("ZABBIX_CONNECTIONS_KEY", "")
+# Products to hide from all reports (comma-separated)
+HIDE_PRODUCTS: frozenset[str] = frozenset(
+    p.strip() for p in os.environ.get("ZABBIX_HIDE_PRODUCTS", "").split(",") if p.strip()
+)
 # Standard Zabbix agent keys
 KEY_CPU_IDLE = "system.cpu.util[,idle]"
 KEY_CPU_LOAD = "system.cpu.load[percpu,avg5]"
@@ -211,6 +215,13 @@ async def fetch_cpu_map(client: ZabbixClient, hostids: list[str]) -> dict[str, f
     return result
 
 
+def is_hidden_product(product: str) -> bool:
+    """Check if a product should be hidden from reports."""
+    if not HIDE_PRODUCTS:
+        return False
+    return product.lower() in {p.lower() for p in HIDE_PRODUCTS}
+
+
 def group_by_country(
     hosts: list[dict],
     *,
@@ -229,10 +240,11 @@ def group_by_country(
             continue
         if region_codes and cc not in region_codes:
             continue
-        if product:
-            prod, _ = _classify_host(h.get("groups", []))
-            if not prod or product.lower() not in prod.lower():
-                continue
+        prod, _ = _classify_host(h.get("groups", []))
+        if is_hidden_product(prod):
+            continue
+        if product and (not prod or product.lower() not in prod.lower()):
+            continue
         result.setdefault(cc, []).append(h)
     return result
 
