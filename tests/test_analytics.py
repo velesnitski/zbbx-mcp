@@ -222,7 +222,7 @@ class TestExtractCountry:
         assert extract_country("srv-mx0101") == "MX"
 
     def test_uk_normalizes_to_gb(self):
-        """UK should normalize to ISO 3166 GB."""
+        """Non-ISO country code normalizes to standard."""
         assert extract_country("srv-uk0001") == "GB"
         assert extract_country("srv-uk0005") == "GB"
 
@@ -232,7 +232,7 @@ class TestExtractCountry:
         assert extract_country("a1") == ""
 
     def test_multiple_country_codes(self):
-        """Hostname with both RU and UK — first match wins."""
+        """Multiple country codes in hostname — first wins."""
         assert extract_country("srv-de-nl01") == "RU"
 
 
@@ -251,68 +251,95 @@ class TestTrendSanity:
     @staticmethod
     def _apply_sanity(change: float, trend: str, traffic_gbps: float, avg_gbps: float) -> str:
         """Replicate the sanity logic from ceo_report.py / geo.py."""
-        if change < -10 and trend == "rising" or change > 0 and trend == "dropping":
-            trend = "stable"
-        elif traffic_gbps > avg_gbps * 1.5 and trend == "dropping":
+        if change < -30 and trend in ("stable", "rising"):
+            trend = "dropping"
+        elif change > 30 and trend in ("stable", "dropping"):
             trend = "rising"
+        elif change < -10 and trend == "rising" or change > 0 and trend == "dropping":
+            trend = "stable"
         if traffic_gbps < 0.01 and avg_gbps > 0.05:
             trend = "dead"
         return trend
 
-    def test_germany_rising_negative_change(self):
-        """DE: avg 25.4, now 22.0, Q1/Q4 says rising but change is -13%."""
+    def test_rising_with_negative_change(self):
+        """Rising trend but negative change should become stable."""
         result = self._apply_sanity(change=-13, trend="rising", traffic_gbps=22.0, avg_gbps=25.4)
         assert result == "stable", f"Expected stable, got {result}"
 
-    def test_india_dropping_negative_change(self):
-        """IN: avg 2.2, now 0.3, legitimately dropping -87%."""
+    def test_dropping_with_large_decline(self):
+        """Legitimate large decline stays dropping."""
         result = self._apply_sanity(change=-87, trend="dropping", traffic_gbps=0.3, avg_gbps=2.2)
         assert result == "dropping"
 
-    def test_russia_rising_positive_change(self):
-        """RU: avg 11.8, now 26.3, legitimately rising +123%."""
+    def test_rising_with_strong_growth(self):
+        """Legitimate strong growth stays rising."""
         result = self._apply_sanity(change=123, trend="rising", traffic_gbps=26.3, avg_gbps=11.8)
         assert result == "rising"
 
     def test_dropping_positive_change_becomes_stable(self):
-        """GB Friday: avg 1.7, now 1.9, Q1/Q4 says dropping but change is +11%."""
+        """Small positive change with dropping trend becomes stable."""
         result = self._apply_sanity(change=11, trend="dropping", traffic_gbps=1.9, avg_gbps=1.7)
         assert result == "stable"
 
     def test_dropping_huge_current_becomes_rising(self):
-        """Current is 2x average but Q1/Q4 says dropping."""
+        """Large positive change with dropping trend becomes rising."""
         result = self._apply_sanity(change=100, trend="dropping", traffic_gbps=4.0, avg_gbps=2.0)
-        # change > 0 catches this first → stable, not rising
-        assert result == "stable"
+        # change > 30 catches this → rising
+        assert result == "rising"
 
     def test_dead_overrides_all(self):
-        """AZ: 0 traffic, avg was 0.9 Gbps."""
+        """Zero traffic with prior average triggers dead."""
         result = self._apply_sanity(change=-100, trend="dropping", traffic_gbps=0.0, avg_gbps=0.9)
         assert result == "dead"
 
-    def test_stable_stays_stable(self):
-        """NL: avg 25.7, now 20.3, change -21%, trend stable — no override."""
+    def test_moderate_decline_stays_stable(self):
+        """Moderate decline within threshold stays stable."""
         result = self._apply_sanity(change=-21, trend="stable", traffic_gbps=20.3, avg_gbps=25.7)
         assert result == "stable"
 
+    def test_stable_large_decline_becomes_dropping(self):
+        """Large decline with stable trend becomes dropping."""
+        result = self._apply_sanity(change=-47, trend="stable", traffic_gbps=0.8, avg_gbps=1.6)
+        assert result == "dropping"
+
+    def test_stable_significant_decline_becomes_dropping(self):
+        """Significant decline with stable trend becomes dropping."""
+        result = self._apply_sanity(change=-43, trend="stable", traffic_gbps=0.4, avg_gbps=0.7)
+        assert result == "dropping"
+
+    def test_stable_severe_decline_becomes_dropping(self):
+        """Severe decline with stable trend becomes dropping."""
+        result = self._apply_sanity(change=-70, trend="stable", traffic_gbps=1.1, avg_gbps=3.7)
+        assert result == "dropping"
+
+    def test_big_positive_change_stable_becomes_rising(self):
+        """Large positive change overrides stable to rising."""
+        result = self._apply_sanity(change=50, trend="stable", traffic_gbps=15.0, avg_gbps=10.0)
+        assert result == "rising"
+
     def test_small_negative_change_keeps_rising(self):
-        """Change is -5% (within -10 threshold), trend rising — keep it."""
+        """Small decline within threshold keeps rising."""
         result = self._apply_sanity(change=-5, trend="rising", traffic_gbps=9.5, avg_gbps=10.0)
         assert result == "rising"
 
     def test_zero_traffic_zero_avg_stays_stable(self):
-        """Country with no traffic history — should stay stable, not dead."""
+        """No traffic and no history stays stable."""
         result = self._apply_sanity(change=0, trend="stable", traffic_gbps=0.0, avg_gbps=0.0)
         assert result == "stable"
 
-    def test_india_dropping_positive_83pct(self):
-        """The original India bug: dropping +83%. Should become stable."""
+    def test_dropping_large_positive_becomes_rising(self):
+        """Large positive change overrides dropping to rising."""
         result = self._apply_sanity(change=83, trend="dropping", traffic_gbps=4.1, avg_gbps=2.2)
-        assert result == "stable"
+        assert result == "rising"
 
-    def test_france_dropping_positive_36pct(self):
-        """The original France bug: dropping +36%. Should become stable."""
+    def test_dropping_moderate_positive_becomes_rising(self):
+        """Moderate positive change overrides dropping to rising."""
         result = self._apply_sanity(change=36, trend="dropping", traffic_gbps=8.3, avg_gbps=6.1)
+        assert result == "rising"
+
+    def test_dropping_positive_15pct_becomes_stable(self):
+        """Small positive change below threshold becomes stable."""
+        result = self._apply_sanity(change=15, trend="dropping", traffic_gbps=1.15, avg_gbps=1.0)
         assert result == "stable"
 
 
