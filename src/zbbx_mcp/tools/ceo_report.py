@@ -644,6 +644,54 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                         html.append('</tbody></table>')
                     html.append('</div>')
 
+                                # Find dead/dropping countries and check if neighbors absorbed traffic
+                redistribution = []
+                for cc, cd in sorted_countries:
+                    if cd["trend"] not in ("dead", "dropping"):
+                        continue
+                    if cd.get("avg_gbps", 0) < 0.1:
+                        continue
+                    name = _COUNTRY_NAMES.get(cc, cc)
+                    lost_gbps = round(cd.get("avg_gbps", 0) - cd["traffic_gbps"], 1)
+                    if lost_gbps <= 0:
+                        continue
+
+                    # Check if any country in same region gained traffic
+                    from zbbx_mcp.data import REGION_MAP
+                    cc_region = ""
+                    for rname, rcodes in REGION_MAP.items():
+                        if cc in rcodes:
+                            cc_region = rname
+                            break
+                    neighbors_gained = []
+                    if cc_region:
+                        for ncc, ncd in sorted_countries:
+                            if ncc == cc or ncc not in REGION_MAP.get(cc_region, []):
+                                continue
+                            if ncd.get("change", 0) > 15 and ncd["traffic_gbps"] > 0.1:
+                                neighbors_gained.append((_COUNTRY_NAMES.get(ncc, ncc), ncd.get("change", 0)))
+
+                    if neighbors_gained:
+                        absorbed = ", ".join(f"{n} +{c}%" for n, c in neighbors_gained[:3])
+                        redistribution.append((name, lost_gbps, cd["trend"], f"Partial redirect to: {absorbed}"))
+                    else:
+                        redistribution.append((name, lost_gbps, cd["trend"], "Traffic lost &mdash; users likely churned, no regional redirect detected"))
+
+                if redistribution:
+                    html.append('<div class="section"><h2>Traffic Redistribution Analysis</h2>')
+                    html.append('<div class="desc">When servers go down, where does the traffic go?</div>')
+                    html.append('<table><thead><tr><th>Country</th><th>Status</th><th class="num">Lost Gbps</th><th>Where Traffic Went</th></tr></thead><tbody>')
+                    for name, lost, trend, where in redistribution:
+                        cls = "critical" if trend == "dead" else "dropping"
+                        html.append(f'<tr><td><b>{name}</b></td><td>{_badge(cls, trend.title())}</td><td class="num">{lost}</td><td>{where}</td></tr>')
+                    html.append('</tbody></table>')
+                    html.append('<div class="alert alert-yellow" style="margin-top:12px">')
+                    html.append('<b>Key insight:</b> Traffic does not automatically redistribute geographically. ')
+                    html.append('When servers go down in one country, those users are <b>lost</b> &mdash; ')
+                    html.append('they do not connect to servers in other countries. ')
+                    html.append('Every day of downtime = permanent user loss. Proactive blocking detection is critical.')
+                    html.append('</div></div>')
+
                                 html.append('<div class="section"><h2>Status Legend</h2><div class="desc">How to read the severity labels in this report</div>')
                 html.append('<table><thead><tr><th>Status</th><th>Meaning</th><th>Business Impact</th><th>Recommended Action</th></tr></thead><tbody>')
                 html.append(f'<tr><td>{_badge("critical", "CRITICAL")}</td><td>service service DOWN, active users affected</td><td>Users cannot connect, revenue impact</td><td>Fix within 24h &mdash; rotate IPs or switch protocol</td></tr>')
