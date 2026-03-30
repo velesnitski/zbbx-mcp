@@ -620,6 +620,14 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     })
                     vpn_map = build_value_map(vpn_items, lambda v: int(float(v)))
 
+                # Build cluster primary lookup: base hostname → primary's traffic
+                # Pattern: "srv01" is primary, "srv01 node3" is secondary
+                primary_traffic: dict[str, float] = {}
+                for h in hosts:
+                    hostname = h["host"]
+                    if " " not in hostname:  # no space = potential primary
+                        primary_traffic[hostname] = traffic_map.get(h["hostid"], 0)
+
                 matched = []
                 for h in hosts:
                     prod, tier = _classify_host(h.get("groups", []))
@@ -633,9 +641,17 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     prov = detect_provider(ip) if ip else "?"
                     cc = extract_country(h["host"])
 
+                    # For cluster secondaries: check primary's traffic
+                    hostname = h["host"]
+                    base = hostname.split()[0] if " " in hostname else ""
+                    cluster_traffic = primary_traffic.get(base, 0) if base else 0
+
                     # Categorize
                     if prod == "Infrastructure" or prod == "Monitoring":
                         cat = "INFRA"
+                    elif hid not in traffic_map and cluster_traffic > 5:
+                        cat = "CLUSTER"  # secondary of active primary
+                        traffic = cluster_traffic  # inherit primary's traffic for display
                     elif hid not in traffic_map:
                         cat = "NO DATA"
                     elif traffic < 0.1 and cpu < 2:
@@ -648,7 +664,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                         cat = "ACTIVE"
 
                     matched.append({
-                        "host": h["host"], "cc": cc,
+                        "host": hostname, "cc": cc,
                         "prov": prov, "traffic": traffic, "cpu": cpu,
                         "vpn": vpn_val, "cat": cat,
                     })
@@ -669,11 +685,11 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     "| Category | Count |",
                     "|----------|-------|",
                 ]
-                for cat in ["ACTIVE", "IDLE", "VPN DOWN", "DEAD", "NO DATA", "INFRA"]:
+                for cat in ["ACTIVE", "CLUSTER", "IDLE", "VPN DOWN", "DEAD", "NO DATA", "INFRA"]:
                     if cat in cats:
                         lines.append(f"| {cat} | {cats[cat]} |")
 
-                for cat in ["INFRA", "DEAD", "VPN DOWN", "IDLE", "ACTIVE"]:
+                for cat in ["INFRA", "DEAD", "NO DATA", "VPN DOWN", "IDLE", "CLUSTER", "ACTIVE"]:
                     servers = [m for m in matched if m["cat"] == cat]
                     if not servers:
                         continue
