@@ -251,11 +251,11 @@ class TestTrendSanity:
     @staticmethod
     def _apply_sanity(change: float, trend: str, traffic_gbps: float, avg_gbps: float) -> str:
         """Replicate the sanity logic from ceo_report.py / geo.py."""
-        if change < -30 and trend in ("stable", "rising"):
+        if change <= -30 and trend in ("stable", "rising"):
             trend = "dropping"
-        elif change > 30 and trend in ("stable", "dropping"):
+        elif change >= 30 and trend in ("stable", "dropping"):
             trend = "rising"
-        elif change < -10 and trend == "rising" or change > 0 and trend == "dropping":
+        elif change <= -10 and trend == "rising" or change > 0 and trend == "dropping":
             trend = "stable"
         if traffic_gbps < 0.01 and avg_gbps > 0.05:
             trend = "dead"
@@ -341,6 +341,47 @@ class TestTrendSanity:
         """Small positive change below threshold becomes stable."""
         result = self._apply_sanity(change=15, trend="dropping", traffic_gbps=1.15, avg_gbps=1.0)
         assert result == "stable"
+
+    
+    def test_exactly_minus_30_becomes_dropping(self):
+        """Boundary: -30% exactly should trigger dropping (<=, not <)."""
+        result = self._apply_sanity(change=-30, trend="stable", traffic_gbps=0.7, avg_gbps=1.0)
+        assert result == "dropping", f"change=-30 stable should be dropping, got {result}"
+
+    def test_minus_29_stays_stable(self):
+        """Boundary: -29% should NOT trigger dropping."""
+        result = self._apply_sanity(change=-29, trend="stable", traffic_gbps=0.71, avg_gbps=1.0)
+        assert result == "stable"
+
+    def test_exactly_plus_30_becomes_rising(self):
+        """Boundary: +30% exactly should trigger rising (>=, not >)."""
+        result = self._apply_sanity(change=30, trend="stable", traffic_gbps=1.3, avg_gbps=1.0)
+        assert result == "rising", f"change=+30 stable should be rising, got {result}"
+
+    def test_plus_29_stays_stable(self):
+        """Boundary: +29% should NOT trigger rising."""
+        result = self._apply_sanity(change=29, trend="stable", traffic_gbps=1.29, avg_gbps=1.0)
+        assert result == "stable"
+
+    def test_exactly_minus_10_rising_becomes_stable(self):
+        """Boundary: -10% with rising should become stable."""
+        result = self._apply_sanity(change=-10, trend="rising", traffic_gbps=0.9, avg_gbps=1.0)
+        assert result == "stable"
+
+    def test_minus_9_rising_stays_rising(self):
+        """Boundary: -9% with rising should stay rising."""
+        result = self._apply_sanity(change=-9, trend="rising", traffic_gbps=0.91, avg_gbps=1.0)
+        assert result == "rising"
+
+    def test_exactly_minus_30_rising_becomes_dropping(self):
+        """Boundary: -30% with rising should become dropping (not stable)."""
+        result = self._apply_sanity(change=-30, trend="rising", traffic_gbps=0.7, avg_gbps=1.0)
+        assert result == "dropping"
+
+    def test_exactly_plus_30_dropping_becomes_rising(self):
+        """Boundary: +30% with dropping should become rising (not stable)."""
+        result = self._apply_sanity(change=30, trend="dropping", traffic_gbps=1.3, avg_gbps=1.0)
+        assert result == "rising"
 
 
 
