@@ -469,3 +469,125 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 return "\n".join(lines)
             except (httpx.HTTPError, ValueError) as e:
                 return f"Error: {e}"
+
+    if "get_incident_report" not in skip:
+
+        @mcp.tool()
+        async def get_incident_report(
+            hours: int = 24,
+            severity_min: int = 3,
+            instance: str = "",
+        ) -> str:
+            """Combined: top errors + correlated clusters + Zabbix links in one call.
+
+            Args:
+                hours: Lookback period (default: 24)
+                severity_min: Min severity 0-5 (default: 3)
+                instance: Zabbix instance name (optional)
+            """
+            try:
+                client = resolver.resolve(instance)
+                now = int(time.time())
+                time_from = now - hours * 3600
+                cutoff = now - hours * 3600 // 2
+                base_url = client.frontend_url
+
+                events = await client.call("event.get", {
+                    "output": ["eventid", "clock", "objectid", "name", "severity"],
+                    "selectHosts": ["host"],
+                    "source": 0, "value": 1,
+                    "time_from": time_from,
+                    "sortfield": "clock", "sortorder": "DESC",
+                    "severities": list(range(severity_min, 6)),
+                    "limit": 5000,
+                })
+
+                if not events:
+                    return f"No incidents (sev>={severity_min}) in {hours}h."
+
+                # Resolve unknown hosts via trigger ID
+                unresolved = {e.get("objectid", "") for e in events if not e.get("hosts")}
+                unresolved.discard("")
+                trig_map: dict[str, str] = {}
+                if unresolved:
+                    trigs = await client.call("trigger.get", {
+                        "triggerids": list(unresolved),
+                        "output": ["triggerid"], "selectHosts": ["host"],
+                    })
+                    for t in trigs:
+                        h = t.get("hosts", [])
+                        if h:
+                            trig_map[t["triggerid"]] = h[0]["host"]
+
+                def _host(e):
+                    h = e.get("hosts", [])
+                    if h:
+                        return h[0]["host"]
+                    if e.get("objectid") in trig_map:
+                        return trig_map[e["objectid"]]
+                    name = e.get("name", "")
+                    if " on " in name:
+                        return name.split(" on ")[-1].strip()[:30]
+                    return "?"
+
+                # Per-server errors
+                host_err: dict[str, dict] = {}
+                for e in events:
+                    h = _host(e)
+                    d = host_err.setdefault(h, {"t": 0, "r": 0, "o": 0, "tr": set()})
+                    d["t"] += 1
+                    d["r" if int(e.get("clock", 0)) >= cutoff else "o"] += 1
+                    d["tr"].add(e.get("name", "?")[:40])
+
+                # Correlated: same trigger on 3+ hosts within 15 min
+                by_trigger: dict[str, list] = defaultdict(list)
+                for e in events:
+                    by_trigger[e.get("name", "")].append({"host": _host(e), "clock": int(e.get("clock", 0))})
+
+                clusters = []
+                for tname, tevts in by_trigger.items():
+                    if len({e["host"] for e in tevts}) < 3:
+                        continue
+                    sorted_evts = sorted(tevts, key=lambda x: x["clock"])
+                    cur = [sorted_evts[0]]
+                    for evt in sorted_evts[1:]:
+                        if evt["clock"] - cur[0]["clock"] <= 900:
+                            cur.append(evt)
+                        else:
+                            ch = sorted({e["host"] for e in cur})
+                            if len(ch) >= 3:
+                                clusters.append((tname[:50], len(ch), ch, cur[0]["clock"]))
+                            cur = [evt]
+                    ch = sorted({e["host"] for e in cur})
+                    if len(ch) >= 3:
+                        clusters.append((tname[:50], len(ch), ch, cur[0]["clock"]))
+                clusters.sort(key=lambda x: -x[1])
+
+                # Output
+                lines = [f"**Incidents ({hours}h): {len(events)} events, {len(host_err)} servers**\n"]
+
+                if clusters:
+                    lines.append("**Correlated (3+ hosts, same trigger):**")
+                    for tname, cnt, hosts, ts in clusters[:5]:
+                        t = _ts(str(ts))
+                        hl = ", ".join(hosts[:4])
+                        if cnt > 4:
+                            hl += f" +{cnt - 4}"
+                        lines.append(f"- {tname} — {cnt} hosts at {t}: {hl}")
+                    lines.append("")
+
+                lines.append("**Top errors:**")
+                for h, d in sorted(host_err.items(), key=lambda x: -x[1]["t"])[:10]:
+                    trend = ""
+                    if d["o"] > 0:
+                        ratio = d["r"] / d["o"]
+                        trend = " WORSE" if ratio > 1.5 else (" better" if ratio < 0.5 else "")
+                    elif d["r"] > 0:
+                        trend = " NEW"
+                    trigs = ", ".join(list(d["tr"])[:2])
+                    link = f" [→]({base_url}/zabbix.php?action=search&search={h})" if h != "?" else ""
+                    lines.append(f"- **{h}** {d['t']} ({d['r']}/{d['o']}{trend}){link} — {trigs}")
+
+                return "\n".join(lines)
+            except (httpx.HTTPError, ValueError) as e:
+                return f"Error: {e}"
