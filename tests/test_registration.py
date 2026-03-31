@@ -65,6 +65,7 @@ EXPECTED_TOOLS = {
     "get_trends",
     "get_event_frequency",
     "get_correlated_events",
+    "get_error_rate",
     # geo.py (new)
     "get_expansion_report",
     "get_regional_density_map",
