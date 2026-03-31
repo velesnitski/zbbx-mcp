@@ -437,10 +437,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                         hostname = trigger_host_map[e["objectid"]]
                     else:
                         name = e.get("name", "")
-                        if " on " in name:
-                            hostname = name.split(" on ")[-1].strip()[:40]
-                        else:
-                            hostname = f"[{name[:40]}]"
+                        hostname = name.split(" on ")[-1].strip()[:40] if " on " in name else f"[{name[:40]}]"
                     entry = host_errors.setdefault(hostname, {"total": 0, "recent": 0, "older": 0, "triggers": set()})
                     entry["total"] += 1
                     if int(e.get("clock", 0)) >= cutoff:
