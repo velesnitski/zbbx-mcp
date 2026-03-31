@@ -439,10 +439,8 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                         name = e.get("name", "")
                         if " on " in name:
                             hostname = name.split(" on ")[-1].strip()[:40]
-                        elif ": " in name:
-                            hostname = name.split(": ")[0].strip()[:40]
                         else:
-                            hostname = f"trigger:{e.get('objectid', '?')}"
+                            hostname = f"[{name[:40]}]"
                     entry = host_errors.setdefault(hostname, {"total": 0, "recent": 0, "older": 0, "triggers": set()})
                     entry["total"] += 1
                     if int(e.get("clock", 0)) >= cutoff:
@@ -528,7 +526,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     name = e.get("name", "")
                     if " on " in name:
                         return name.split(" on ")[-1].strip()[:30]
-                    return "?"
+                    return f"[{name[:30]}]"
 
                 # Per-server errors
                 host_err: dict[str, dict] = {}
