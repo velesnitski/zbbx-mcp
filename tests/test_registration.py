@@ -67,10 +67,13 @@ EXPECTED_TOOLS = {
     "get_correlated_events",
     "get_error_rate",
     "get_incident_report",
-    # geo.py (new)
+    # geo.py
     "get_expansion_report",
     "get_regional_density_map",
     "get_latency_estimate",
+    # availability.py
+    "get_host_availability",
+    "get_recent_changes",
     # discovery.py
     "get_discovery_rules",
     # configuration.py
