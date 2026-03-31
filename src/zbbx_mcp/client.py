@@ -94,6 +94,13 @@ class ZabbixClient:
             msg = err.get("data", err.get("message", "Unknown error"))
             if isinstance(msg, str) and len(msg) > 200:
                 msg = msg[:200] + "..."
+            # Friendly message for permission errors
+            if isinstance(msg, str) and "no permissions" in msg.lower():
+                raise ValueError(
+                    f"No permissions for {method}. "
+                    "Your API token may lack the required role (Admin or Super Admin). "
+                    "Check token permissions in Zabbix UI → User settings → API tokens."
+                )
             raise ValueError(f"Zabbix API error ({err.get('code', '?')}): {msg}")
 
         return body.get("result", {})
