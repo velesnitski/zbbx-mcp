@@ -453,6 +453,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
 
                 ranked = sorted(host_errors.items(), key=lambda x: -x[1]["total"])[:max_results]
 
+                base_url = client.frontend_url
                 lines = [f"**Error rate ({hours}h, sev>={severity_min}): {len(host_errors)} servers, {len(events)} events**\n"]
                 for hostname, d in ranked:
                     trend = ""
@@ -462,7 +463,8 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     elif d["recent"] > 0:
                         trend = " NEW"
                     triggers = ", ".join(list(d["triggers"])[:2])
-                    lines.append(f"- **{hostname}** {d['total']} err ({d['recent']}/{d['older']}{trend}) — {triggers}")
+                    link = f" [→]({base_url}/zabbix.php?action=search&search={hostname})" if not hostname.startswith("trigger:") else ""
+                    lines.append(f"- **{hostname}** {d['total']} err ({d['recent']}/{d['older']}{trend}){link} — {triggers}")
 
                 return "\n".join(lines)
             except (httpx.HTTPError, ValueError) as e:
