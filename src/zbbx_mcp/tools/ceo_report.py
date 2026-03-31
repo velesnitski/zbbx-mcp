@@ -110,7 +110,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 now_str = now.strftime("%Y-%m-%d %H:%M UTC")
                 date_str = now.strftime("%Y-%m-%d")
 
-                                hosts = await fetch_enabled_hosts(client)
+                hosts = await fetch_enabled_hosts(client)
                 all_ids = [h["hostid"] for h in hosts]
 
                 # Batch trends in chunks to avoid Zabbix 500
@@ -130,7 +130,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 from zbbx_mcp.data import fetch_vpn_status
                 vpn_map = await fetch_vpn_status(client, all_ids)
 
-                                _NON_VPN = {"Monitoring", "Infrastructure", "Unknown"}
+                _NON_VPN = {"Monitoring", "Infrastructure", "Unknown"}
                 vpn_hosts = [h for h in hosts
                              if not is_hidden_product(_classify_host(h.get("groups", []))[0])
                              and _classify_host(h.get("groups", []))[0] not in _NON_VPN]
@@ -229,7 +229,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 top_countries = sorted_countries[:18]
                 max_traffic = max((cd["traffic_gbps"] for _, cd in top_countries), default=1)
 
-                                html = [f"""<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
+                html = [f"""<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1.0">
 <title>Infrastructure Report — {now.strftime("%B %d, %Y")}</title>
 <style>{_CSS}</style></head><body><div class="page">
@@ -248,7 +248,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
 <div class="kpi"><div class="kpi-value">{avg_cpu}%</div><div class="kpi-label">Avg CPU</div></div>
 </div></div>"""]
 
-                                alerts = []
+                alerts = []
                 # Dead countries
                 dead = [(cc, cd) for cc, cd in sorted_countries if cd["trend"] == "dead"]
                 for cc, cd in dead:
@@ -284,7 +284,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     html.append(f'<div class="alert alert-{cls}">{text}</div>')
                 html.append('</div>')
 
-                                html.append(f'<div class="section"><h2>Traffic by Country ({period})</h2>')
+                html.append(f'<div class="section"><h2>Traffic by Country ({period})</h2>')
                 html.append(f'<div class="desc">{len(by_country)} countries. Total fleet throughput: {total_traffic} Gbps.</div>')
                 html.append('<table><thead><tr><th>Country</th><th class="num">Servers</th><th class="num">Avg</th><th class="num">Now</th><th>Trend</th><th class="num">Change</th><th style="width:200px">Traffic</th></tr></thead><tbody>')
 
@@ -304,7 +304,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     )
                 html.append('</tbody></table></div>')
 
-                                sla_rows = []
+                sla_rows = []
                 for cc, cd in sorted_countries:
                     if cd["vpn_total"] > 0:
                         uptime = round(cd["vpn_up"] / cd["vpn_total"] * 100, 1)
@@ -324,7 +324,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     )
                 html.append('</tbody></table></div>')
 
-                                capacity_rows = []
+                capacity_rows = []
                 for cc, cd in sorted_countries:
                     if cd["servers"] > 0 and cd["traffic_gbps"] > 0.1:
                         density = round(cd["traffic_gbps"] * 1000 / cd["servers"], 1)
@@ -344,7 +344,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     )
                 html.append('</tbody></table></div>')
 
-                                risk_rows = []
+                risk_rows = []
                 for cc, cc_hosts in by_country.items():
                     if len(cc_hosts) < 1:
                         continue
@@ -379,7 +379,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     )
                 html.append('</tbody></table></div>')
 
-                                product_counts: dict[str, dict] = {}
+                product_counts: dict[str, dict] = {}
                 for h in vpn_hosts:
                     prod, tier = _classify_host(h.get("groups", []))
                     if prod:
@@ -396,7 +396,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     html.append(_card(prod, str(pc["total"]), tier_str))
                 html.append('</div></div>')
 
-                                dead_servers = []
+                dead_servers = []
                 broken_servers = []
                 idle_servers = []
                 _SKIP_PRODUCTS = {"Monitoring", "Infrastructure", "Unknown"}
@@ -446,7 +446,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     html.append('<div class="alert alert-yellow" style="margin-top:12px"><b>Manual review needed.</b> Verify each server before shutdown &mdash; some may be standby replicas or recently deployed.</div>')
                     html.append('</div>')
 
-                                # Auto-detect countries needing detailed analysis
+                # Auto-detect countries needing detailed analysis
                 deep_dive_countries = []
                 for cc, cd in sorted_countries:
                     reasons = []
@@ -551,7 +551,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
 
                     html.append('</div>')
 
-                                prov_counts: dict[str, int] = {}
+                prov_counts: dict[str, int] = {}
                 for h in hosts:
                     ip = host_ip(h)
                     if not ip:
@@ -581,7 +581,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     html.append(f'<div class="alert alert-yellow"><b>Concentration risk:</b> {top_prov[0]} hosts {top_prov[1]} servers ({top_prov[1]*100//prov_total}%). Consider diversifying.</div>')
                 html.append('</div>')
 
-                                from zbbx_mcp.data import REGION_MAP
+                from zbbx_mcp.data import REGION_MAP
                 html.append('<div class="section"><h2>Expansion Opportunities</h2><div class="desc">Regional analysis: where to invest for growth</div>')
                 for region_name, region_label in [("LATAM", "LATAM &mdash; Growth Potential"), ("APAC", "APAC &mdash; Capacity Constrained"), ("EMEA", "EMEA &mdash; Core Markets")]:
                     region_codes = set(REGION_MAP.get(region_name, []))
@@ -604,7 +604,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     html.append('</tbody></table>')
                 html.append('</div>')
 
-                                recs_immediate = []
+                recs_immediate = []
                 recs_short = []
                 recs_medium = []
 
@@ -647,7 +647,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                         html.append('</tbody></table>')
                     html.append('</div>')
 
-                                # Find dead/dropping countries and check if neighbors absorbed traffic
+                # Find dead/dropping countries and check if neighbors absorbed traffic
                 redistribution = []
                 for cc, cd in sorted_countries:
                     if cd["trend"] not in ("dead", "dropping"):
@@ -695,7 +695,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     html.append('Every day of downtime = permanent user loss. Proactive blocking detection is critical.')
                     html.append('</div></div>')
 
-                                html.append('<div class="section"><h2>Status Legend</h2><div class="desc">How to read the severity labels in this report</div>')
+                html.append('<div class="section"><h2>Status Legend</h2><div class="desc">How to read the severity labels in this report</div>')
                 html.append('<table><thead><tr><th>Status</th><th>Meaning</th><th>Business Impact</th><th>Recommended Action</th></tr></thead><tbody>')
                 html.append(f'<tr><td>{_badge("critical", "CRITICAL")}</td><td>VPN service DOWN, active users affected</td><td>Users cannot connect, revenue impact</td><td>Fix within 24h &mdash; rotate IPs or switch protocol</td></tr>')
                 html.append(f'<tr><td>{_badge("dead", "DEAD")}</td><td>All servers offline 30+ days, zero traffic</td><td>Country fully lost, paying for idle servers</td><td>Decommission or rotate to save costs</td></tr>')
@@ -707,10 +707,10 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 html.append(f'<tr><td>{_badge("ok", "OK")}</td><td>VPN healthy, capacity adequate</td><td>All good</td><td>Continue monitoring</td></tr>')
                 html.append('</tbody></table></div>')
 
-                                html.append(f'<div class="footer">Made with &hearts; by Alex Velesnitski &bull; {total_servers} servers &bull; {now_str}<br>Confidential &mdash; for internal use only</div>')
+                html.append(f'<div class="footer">Made with &hearts; by Alex Velesnitski &bull; {total_servers} servers &bull; {now_str}<br>Confidential &mdash; for internal use only</div>')
                 html.append('</div></body></html>')
 
-                                if not output_dir:
+                if not output_dir:
                     output_dir = os.path.expanduser("~/Downloads")
                 filename = f"infra-report-{date_str}.html"
                 filepath = os.path.join(output_dir, filename)

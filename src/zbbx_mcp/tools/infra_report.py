@@ -271,7 +271,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                                 max_len = max(max_len, len(str(val)))
                         ws.column_dimensions[ws.cell(1, col).column_letter].width = min(max_len + 3, 40)
 
-                                ws1 = wb.active
+                ws1 = wb.active
                 ws1.title = "Apps & Infra"
                 h1 = ["#", "Host", "Name", "Product", "Tier", "Provider", "IP",
                        "RAM Total GB", "RAM Avail GB", "CPU Used %", "Load Avg5",
@@ -299,7 +299,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 ws1.freeze_panes = "A2"
                 _auto_width(ws1, h1)
 
-                                ws2 = wb.create_sheet("Unused & Underloaded")
+                ws2 = wb.create_sheet("Unused & Underloaded")
                 h2 = ["#", "Resource", "Type", "Host/Domain", "Provider", "Product",
                        "Tier", "CPU Used %", "Load Avg5", "Cost/Month ($)",
                        "Reason", "Recommendation", "Priority", "Dashboard"]
@@ -321,7 +321,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 ws2.freeze_panes = "A2"
                 _auto_width(ws2, h2)
 
-                                ws3 = wb.create_sheet("Provider Summary")
+                ws3 = wb.create_sheet("Provider Summary")
                 h3 = ["Provider", "Servers", "Cost/Month ($)", "Cost/Year ($)",
                        "Decomm Candidates", "Potential Savings/Month ($)",
                        "Median CPU %", "Servers < 10% CPU"]
