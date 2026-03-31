@@ -80,6 +80,84 @@ _logger = setup_logging()
 setup_sentry()
 
 
+def _register_resources(mcp: FastMCP) -> None:
+    """Register MCP resources — static reference data clients can read without tool calls."""
+
+    @mcp.resource("zabbix://tools")
+    def tools_catalog() -> str:
+        """List of all available Zabbix MCP tools grouped by category."""
+        from zbbx_mcp.tools import WRITE_TOOLS
+        categories = {
+            "Hosts": ["search_hosts", "get_host", "create_host", "update_host", "delete_host", "get_server_clusters", "search_hosts_by_location"],
+            "Problems": ["get_problems", "get_problem_detail", "acknowledge_problem"],
+            "Host Groups": ["get_hostgroups", "create_hostgroup", "delete_hostgroup"],
+            "Triggers": ["get_triggers", "create_trigger", "update_trigger", "delete_trigger"],
+            "Templates": ["get_templates", "link_template", "unlink_template"],
+            "Items & Metrics": ["get_host_items", "create_item", "update_item", "delete_item", "get_item_history", "get_graphs"],
+            "Events & Trends": ["get_events", "get_trends", "get_event_frequency", "get_correlated_events", "get_error_rate", "get_incident_report"],
+            "Dashboards": ["get_dashboards", "get_dashboard_detail", "find_host_dashboard"],
+            "Maintenance": ["get_maintenance", "create_maintenance", "delete_maintenance"],
+            "Availability": ["get_host_availability", "get_recent_changes"],
+            "Discovery": ["get_discovery_rules"],
+            "Configuration": ["export_configuration", "import_configuration"],
+            "Scripts": ["get_scripts", "execute_script"],
+            "Services & SLA": ["get_services", "get_sla"],
+            "Macros": ["get_host_macros", "get_global_macros", "set_host_macro", "delete_host_macro"],
+            "Inventory": ["get_server_map", "get_product_summary", "get_server_load", "get_high_cpu_servers", "get_underloaded_servers", "get_provider_summary", "get_unknown_providers", "identify_providers", "generate_product_map"],
+            "Rollback": ["get_rollback_history", "rollback_last", "rollback_by_index"],
+            "Alerts": ["get_alerts", "get_alert_summary"],
+            "Users": ["get_users"],
+            "Proxies": ["get_proxies"],
+            "Maps": ["get_maps", "get_map_detail"],
+            "Media & Actions": ["get_media_types", "get_actions"],
+            "Slack": ["send_slack_message", "send_slack_report"],
+            "Costs": ["import_server_costs", "set_bulk_cost", "get_cost_summary"],
+            "Traffic": ["detect_traffic_anomalies", "detect_traffic_drops", "get_traffic_report"],
+            "Trends & Analysis": ["get_trends_batch", "get_server_dashboard", "compare_servers", "get_health_assessment", "get_shutdown_candidates", "get_capacity_planning"],
+            "Geo": ["detect_geo_blocks", "get_geo_traffic_trends", "get_server_availability_report", "get_protocol_failure_matrix", "get_block_timeline", "get_expansion_report", "get_regional_density_map", "get_latency_estimate"],
+            "Executive": ["get_executive_dashboard", "get_month_over_month", "get_fleet_risk_score", "get_sla_dashboard", "get_report_snapshot", "get_peak_analysis", "get_product_audit"],
+            "Reports": ["generate_server_report", "generate_infra_report", "export_dashboard", "generate_full_report", "generate_html_report", "generate_ceo_report"],
+            "Health": ["check_connection"],
+        }
+        lines = []
+        for cat, tools in categories.items():
+            write = [t for t in tools if t in WRITE_TOOLS]
+            read = [t for t in tools if t not in WRITE_TOOLS]
+            lines.append(f"## {cat}")
+            if read:
+                lines.append(f"Read: {', '.join(read)}")
+            if write:
+                lines.append(f"Write: {', '.join(write)}")
+            lines.append("")
+        return "\n".join(lines)
+
+    @mcp.resource("zabbix://regions")
+    def regions_resource() -> str:
+        """Region-to-country mapping used by geo tools."""
+        from zbbx_mcp.data import REGION_MAP
+        lines = []
+        for region, codes in sorted(REGION_MAP.items()):
+            lines.append(f"{region}: {', '.join(sorted(codes))}")
+        return "\n".join(lines)
+
+    @mcp.resource("zabbix://env")
+    def env_config_resource() -> str:
+        """Current Zabbix MCP configuration (non-sensitive)."""
+        safe_keys = [
+            "ZABBIX_READ_ONLY", "DISABLED_TOOLS", "ZABBIX_COMPACT_TOOLS",
+            "ZABBIX_COMPACT", "ZABBIX_RESPONSE_BUDGET", "ZABBIX_INSTANCES",
+            "ZABBIX_HIDE_PRODUCTS", "ZABBIX_ALLOW_HTTP",
+        ]
+        lines = []
+        for k in safe_keys:
+            v = os.environ.get(k, "")
+            if v:
+                lines.append(f"{k}={v}")
+        if not lines:
+            lines.append("All defaults (no overrides set)")
+        return "\n".join(lines)
+
+
 def create_server() -> tuple[FastMCP, dict[str, ZabbixClient]]:
     """Build and configure the MCP server.
 
@@ -96,6 +174,9 @@ def create_server() -> tuple[FastMCP, dict[str, ZabbixClient]]:
 
     read_only, disabled_tools = load_global_policy()
     register_all(mcp, resolver, read_only=read_only, disabled_tools=disabled_tools)
+
+    # Register MCP resources (static data clients can reference without tool calls)
+    _register_resources(mcp)
 
     # Compact tool descriptions to save tokens (default: on)
     compact = os.environ.get("ZABBIX_COMPACT_TOOLS", "true").lower() in ("1", "true", "yes")

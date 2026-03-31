@@ -4,12 +4,12 @@ Instructions for Claude Code when working in this repository.
 
 ## Project
 
-Zabbix MCP server — 96 tools across 33 modules. Python 3.10+, FastMCP framework, async httpx HTTP/2 client.
+Zabbix MCP server — 107 tools across 35 modules. Python 3.10+, FastMCP framework, async httpx HTTP/2 client.
 
 ## Commands
 
 ```bash
-uv run pytest                              # run all tests (128 tests, ~2s)
+uv run pytest                              # run all tests (180+ tests, ~2s)
 uv run pytest tests/test_registration.py   # tool registration only
 uv run pytest tests/test_server.py         # JSON-RPC subprocess test
 uv run pytest -k "test_name"               # single test by name
@@ -45,7 +45,7 @@ uv run pytest -k "test_name"               # single test by name
 - **Error handling** — catch `(httpx.HTTPError, ValueError)`, return user-friendly string, never raise
 - **Token budget** — responses are truncated by `ZABBIX_RESPONSE_BUDGET` (default 6000 chars). Design output to fit
 - **Imports** — `classify.py` must not import from `tools/` (circular import risk)
-- **Tests** — 128 tests must pass. Tool count assertions must match actual registered tools
+- **Tests** — 180+ tests must pass. Tool count assertions must match actual registered tools
 
 ## Branching
 

@@ -60,7 +60,7 @@ You should see `zabbix` listed when Claude starts. Try asking: *"Show current pr
 
 ## What it does
 
-**100 tools** across 34 modules:
+**107 tools** across 35 modules:
 
 | Category | Tools |
 |----------|-------|
@@ -70,8 +70,8 @@ You should see `zabbix` listed when Claude starts. Try asking: *"Show current pr
 | **Triggers** | `get_triggers`, `create_trigger`, `update_trigger`, `delete_trigger` |
 | **Templates** | `get_templates`, `link_template`, `unlink_template` |
 | **Items & Metrics** | `get_host_items`, `create_item`, `update_item`, `delete_item`, `get_item_history`, `get_graphs` |
-| **Events & Trends** | `get_events`, `get_trends`, `get_event_frequency`, `get_correlated_events` |
-| **Dashboards** | `get_dashboards`, `get_dashboard_detail` |
+| **Events & Trends** | `get_events`, `get_trends`, `get_event_frequency`, `get_correlated_events`, `get_error_rate`, `get_incident_report` |
+| **Dashboards** | `get_dashboards`, `get_dashboard_detail`, `find_host_dashboard` |
 | **Maintenance** | `get_maintenance`, `create_maintenance`, `delete_maintenance` |
 | **Discovery** | `get_discovery_rules` |
 | **Configuration** | `export_configuration`, `import_configuration` |
@@ -90,7 +90,8 @@ You should see `zabbix` listed when Claude starts. Try asking: *"Show current pr
 | **Traffic** | `detect_traffic_anomalies`, `detect_traffic_drops`, `get_traffic_report` |
 | **Trends & Analysis** | `get_trends_batch`, `get_server_dashboard`, `compare_servers`, `get_health_assessment`, `get_shutdown_candidates`, `get_capacity_planning` |
 | **Geo Monitoring** | `detect_geo_blocks`, `get_geo_traffic_trends`, `get_server_availability_report`, `get_protocol_failure_matrix`, `get_block_timeline`, `get_expansion_report`, `get_regional_density_map`, `get_latency_estimate` |
-| **Executive** | `get_executive_dashboard`, `get_month_over_month`, `get_fleet_risk_score`, `get_sla_dashboard`, `get_report_snapshot`, `get_peak_analysis` |
+| **Availability** | `get_host_availability`, `get_recent_changes` |
+| **Executive** | `get_executive_dashboard`, `get_month_over_month`, `get_fleet_risk_score`, `get_sla_dashboard`, `get_report_snapshot`, `get_peak_analysis`, `get_product_audit` |
 | **Reports** | `generate_server_report`, `generate_infra_report`, `export_dashboard`, `generate_full_report` (Excel), `generate_html_report` (HTML), `generate_ceo_report` (CEO HTML) |
 | **Health** | `check_connection` |
 
