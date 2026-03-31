@@ -205,7 +205,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
 
                 wb = Workbook()
 
-                                ws1 = wb.active
+                ws1 = wb.active
                 ws1.title = "Servers"
                 headers = ["Host", "Name", "Product", "Tier", "IP", "Provider",
                            "CPU %", "Load Avg5", "Mem Avail GB", "On Dashboard", "Dashboards", "Dashboard Tabs", "Groups"]
@@ -253,7 +253,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 ws1.auto_filter.ref = f"A1:{chr(64 + len(headers))}{len(rows) + 1}"
                 ws1.freeze_panes = "A2"
 
-                                ws2 = wb.create_sheet("Products")
+                ws2 = wb.create_sheet("Products")
                 prod_headers = ["Product", "Tier", "Servers", "On Dashboard", "Median CPU %", "Median Load"]
                 for col, h in enumerate(prod_headers, 1):
                     cell = ws2.cell(row=1, column=col, value=h)
@@ -273,7 +273,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     ws2.column_dimensions[ws2.cell(row=1, column=col).column_letter].width = 18
                 ws2.freeze_panes = "A2"
 
-                                ws3 = wb.create_sheet("Providers")
+                ws3 = wb.create_sheet("Providers")
                 prov_headers = ["Provider", "Servers", "Median CPU %"]
                 for col, h in enumerate(prov_headers, 1):
                     cell = ws3.cell(row=1, column=col, value=h)
