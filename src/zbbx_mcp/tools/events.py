@@ -372,3 +372,68 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 return "\n".join(lines)
             except (httpx.HTTPError, ValueError) as e:
                 return f"Error: {e}"
+
+    if "get_error_rate" not in skip:
+
+        @mcp.tool()
+        async def get_error_rate(
+            hours: int = 24,
+            severity_min: int = 3,
+            max_results: int = 15,
+            instance: str = "",
+        ) -> str:
+            """Top servers by error count with trend (getting worse or better).
+
+            Args:
+                hours: Lookback period (default: 24)
+                severity_min: Minimum severity 0-5 (default: 3=Average)
+                max_results: Max servers (default: 15)
+                instance: Zabbix instance name (optional)
+            """
+            try:
+                client = resolver.resolve(instance)
+                now = int(time.time())
+                half = hours * 3600 // 2
+
+                events = await client.call("event.get", {
+                    "output": ["eventid", "clock", "objectid", "name", "severity"],
+                    "selectHosts": ["host"],
+                    "source": 0, "value": 1,
+                    "time_from": now - hours * 3600,
+                    "sortfield": "clock", "sortorder": "DESC",
+                    "severities": list(range(severity_min, 6)),
+                    "limit": 5000,
+                })
+
+                if not events:
+                    return f"No errors (severity >= {severity_min}) in {hours}h."
+
+                cutoff = now - half
+                host_errors: dict[str, dict] = {}
+                for e in events:
+                    hosts = e.get("hosts", [])
+                    hostname = hosts[0]["host"] if hosts else "?"
+                    entry = host_errors.setdefault(hostname, {"total": 0, "recent": 0, "older": 0, "triggers": set()})
+                    entry["total"] += 1
+                    if int(e.get("clock", 0)) >= cutoff:
+                        entry["recent"] += 1
+                    else:
+                        entry["older"] += 1
+                    entry["triggers"].add(e.get("name", "?")[:50])
+
+                ranked = sorted(host_errors.items(), key=lambda x: -x[1]["total"])[:max_results]
+
+                lines = [f"**Error rate ({hours}h, sev>={severity_min}): {len(host_errors)} servers, {len(events)} events**\n"]
+                for hostname, d in ranked:
+                    trend = ""
+                    if d["older"] > 0:
+                        ratio = d["recent"] / d["older"]
+                        trend = " WORSE" if ratio > 1.5 else (" better" if ratio < 0.5 else "")
+                    elif d["recent"] > 0:
+                        trend = " NEW"
+                    triggers = ", ".join(list(d["triggers"])[:2])
+                    lines.append(f"- **{hostname}** {d['total']} err ({d['recent']}/{d['older']}{trend}) — {triggers}")
+
+                return "\n".join(lines)
+            except (httpx.HTTPError, ValueError) as e:
+                return f"Error: {e}"
