@@ -408,12 +408,33 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 if not events:
                     return f"No errors (severity >= {severity_min}) in {hours}h."
 
+                # Resolve unknown hosts via trigger ID → host lookup
+                unresolved_trigger_ids = set()
+                for e in events:
+                    if not e.get("hosts"):
+                        unresolved_trigger_ids.add(e.get("objectid", ""))
+                unresolved_trigger_ids.discard("")
+
+                trigger_host_map: dict[str, str] = {}
+                if unresolved_trigger_ids:
+                    triggers = await client.call("trigger.get", {
+                        "triggerids": list(unresolved_trigger_ids),
+                        "output": ["triggerid"],
+                        "selectHosts": ["host"],
+                    })
+                    for t in triggers:
+                        thosts = t.get("hosts", [])
+                        if thosts:
+                            trigger_host_map[t["triggerid"]] = thosts[0]["host"]
+
                 cutoff = now - half
                 host_errors: dict[str, dict] = {}
                 for e in events:
                     hosts = e.get("hosts", [])
                     if hosts:
                         hostname = hosts[0]["host"]
+                    elif e.get("objectid") in trigger_host_map:
+                        hostname = trigger_host_map[e["objectid"]]
                     else:
                         name = e.get("name", "")
                         if " on " in name:
@@ -421,7 +442,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                         elif ": " in name:
                             hostname = name.split(": ")[0].strip()[:40]
                         else:
-                            hostname = "unknown"
+                            hostname = f"trigger:{e.get('objectid', '?')}"
                     entry = host_errors.setdefault(hostname, {"total": 0, "recent": 0, "older": 0, "triggers": set()})
                     entry["total"] += 1
                     if int(e.get("clock", 0)) >= cutoff:
