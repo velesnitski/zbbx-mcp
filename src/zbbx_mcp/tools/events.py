@@ -412,7 +412,16 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 host_errors: dict[str, dict] = {}
                 for e in events:
                     hosts = e.get("hosts", [])
-                    hostname = hosts[0]["host"] if hosts else "?"
+                    if hosts:
+                        hostname = hosts[0]["host"]
+                    else:
+                        name = e.get("name", "")
+                        if " on " in name:
+                            hostname = name.split(" on ")[-1].strip()[:40]
+                        elif ": " in name:
+                            hostname = name.split(": ")[0].strip()[:40]
+                        else:
+                            hostname = "unknown"
                     entry = host_errors.setdefault(hostname, {"total": 0, "recent": 0, "older": 0, "triggers": set()})
                     entry["total"] += 1
                     if int(e.get("clock", 0)) >= cutoff:
