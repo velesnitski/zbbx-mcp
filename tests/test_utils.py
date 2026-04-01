@@ -37,7 +37,7 @@ class TestExtractCountry:
     def test_in_lite(self):
         assert extract_country("srv-nl01-lite") == "IN"
 
-    def test_in_lite_mu(self):
+    def test_in_lite_2(self):
         assert extract_country("srv-us01-lite") == "IN"
 
     def test_us_lite(self):
