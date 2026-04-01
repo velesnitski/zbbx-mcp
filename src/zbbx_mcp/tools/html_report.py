@@ -92,6 +92,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
             product: str = "",
             products: str = "",
             exclude_product: str = "",
+            tier: str = "",
             period: str = "7d",
             output_dir: str = "",
             instance: str = "",
@@ -103,6 +104,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 product: Single product filter (optional)
                 products: Comma-separated products to include (optional)
                 exclude_product: Comma-separated products to exclude (optional)
+                tier: Tier filter e.g. Personal, Premium, Free (optional)
                 period: Trend period (default: 7d)
                 output_dir: Output directory (default: ~/Downloads)
                 instance: Zabbix instance (optional)
@@ -123,13 +125,15 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 if exclude_product:
                     exclude_set = {p.strip().lower() for p in exclude_product.split(",")}
 
-                if country or product or include_set or exclude_set:
+                if country or product or include_set or exclude_set or tier:
                     filtered = []
                     for r in rows:
                         rp = r.get("Product", "").lower()
                         if country and extract_country(r.get("Host", "")).lower() != country.lower():
                             continue
                         if product and product.lower() not in rp:
+                            continue
+                        if tier and tier.lower() not in r.get("Tier", "").lower():
                             continue
                         if include_set and not any(p in rp for p in include_set):
                             continue
@@ -368,7 +372,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 if not output_dir:
                     output_dir = os.path.expanduser("~/Downloads")
                 ts = datetime.now().strftime("%Y%m%d_%H%M")
-                safe_name = f"{'_'.join(filter(None, [country, product]))}_" if (country or product) else ""
+                safe_name = f"{'_'.join(filter(None, [country, product, tier]))}_" if (country or product or tier) else ""
                 filename = f"zabbix_report_{safe_name}{ts}.html"
                 filepath = os.path.join(output_dir, filename)
 
