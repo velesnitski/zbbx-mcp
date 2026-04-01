@@ -146,6 +146,36 @@ def extract_country(hostname: str) -> str:
     return _COUNTRY_ALIASES.get(cc, cc)
 
 
+def build_parent_map(hosts: list[dict]) -> dict[str, str]:
+    """Build child→parent hostid map for proxy sub-hosts.
+
+    Pattern: parent ``proxy-xx01``, child ``proxy-xx01 xx02``.
+    Child hostname = parent hostname + space + suffix.
+    """
+    name_to_id: dict[str, str] = {}
+    for h in hosts:
+        name_to_id[h.get("host", "")] = h["hostid"]
+
+    parent_map: dict[str, str] = {}
+    for h in hosts:
+        hostname = h.get("host", "")
+        if " " in hostname:
+            parent_name = hostname.split(" ", 1)[0]
+            pid = name_to_id.get(parent_name)
+            if pid and pid != h["hostid"]:
+                parent_map[h["hostid"]] = pid
+    return parent_map
+
+
+def _resolve(metric_map: dict, hid: str, parent_map: dict[str, str]):
+    """Get metric for host, falling back to parent if missing."""
+    val = metric_map.get(hid)
+    if val is not None:
+        return val
+    pid = parent_map.get(hid)
+    return metric_map.get(pid) if pid else None
+
+
 # Shared fetch helpers — DRY extraction from tools/*.py
 
 async def fetch_enabled_hosts(
@@ -524,7 +554,10 @@ async def fetch_all_data(
                         }
 
     host_map = {h["hostid"]: h for h in hosts}
-    all_ids = list(host_map.keys())
+    parent_map = build_parent_map(hosts)
+    # Include parent hostids so their metrics are fetched too
+    parent_ids = set(parent_map.values()) - set(host_map.keys())
+    all_ids = list(host_map.keys()) + list(parent_ids)
 
     # Phase 2: all metrics in parallel
     graph_task = (
@@ -700,8 +733,8 @@ async def fetch_all_data(
 
         hostname = h.get("host", "")
         ip = next((i["ip"] for i in h.get("interfaces", []) if i.get("ip") != "127.0.0.1"), "")
-        in_traffic = in_traffic_map.get(hid)
-        out_traffic = out_traffic_map.get(hid)
+        in_traffic = _resolve(in_traffic_map, hid, parent_map)
+        out_traffic = _resolve(out_traffic_map, hid, parent_map)
         in_mbps = round(in_traffic / 1e6, 1) if in_traffic else None
         out_mbps = round(out_traffic / 1e6, 1) if out_traffic else None
         total_mbps = round((in_mbps or 0) + (out_mbps or 0), 1) if (in_mbps or out_mbps) else None
@@ -709,8 +742,8 @@ async def fetch_all_data(
         vpn1_val = vpn1_map.get(hid)
         vpn2_val = vpn2_map.get(hid)
         vpn3_val = vpn3_map.get(hid)
-        version = version_map.get(hid)
-        templates = template_map.get(hid, "")
+        version = _resolve(version_map, hid, parent_map)
+        templates = template_map.get(hid) or (template_map.get(parent_map.get(hid, ""), "") if hid in parent_map else "")
 
         tabs = host_dash_tabs.get(hid, [])
 
@@ -728,15 +761,15 @@ async def fetch_all_data(
             tier=tier,
             provider=detect_provider(ip) if ip else "",
             ip=ip,
-            cpu_pct=cpu_map.get(hid),
-            load_avg5=load_map.get(hid),
-            mem_avail_gb=mem_map.get(hid),
+            cpu_pct=_resolve(cpu_map, hid, parent_map),
+            load_avg5=_resolve(load_map, hid, parent_map),
+            mem_avail_gb=_resolve(mem_map, hid, parent_map),
             traffic_in_mbps=in_mbps,
             traffic_out_mbps=out_mbps,
             traffic_total_mbps=total_mbps,
             bw_util_pct=round(in_mbps / (bw_limit_map.get(hid, BW_MAX)) * 100, 1) if in_mbps else None,
             bw_tier=classify_bandwidth(in_mbps),
-            connections=conn_map.get(hid),
+            connections=_resolve(conn_map, hid, parent_map),
             vpn_primary="OK" if vpn1_val == 1 else ("DOWN" if vpn1_val is not None else ""),
             vpn_secondary="OK" if vpn2_val == 1 else ("DOWN" if vpn2_val is not None else ""),
             vpn_tertiary="OK" if vpn3_val and vpn3_val >= 1 else ("DOWN" if vpn3_val is not None else ""),
