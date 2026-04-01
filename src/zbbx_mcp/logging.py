@@ -26,6 +26,8 @@ _INSTANCE_DIR = Path.home() / ".zbbx-mcp"
 _INSTANCE_ID_FILE = _INSTANCE_DIR / "instance_id"
 _ANALYTICS_FILE = _INSTANCE_DIR / "analytics.log"
 
+_sentry_enabled = False  # set True by setup_sentry()
+
 # Keys to extract from tool params for analytics (safe, non-sensitive)
 _ANALYTICS_KEYS = frozenset({
     "query", "host_id", "group", "instance", "search",
@@ -140,6 +142,8 @@ def setup_sentry() -> None:
 
     import sentry_sdk
 
+    from sentry_sdk.integrations.logging import LoggingIntegration
+
     sentry_sdk.init(
         dsn=dsn,
         release=f"zbbx-mcp@{__version__}",
@@ -147,8 +151,13 @@ def setup_sentry() -> None:
         traces_sample_rate=0,
         send_default_pii=False,
         before_send=_scrub_event,
+        integrations=[
+            LoggingIntegration(level=logging.WARNING, event_level=logging.ERROR),
+        ],
     )
     sentry_sdk.set_tag("instance_id", INSTANCE_ID)
+    global _sentry_enabled
+    _sentry_enabled = True
 
 
 _SENSITIVE_PATTERNS = ("token", "secret", "password", "dsn", "key", "auth", "credential")
@@ -194,7 +203,7 @@ def _add_sentry_breadcrumb(
     response_size: int = 0, error_detail: str = "",
 ) -> None:
     """Add tool call as Sentry breadcrumb (visible in error context)."""
-    if not os.environ.get("SENTRY_DSN"):
+    if not _sentry_enabled:
         return
     import sentry_sdk
     data: dict = {"params": params, "duration_ms": duration_ms, "status": status}
@@ -237,6 +246,12 @@ def logged(func):
         except Exception as exc:
             status = "error"
             error_detail = str(exc)[:200]
+            if _sentry_enabled:
+                import sentry_sdk
+                with sentry_sdk.new_scope() as scope:
+                    scope.set_tag("tool", tool_name)
+                    scope.set_context("tool_call", {"params": params})
+                    sentry_sdk.capture_exception(exc)
             raise
         finally:
             duration_ms = int((time.monotonic() - start) * 1000)
