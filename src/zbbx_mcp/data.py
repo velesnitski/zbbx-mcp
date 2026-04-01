@@ -136,7 +136,7 @@ _COUNTRY_ALIASES = {"UK": "GB"}  # normalize non-ISO codes
 def extract_country(hostname: str) -> str:
     """Extract 2-letter country code from hostname.
 
-    Handles: srv-nl01 → NL, srv-nl03 → IN, srv-us03 → IN
+    Handles: srv-nl01 → NL, srv-nl03 → IN, srv-us03 → US
     Normalizes UK → GB.
     """
     m = _COUNTRY_RE.search(hostname)
