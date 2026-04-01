@@ -10,7 +10,7 @@ from zbbx_mcp.classify import (
 from zbbx_mcp.classify import (
     detect_provider,
 )
-from zbbx_mcp.data import TRAFFIC_IN_KEYS, extract_country
+from zbbx_mcp.data import TRAFFIC_IN_KEYS, build_parent_map, extract_country
 from zbbx_mcp.resolver import InstanceResolver
 from zbbx_mcp.tools.items import _format_value
 
@@ -239,11 +239,16 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()):
                 if not filtered:
                     return "No servers match the filters."
 
-                # Batch-fetch CPU/load/mem + traffic in parallel
+                # Resolve parent hosts for metric inheritance
+                p_map = build_parent_map(hosts)
                 hostids = [h["hostid"] for h in filtered]
+                parent_ids = list({p_map[hid] for hid in hostids if hid in p_map} - set(hostids))
+                lookup_ids = hostids + parent_ids
+
+                # Batch-fetch CPU/load/mem + traffic in parallel
                 items, net_items = await asyncio.gather(
                     client.call("item.get", {
-                        "hostids": hostids,
+                        "hostids": lookup_ids,
                         "output": ["hostid", "itemid", "key_", "lastvalue", "units"],
                         "filter": {"key_": [
                             "system.cpu.util[,idle]",
@@ -253,7 +258,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()):
                         "sortfield": "key_",
                     }),
                     client.call("item.get", {
-                        "hostids": hostids,
+                        "hostids": lookup_ids,
                         "output": ["hostid", "key_", "lastvalue", "units"],
                         "filter": {"key_": TRAFFIC_IN_KEYS, "status": "0"},
                     }),
@@ -287,6 +292,19 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()):
                     current = m.get("traffic_bps", 0)
                     if val > current:
                         m["traffic_bps"] = val
+
+                # Inherit parent metrics for child hosts missing own data
+                for h in filtered:
+                    hid = h["hostid"]
+                    pid = p_map.get(hid)
+                    if pid and hid not in metrics and pid in metrics:
+                        metrics[hid] = dict(metrics[pid])
+                    elif pid and pid in metrics:
+                        parent_m = metrics[pid]
+                        child_m = metrics.setdefault(hid, {})
+                        for k, v in parent_m.items():
+                            if k not in child_m:
+                                child_m[k] = v
 
                 # Sort
                 def sort_key(h):
@@ -376,25 +394,33 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()):
                 if not host_map:
                     return "No servers match the filter."
 
+                p_map = build_parent_map(hosts)
+                hids = list(host_map.keys())
+                parent_ids = list({p_map[h] for h in hids if h in p_map} - set(hids))
+
                 items = await client.call("item.get", {
-                    "hostids": list(host_map.keys()),
+                    "hostids": hids + parent_ids,
                     "output": ["hostid", "lastvalue"],
                     "filter": {"key_": "system.cpu.util[,idle]"},
                 })
 
-                # Find overloaded servers
-                overloaded = []
+                # Build CPU map with parent fallback
+                cpu_by_host: dict[str, float] = {}
                 for item in items:
                     try:
                         idle = float(item.get("lastvalue", "100"))
                     except (ValueError, TypeError):
                         continue
-                    cpu_used = round(100 - idle, 1)
-                    if cpu_used >= threshold:
-                        hid = item["hostid"]
-                        if hid in host_map:
-                            h = host_map[hid]
-                            overloaded.append((cpu_used, h))
+                    cpu_by_host[item["hostid"]] = round(100 - idle, 1)
+
+                # Find overloaded servers
+                overloaded = []
+                for hid, h in host_map.items():
+                    cpu_used = cpu_by_host.get(hid)
+                    if cpu_used is None and hid in p_map:
+                        cpu_used = cpu_by_host.get(p_map[hid])
+                    if cpu_used is not None and cpu_used >= threshold:
+                        overloaded.append((cpu_used, h))
 
                 overloaded.sort(key=lambda x: -x[0])
 
@@ -465,16 +491,20 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()):
                 if not host_map:
                     return "No servers match the filter."
 
-                # Fetch CPU + traffic in parallel
+                p_map = build_parent_map(hosts)
                 hids = list(host_map.keys())
+                parent_ids = list({p_map[h] for h in hids if h in p_map} - set(hids))
+                lookup_ids = hids + parent_ids
+
+                # Fetch CPU + traffic in parallel
                 items, traffic_items = await asyncio.gather(
                     client.call("item.get", {
-                        "hostids": hids,
+                        "hostids": lookup_ids,
                         "output": ["hostid", "lastvalue"],
                         "filter": {"key_": "system.cpu.util[,idle]"},
                     }),
                     client.call("item.get", {
-                        "hostids": hids,
+                        "hostids": lookup_ids,
                         "output": ["hostid", "lastvalue"],
                         "filter": {"key_": TRAFFIC_IN_KEYS, "status": "0"},
                     }),
@@ -491,19 +521,22 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()):
                     except (ValueError, TypeError):
                         pass
 
-                underloaded = []
+                # Build CPU map with parent fallback
+                cpu_by_host: dict[str, float] = {}
                 for item in items:
                     try:
-                        idle = float(item.get("lastvalue", "0"))
+                        cpu_by_host[item["hostid"]] = round(100 - float(item.get("lastvalue", "0")), 1)
                     except (ValueError, TypeError):
-                        continue
-                    cpu_used = round(100 - idle, 1)
-                    if cpu_used <= threshold:
-                        hid = item["hostid"]
-                        if hid in host_map:
-                            h = host_map[hid]
-                            traffic = traffic_map.get(hid, 0)
-                            underloaded.append((cpu_used, traffic, h))
+                        pass
+
+                underloaded = []
+                for hid, h in host_map.items():
+                    cpu_used = cpu_by_host.get(hid)
+                    if cpu_used is None and hid in p_map:
+                        cpu_used = cpu_by_host.get(p_map[hid])
+                    if cpu_used is not None and cpu_used <= threshold:
+                        traffic = traffic_map.get(hid) or (traffic_map.get(p_map.get(hid, ""), 0))
+                        underloaded.append((cpu_used, traffic, h))
 
                 underloaded.sort(key=lambda x: x[0])
 
