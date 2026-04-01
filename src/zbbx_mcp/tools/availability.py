@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import httpx
 
-from zbbx_mcp.data import extract_country, fetch_enabled_hosts, host_ip
-from zbbx_mcp.classify import classify_host, detect_provider
+from zbbx_mcp.classify import classify_host
+from zbbx_mcp.data import extract_country, host_ip
 from zbbx_mcp.resolver import InstanceResolver
 
 
@@ -69,9 +69,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     agent_str = {0: "?", 1: "OK", 2: "DOWN"}.get(agent, "?")
                     snmp_str = {0: "-", 1: "OK", 2: "DOWN"}.get(snmp, "-")
 
-                    if status == "unavailable" and agent != 2 and snmp != 2:
-                        continue
-                    elif status == "available" and agent != 1:
+                    if (status == "unavailable" and agent != 2 and snmp != 2) or (status == "available" and agent != 1):
                         continue
 
                     hostname = h.get("host", "")
