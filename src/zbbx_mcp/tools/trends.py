@@ -6,7 +6,7 @@ import httpx
 
 from zbbx_mcp.classify import classify_host as _classify_host
 from zbbx_mcp.classify import detect_provider
-from zbbx_mcp.data import KEY_service_PRIMARY, extract_country, fetch_host_dashboards, fetch_trends_batch
+from zbbx_mcp.data import KEY_service_PRIMARY, build_parent_map, extract_country, fetch_host_dashboards, fetch_trends_batch
 from zbbx_mcp.excel import BW_MAX
 from zbbx_mcp.resolver import InstanceResolver
 
@@ -793,13 +793,21 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()):
                 if not filtered:
                     return "No servers match the filters."
 
+                p_map = build_parent_map(hosts)
                 hostids = [h["hostid"] for h in filtered]
+                parent_ids = list({p_map[h] for h in hostids if h in p_map} - set(hostids))
+
                 trend_rows, _ = await fetch_trends_batch(
-                    client, hostids, ["cpu", "traffic", "load"], period,
+                    client, hostids + parent_ids, ["cpu", "traffic", "load"], period,
                 )
                 host_metrics: dict[str, dict] = {}
                 for r in trend_rows:
                     host_metrics.setdefault(r.hostid, {})[r.metric] = r
+                # Inherit parent trends for child hosts
+                for hid in hostids:
+                    pid = p_map.get(hid)
+                    if pid and hid not in host_metrics and pid in host_metrics:
+                        host_metrics[hid] = host_metrics[pid]
 
                 from statistics import median as _median
                 efficiencies = []
