@@ -16,7 +16,6 @@ from zbbx_mcp.data import (
 )
 
 
-
 class TestRegionMap:
     def test_latam_countries(self):
         codes = countries_for_region("LATAM")
