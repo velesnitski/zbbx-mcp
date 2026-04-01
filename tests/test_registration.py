@@ -74,6 +74,8 @@ EXPECTED_TOOLS = {
     # availability.py
     "get_host_availability",
     "get_recent_changes",
+    # audit.py
+    "get_audit_log",
     # discovery.py
     "get_discovery_rules",
     # configuration.py
