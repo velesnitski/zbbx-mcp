@@ -1,6 +1,6 @@
 # zbbx-mcp
 
-Zabbix MCP server for [Claude Code](https://claude.com/claude-code), [Codex CLI](https://github.com/openai/codex), [n8n](https://n8n.io), and any MCP-compatible client. Talk to your Zabbix monitoring in natural language.
+Zabbix MCP server for [Claude Code](https://claude.com/claude-code), [GitHub Copilot](https://github.com/features/copilot), [Codex CLI](https://github.com/openai/codex), [n8n](https://n8n.io), and any MCP-compatible client. Talk to your Zabbix monitoring in natural language.
 
 ## Quick start
 
@@ -60,7 +60,7 @@ You should see `zabbix` listed when Claude starts. Try asking: *"Show current pr
 
 ## What it does
 
-**107 tools** across 35 modules:
+**108 tools** across 35 modules:
 
 | Category | Tools |
 |----------|-------|
@@ -74,7 +74,7 @@ You should see `zabbix` listed when Claude starts. Try asking: *"Show current pr
 | **Dashboards** | `get_dashboards`, `get_dashboard_detail`, `find_host_dashboard` |
 | **Maintenance** | `get_maintenance`, `create_maintenance`, `delete_maintenance` |
 | **Discovery** | `get_discovery_rules` |
-| **Configuration** | `export_configuration`, `import_configuration` |
+| **Configuration** | `export_configuration`, `import_configuration`, `get_audit_log` |
 | **Scripts** | `get_scripts`, `execute_script` |
 | **Services & SLA** | `get_services`, `get_sla` |
 | **Macros** | `get_host_macros`, `get_global_macros`, `set_host_macro`, `delete_host_macro` |
@@ -92,7 +92,7 @@ You should see `zabbix` listed when Claude starts. Try asking: *"Show current pr
 | **Geo Monitoring** | `detect_regional_anomalies`, `get_geo_traffic_trends`, `get_service_uptime_report`, `get_service_health_matrix`, `get_traffic_drop_timeline`, `get_expansion_report`, `get_regional_density_map`, `get_latency_estimate` |
 | **Availability** | `get_host_availability`, `get_recent_changes` |
 | **Executive** | `get_executive_dashboard`, `get_month_over_month`, `get_fleet_risk_score`, `get_sla_dashboard`, `get_report_snapshot`, `get_peak_analysis`, `get_product_audit` |
-| **Reports** | `generate_server_report`, `generate_infra_report`, `export_dashboard`, `generate_full_report` (Excel), `generate_html_report` (HTML), `generate_ceo_report` (CEO HTML) |
+| **Reports** | `generate_server_report`, `generate_infra_report`, `export_dashboard`, `generate_full_report` (Excel), `generate_html_report` (HTML), `generate_ceo_report` (CEO HTML), `generate_product_map` |
 | **Health** | `check_connection` |
 
 ### Report filtering
@@ -265,6 +265,73 @@ codex mcp add zabbix \
 ```
 
 The Zabbix tools will be available automatically. Multi-instance setup works the same way — add `ZABBIX_INSTANCES` and per-instance env vars as described above.
+
+## Setup for GitHub Copilot (VS Code)
+
+[GitHub Copilot](https://github.com/features/copilot) supports MCP servers in VS Code agent mode. Add zbbx-mcp to your workspace or user settings:
+
+**Option A — `.vscode/mcp.json` (per-project, recommended):**
+
+Create `.vscode/mcp.json` in your project root:
+
+```json
+{
+  "servers": {
+    "zabbix": {
+      "command": "uvx",
+      "args": ["--from", "git+https://github.com/velesnitski/zbbx-mcp", "zbbx-mcp"],
+      "env": {
+        "ZABBIX_URL": "https://your-zabbix.example.com",
+        "ZABBIX_TOKEN": "your_api_token"
+      }
+    }
+  }
+}
+```
+
+**Option B — VS Code user settings (global):**
+
+Open Settings (`Cmd+,` / `Ctrl+,`) → search `mcp` → Edit in `settings.json`:
+
+```json
+{
+  "mcp": {
+    "servers": {
+      "zabbix": {
+        "command": "uvx",
+        "args": ["--from", "git+https://github.com/velesnitski/zbbx-mcp", "zbbx-mcp"],
+        "env": {
+          "ZABBIX_URL": "https://your-zabbix.example.com",
+          "ZABBIX_TOKEN": "your_api_token"
+        }
+      }
+    }
+  }
+}
+```
+
+Then in Copilot Chat, switch to **Agent mode** (`@workspace` → Agent) and ask: *"Show current Zabbix problems"*. Copilot will discover and use the Zabbix tools automatically.
+
+> **Tip:** If `uvx` is not found, use the full path (e.g., `"/Users/you/.local/bin/uvx"` or `"C:\\Users\\you\\.local\\bin\\uvx.exe"`).
+
+## Setup for GPT-CLI
+
+[GPT-CLI](https://github.com/openai/gpt-cli) supports MCP servers. Add zbbx-mcp to your configuration:
+
+Edit `~/.gptcli/config.yaml`:
+
+```yaml
+mcp_servers:
+  zabbix:
+    command: uvx
+    args:
+      - --from
+      - git+https://github.com/velesnitski/zbbx-mcp
+      - zbbx-mcp
+    env:
+      ZABBIX_URL: https://your-zabbix.example.com
+      ZABBIX_TOKEN: your_api_token
+```
 
 ## Alternative installation
 
