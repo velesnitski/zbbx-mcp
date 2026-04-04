@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.5.1] - 2026-04-04
+
+### Added
+- **GitHub Copilot** setup guide — `.vscode/mcp.json` and VS Code user settings
+- **GPT-CLI** setup guide — `~/.gptcli/config.yaml` configuration
+- `get_audit_log` tool — host creation dates and change history
+- `generate_product_map` tool — auto-generate product mapping from host groups
+- **108 tools** total (was 107)
+
+### Changed
+- README: added Copilot and GPT-CLI to supported clients list
+- pyproject.toml: added `copilot` keyword, updated description
+
 ## [1.5.0] - 2026-03-30
 
 ### Added
