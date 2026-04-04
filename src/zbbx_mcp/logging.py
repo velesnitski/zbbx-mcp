@@ -141,7 +141,6 @@ def setup_sentry() -> None:
         return
 
     import sentry_sdk
-
     from sentry_sdk.integrations.logging import LoggingIntegration
 
     sentry_sdk.init(
