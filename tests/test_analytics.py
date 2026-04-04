@@ -209,7 +209,7 @@ class TestExtractCountry:
         assert extract_country("srv-us0999") == "US"
 
     def test_lite_pattern(self):
-        assert extract_country("srv-nl03") == "IN"
+        assert extract_country("srv-nl03") == "NL"
         assert extract_country("srv-us03") == "US"
         assert extract_country("srv-tr03") == "TR"
 
