@@ -4,7 +4,7 @@ Instructions for Claude Code when working in this repository.
 
 ## Project
 
-Zabbix MCP server — 107 tools across 35 modules. Python 3.10+, FastMCP framework, async httpx HTTP/2 client.
+Zabbix MCP server — 108 tools across 35 modules. Python 3.10+, FastMCP framework, async httpx HTTP/2 client.
 
 ## Commands
 
