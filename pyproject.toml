@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "zbbx-mcp"
 version = "1.5.0"
-description = "Zabbix MCP server for Claude Code, Codex CLI, n8n, and any MCP-compatible client"
+description = "Zabbix MCP server for Claude Code, GitHub Copilot, Codex CLI, n8n, and any MCP-compatible client"
 readme = "README.md"
 license = "MIT"
 requires-python = ">=3.10"
@@ -24,7 +24,7 @@ classifiers = [
     "Topic :: Software Development :: Libraries",
     "Topic :: System :: Monitoring",
 ]
-keywords = ["zabbix", "mcp", "monitoring", "claude", "codex"]
+keywords = ["zabbix", "mcp", "monitoring", "claude", "copilot", "codex"]
 dependencies = [
     "mcp>=1.0.0,<1.26.0",
     "httpx[http2]>=0.27.0",
