@@ -2,6 +2,7 @@ import httpx
 
 from zbbx_mcp.formatters import _ts, format_severity
 from zbbx_mcp.resolver import InstanceResolver
+from zbbx_mcp.utils import resolve_group_ids
 
 TRIGGER_STATES = {"0": "Normal", "1": "Unknown"}
 TRIGGER_STATUS = {"0": "Enabled", "1": "Disabled"}
@@ -58,12 +59,10 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     params["search"] = {"description": search}
                     params["searchWildcardsEnabled"] = True
                 if group:
-                    groups = await client.call("hostgroup.get", {
-                        "output": ["groupid"], "filter": {"name": [group]},
-                    })
-                    if not groups:
+                    gids = await resolve_group_ids(client, group)
+                    if gids is None:
                         return f"Host group '{group}' not found."
-                    params["groupids"] = [g["groupid"] for g in groups]
+                    params["groupids"] = gids
 
                 data = await client.call("trigger.get", params)
 

@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 import asyncio
-import os
 from datetime import datetime, timezone
 
 import httpx
 
+from zbbx_mcp import __version__
 from zbbx_mcp.classify import classify_host as _classify_host
 from zbbx_mcp.classify import detect_provider
 from zbbx_mcp.data import (
@@ -21,6 +21,7 @@ from zbbx_mcp.data import (
     is_hidden_product,
 )
 from zbbx_mcp.resolver import InstanceResolver
+from zbbx_mcp.utils import safe_output_path
 
 _CSS = """
 @page{size:A4;margin:15mm}*{margin:0;padding:0;box-sizing:border-box}
@@ -220,7 +221,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                         cd["trend"] = "dropping"
                     elif change >= 30 and cd["trend"] in ("stable", "dropping"):
                         cd["trend"] = "rising"
-                    elif change <= -10 and cd["trend"] == "rising" or change > 0 and cd["trend"] == "dropping":
+                    elif (change <= -10 and cd["trend"] == "rising") or (change > 0 and cd["trend"] == "dropping"):
                         cd["trend"] = "stable"
                     if cd["traffic_gbps"] < 0.01 and avg_gbps > 0.05:
                         cd["trend"] = "dead"
@@ -238,7 +239,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
 <div class="header">
 <h1>Infrastructure Status Report</h1>
 <div class="subtitle">Server Fleet Overview &amp; Strategic Recommendations</div>
-<div class="date">{now_str} &bull; zbbx-mcp v1.3</div>
+<div class="date">{now_str} &bull; zbbx-mcp v{__version__}</div>
 <div class="kpi-row">
 <div class="kpi"><div class="kpi-value">{total_servers}</div><div class="kpi-label">Servers</div></div>
 <div class="kpi"><div class="kpi-value">{total_traffic} Gbps</div><div class="kpi-label">Total Traffic</div></div>
@@ -711,9 +712,9 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 html.append('</div></body></html>')
 
                 if not output_dir:
-                    output_dir = os.path.expanduser("~/Downloads")
+                    output_dir = "~/Downloads"
                 filename = f"infra-report-{date_str}.html"
-                filepath = os.path.join(output_dir, filename)
+                filepath = safe_output_path(output_dir, filename)
                 with open(filepath, "w") as f:
                     f.write("\n".join(html))
 

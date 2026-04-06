@@ -2,7 +2,7 @@
 
 __all__ = ["__version__", "create_server", "ZabbixClient", "ZabbixConfig"]
 
-__version__ = "1.3.0"
+__version__ = "1.5.1"
 
 
 def create_server():  # noqa: ANN201 – deferred import

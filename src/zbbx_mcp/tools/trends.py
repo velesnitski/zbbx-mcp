@@ -6,9 +6,17 @@ import httpx
 
 from zbbx_mcp.classify import classify_host as _classify_host
 from zbbx_mcp.classify import detect_provider
-from zbbx_mcp.data import KEY_VPN_PRIMARY, build_parent_map, extract_country, fetch_host_dashboards, fetch_trends_batch
+from zbbx_mcp.data import (
+    KEY_VPN_PRIMARY,
+    build_parent_map,
+    extract_country,
+    fetch_host_dashboards,
+    fetch_trends_batch,
+    host_ip,
+)
 from zbbx_mcp.excel import BW_MAX
 from zbbx_mcp.resolver import InstanceResolver
+from zbbx_mcp.utils import resolve_group_ids
 
 
 def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()):
@@ -51,12 +59,10 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()):
                     "sortfield": "host",
                 }
                 if group:
-                    groups = await client.call("hostgroup.get", {
-                        "output": ["groupid"], "filter": {"name": [group]},
-                    })
-                    if not groups:
+                    gids = await resolve_group_ids(client, group)
+                    if gids is None:
                         return f"Host group '{group}' not found."
-                    params["groupids"] = [g["groupid"] for g in groups]
+                    params["groupids"] = gids
 
                 hosts = await client.call("host.get", params)
 
@@ -308,7 +314,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()):
                 parts.append(f"|------|{'---|' * len(server_names)}")
                 provs = []
                 for h in lookup:
-                    ip = next((i["ip"] for i in h.get("interfaces", []) if i.get("ip") != "127.0.0.1"), "")
+                    ip = host_ip(h)
                     provs.append(detect_provider(ip) if ip else "?")
                 parts.append(f"| Provider | {' | '.join(provs)} |")
                 parts.append(f"| Country | {' | '.join(extract_country(h['host']) for h in lookup)} |")
@@ -349,12 +355,10 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()):
                     "filter": {"status": "0"},
                 }
                 if group:
-                    grps = await client.call("hostgroup.get", {
-                        "output": ["groupid"], "filter": {"name": [group]},
-                    })
-                    if not grps:
+                    gids = await resolve_group_ids(client, group)
+                    if gids is None:
                         return f"Group '{group}' not found."
-                    params["groupids"] = [g["groupid"] for g in grps]
+                    params["groupids"] = gids
 
                 hosts = await client.call("host.get", params)
                 filtered = []
@@ -481,7 +485,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()):
                         score -= 30
 
                     if server_issues:
-                        ip = next((i["ip"] for i in h.get("interfaces", []) if i.get("ip") != "127.0.0.1"), "")
+                        ip = host_ip(h)
                         issues.append({
                             "host": hostname, "hostid": hid, "ip": ip,
                             "score": max(0, score),
@@ -670,7 +674,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()):
                     cpu = hm.get("cpu")
                     traffic = hm.get("traffic")
                     vpn1_val = vpn1_map.get(hid)
-                    ip = next((i["ip"] for i in h.get("interfaces", []) if i.get("ip") != "127.0.0.1"), "")
+                    ip = host_ip(h)
 
                     cpu_avg = cpu.avg if cpu else None
                     traffic_avg = traffic.avg if traffic else None
@@ -825,7 +829,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()):
                     cpu = hm.get("cpu")
                     traffic = hm.get("traffic")
                     load = hm.get("load")
-                    ip = next((i["ip"] for i in h.get("interfaces", []) if i.get("ip") != "127.0.0.1"), "")
+                    ip = host_ip(h)
                     signals = []
                     severity = 0
 
