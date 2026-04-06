@@ -12,6 +12,7 @@ from zbbx_mcp.data import (
 )
 from zbbx_mcp.formatters import format_host_detail, format_host_list
 from zbbx_mcp.resolver import InstanceResolver
+from zbbx_mcp.utils import resolve_group_ids
 
 
 def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> None:
@@ -51,12 +52,9 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     params["searchWildcardsEnabled"] = True
                     params["searchByAny"] = True
                 if group:
-                    groups = await client.call("hostgroup.get", {
-                        "output": ["groupid"],
-                        "filter": {"name": [group]},
-                    })
-                    if groups:
-                        params["groupids"] = [g["groupid"] for g in groups]
+                    gids = await resolve_group_ids(client, group)
+                    if gids is not None:
+                        params["groupids"] = gids
                     else:
                         return f"Host group '{group}' not found."
 
@@ -82,7 +80,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                              "|------|------|---------|--------|----|"]
                     for h in data:
                         status = "Enabled" if h.get("status") == "0" else "Disabled"
-                        ip = next((i["ip"] for i in h.get("interfaces", []) if i.get("ip") != "127.0.0.1"), "")
+                        ip = host_ip(h)
                         lines.append(f"| {h.get('host', '?')} | {h.get('name', '')} | {h.get('hostid', '?')} | {status} | {ip} |")
                     return f"{header}\n\n" + "\n".join(lines)
                 else:
@@ -292,12 +290,9 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     "sortfield": "host",
                 }
                 if group:
-                    groups = await client.call("hostgroup.get", {
-                        "output": ["groupid"],
-                        "filter": {"name": [group]},
-                    })
-                    if groups:
-                        params["groupids"] = [g["groupid"] for g in groups]
+                    gids = await resolve_group_ids(client, group)
+                    if gids is not None:
+                        params["groupids"] = gids
                     else:
                         return f"Host group '{group}' not found."
 
@@ -327,7 +322,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     lines.append(f"**{base}** ({cc}, {prod or '?'}) — {len(members)} members")
                     for m in sorted(members, key=lambda x: x["host"]):
                         role = _infer_cluster_role(m.get("name", m["host"]))
-                        ip = next((i["ip"] for i in m.get("interfaces", []) if i.get("ip") != "127.0.0.1"), "")
+                        ip = host_ip(m)
                         lines.append(f"  {m['host']} — {role} {ip}")
                     lines.append("")
 
@@ -368,14 +363,11 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 hosts = await fetch_enabled_hosts(client, extra_output=["name", "status"])
 
                 if group:
-                    grps = await client.call("hostgroup.get", {
-                        "output": ["groupid"],
-                        "filter": {"name": [group]},
-                    })
-                    if not grps:
+                    gids = await resolve_group_ids(client, group)
+                    if gids is None:
                         return f"Host group '{group}' not found."
-                    gids = {g["groupid"] for g in grps}
-                    hosts = [h for h in hosts if any(g.get("groupid") in gids for g in h.get("groups", []))]
+                    gid_set = set(gids)
+                    hosts = [h for h in hosts if any(g.get("groupid") in gid_set for g in h.get("groups", []))]
 
                 if country:
                     hosts = [h for h in hosts if extract_country(h["host"]).lower() == country.lower()]

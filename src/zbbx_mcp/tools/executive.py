@@ -25,6 +25,7 @@ from zbbx_mcp.data import (
     host_ip,
 )
 from zbbx_mcp.resolver import InstanceResolver
+from zbbx_mcp.utils import safe_output_path
 
 
 def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> None:
@@ -438,7 +439,9 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 result = json.dumps(snapshot, indent=2)
 
                 if output != "json" and output:
-                    path = os.path.expanduser(output)
+                    out_dir = os.path.dirname(os.path.expanduser(output)) or "~/Downloads"
+                    out_name = os.path.basename(output)
+                    path = safe_output_path(out_dir, out_name)
                     with open(path, "w") as f:
                         f.write(result)
                     return f"Snapshot saved to {path}"

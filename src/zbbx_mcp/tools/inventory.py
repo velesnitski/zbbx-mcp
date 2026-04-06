@@ -763,7 +763,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()):
                     except (socket.herror, socket.gaierror, OSError):
                         return ""
 
-                loop = _aio.get_event_loop()
+                loop = _aio.get_running_loop()
                 rdns_tasks = []
                 for pfx, data in targets:
                     for ip in data["ips"][:1]:  # one lookup per prefix
