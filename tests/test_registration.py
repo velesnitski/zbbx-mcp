@@ -163,6 +163,11 @@ EXPECTED_TOOLS = {
     "get_product_audit",
     # ceo_report.py
     "generate_ceo_report",
+    # analysis.py
+    "analyze_server_roles",
+    "correlate_logs",
+    "audit_host_ips",
+    "classify_external_ips",
 }
 
 
