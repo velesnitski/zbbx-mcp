@@ -9,7 +9,7 @@ import httpx
 
 from zbbx_mcp.classify import classify_host as _classify_host
 from zbbx_mcp.classify import detect_provider
-from zbbx_mcp.data import KEY_CONNECTIONS
+from zbbx_mcp.data import KEY_CONNECTIONS, host_ip
 from zbbx_mcp.resolver import InstanceResolver
 
 
@@ -187,7 +187,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                             continue
                         seen.add(hid)
                         h = host_map.get(hid, {})
-                        ip = next((i["ip"] for i in h.get("interfaces", []) if i.get("ip") != "127.0.0.1"), "")
+                        ip = host_ip(h)
                         prod, tier = _classify_host(h.get("groups", []))
                         provider = detect_provider(ip) if ip else ""
                         cost = cost_map.get(hid)

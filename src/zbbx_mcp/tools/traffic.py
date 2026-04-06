@@ -8,7 +8,7 @@ import httpx
 
 from zbbx_mcp.classify import classify_host as _classify_host
 from zbbx_mcp.classify import detect_provider
-from zbbx_mcp.data import KEY_CONNECTIONS, TRAFFIC_IN_KEYS, countries_for_region, extract_country
+from zbbx_mcp.data import KEY_CONNECTIONS, TRAFFIC_IN_KEYS, countries_for_region, extract_country, host_ip
 from zbbx_mcp.resolver import InstanceResolver
 
 
@@ -154,7 +154,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                         cpu = host_cpu.get(hid)
                         h = host_map[hid]
                         hostname = h["host"]
-                        ip = next((i["ip"] for i in h.get("interfaces", []) if i.get("ip") != "127.0.0.1"), "")
+                        ip = host_ip(h)
                         provider = detect_provider(ip) if ip else ""
 
                         # Determine anomaly type
@@ -330,7 +330,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
 
                     conns = host_conns.get(hid, 0)
                     bw_per_client = (traffic / conns) if conns > 0 else 0
-                    ip = next((i["ip"] for i in h.get("interfaces", []) if i.get("ip") != "127.0.0.1"), "")
+                    ip = host_ip(h)
 
                     rows.append({
                         "host": h["host"],
@@ -499,7 +499,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     if drop >= drop_pct:
                         h = host_map[hid]
                         hostname = h["host"]
-                        ip = next((i["ip"] for i in h.get("interfaces", []) if i.get("ip") != "127.0.0.1"), "")
+                        ip = host_ip(h)
                         provider = detect_provider(ip) if ip else ""
                         prod, tier = _classify_host(h.get("groups", []))
                         groups = [g["name"] for g in h.get("groups", [])]

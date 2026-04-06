@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 from datetime import datetime, timezone
 from statistics import median
 
@@ -15,6 +14,7 @@ from zbbx_mcp.data import (
 )
 from zbbx_mcp.excel import BW_MAX, BW_ORANGE, BW_RED
 from zbbx_mcp.resolver import InstanceResolver
+from zbbx_mcp.utils import safe_output_path
 
 CSS = """
 :root{--bg:#0f1117;--card:#1a1d27;--border:#2a2d3a;--text:#e4e4e7;--muted:#9ca3af;--accent:#6366f1;--red:#ef4444;--orange:#f59e0b;--green:#22c55e;--blue:#3b82f6}
@@ -370,11 +370,11 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
 
                 # Save
                 if not output_dir:
-                    output_dir = os.path.expanduser("~/Downloads")
+                    output_dir = "~/Downloads"
                 ts = datetime.now().strftime("%Y%m%d_%H%M")
                 safe_name = f"{'_'.join(filter(None, [country, product, tier]))}_" if (country or product or tier) else ""
                 filename = f"zabbix_report_{safe_name}{ts}.html"
-                filepath = os.path.join(output_dir, filename)
+                filepath = safe_output_path(output_dir, filename)
 
                 with open(filepath, "w") as f:
                     f.write("\n".join(html))

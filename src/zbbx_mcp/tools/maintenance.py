@@ -3,6 +3,7 @@ import httpx
 
 from zbbx_mcp.formatters import _ts
 from zbbx_mcp.resolver import InstanceResolver
+from zbbx_mcp.utils import resolve_group_ids
 
 MAINTENANCE_TYPES = {"0": "With data collection", "1": "Without data collection"}
 
@@ -37,12 +38,10 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 if host_id:
                     params["hostids"] = [host_id]
                 if group:
-                    groups = await client.call("hostgroup.get", {
-                        "output": ["groupid"], "filter": {"name": [group]},
-                    })
-                    if not groups:
+                    gids = await resolve_group_ids(client, group)
+                    if gids is None:
                         return f"Host group '{group}' not found."
-                    params["groupids"] = [g["groupid"] for g in groups]
+                    params["groupids"] = gids
 
                 data = await client.call("maintenance.get", params)
 

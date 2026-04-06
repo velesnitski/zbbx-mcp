@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 
 import httpx
 
+from zbbx_mcp.data import host_ip
 from zbbx_mcp.resolver import InstanceResolver
 
 SLACK_WEBHOOK_ENV = "SLACK_WEBHOOK_URL"
@@ -135,7 +136,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                         if cpu >= cpu_threshold:
                             h = host_map.get(item["hostid"])
                             if h:
-                                ip = next((i["ip"] for i in h.get("interfaces", []) if i.get("ip") != "127.0.0.1"), "")
+                                ip = host_ip(h)
                                 high_cpu_lines.append(
                                     f"• `{h['host']}` ({h.get('_product', '')}/{h.get('_tier', '')}) "
                                     f"— *{cpu}%* ({ip})"

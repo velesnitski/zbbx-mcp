@@ -6,7 +6,9 @@ import json
 
 import httpx
 
+from zbbx_mcp.data import host_ip
 from zbbx_mcp.resolver import InstanceResolver
+from zbbx_mcp.utils import resolve_group_ids
 
 
 def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> None:
@@ -135,17 +137,14 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 client = resolver.resolve(instance)
 
                 # Resolve group
-                groups = await client.call("hostgroup.get", {
-                    "output": ["groupid"],
-                    "filter": {"name": [group]},
-                })
-                if not groups:
+                gids = await resolve_group_ids(client, group)
+                if gids is None:
                     return f"Host group '{group}' not found."
 
                 # Get hosts in group
                 hosts = await client.call("host.get", {
                     "output": ["hostid", "host"],
-                    "groupids": [groups[0]["groupid"]],
+                    "groupids": gids,
                     "filter": {"status": "0"},
                 })
                 if not hosts:
@@ -237,7 +236,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     if not h:
                         continue
                     prod, tier = _classify_host(h.get("groups", []))
-                    ip = next((i["ip"] for i in h.get("interfaces", []) if i.get("ip") != "127.0.0.1"), "")
+                    ip = host_ip(h)
                     provider = detect_provider(ip) if ip else "No IP"
 
                     key = f"{prod} / {tier}"

@@ -5,6 +5,7 @@ import httpx
 
 from zbbx_mcp.formatters import _ts, format_severity
 from zbbx_mcp.resolver import InstanceResolver
+from zbbx_mcp.utils import resolve_group_ids
 
 EVENT_SOURCES = {"0": "Trigger", "1": "Discovery", "2": "Autoregistration", "3": "Internal"}
 EVENT_VALUES = {
@@ -57,12 +58,10 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 if time_till:
                     params["time_till"] = int(time_till)
                 if group:
-                    groups = await client.call("hostgroup.get", {
-                        "output": ["groupid"], "filter": {"name": [group]},
-                    })
-                    if not groups:
+                    gids = await resolve_group_ids(client, group)
+                    if gids is None:
                         return f"Host group '{group}' not found."
-                    params["groupids"] = [g["groupid"] for g in groups]
+                    params["groupids"] = gids
 
                 data = await client.call("event.get", params)
 
@@ -199,12 +198,10 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     "limit": 5000,
                 }
                 if group:
-                    groups = await client.call("hostgroup.get", {
-                        "output": ["groupid"], "filter": {"name": [group]},
-                    })
-                    if not groups:
+                    gids = await resolve_group_ids(client, group)
+                    if gids is None:
                         return f"Host group '{group}' not found."
-                    params["groupids"] = [g["groupid"] for g in groups]
+                    params["groupids"] = gids
 
                 events = await client.call("event.get", params)
 
@@ -292,12 +289,10 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     "limit": 5000,
                 }
                 if group:
-                    groups = await client.call("hostgroup.get", {
-                        "output": ["groupid"], "filter": {"name": [group]},
-                    })
-                    if not groups:
+                    gids = await resolve_group_ids(client, group)
+                    if gids is None:
                         return f"Host group '{group}' not found."
-                    params["groupids"] = [g["groupid"] for g in groups]
+                    params["groupids"] = gids
 
                 events = await client.call("event.get", params)
 
