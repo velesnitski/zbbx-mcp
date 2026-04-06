@@ -4,6 +4,7 @@ import httpx
 
 from zbbx_mcp.formatters import _ts, format_problem_list, format_severity
 from zbbx_mcp.resolver import InstanceResolver
+from zbbx_mcp.utils import resolve_group_ids
 
 
 def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> None:
@@ -76,13 +77,10 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                         return f"Host '{host}' not found."
                     params["hostids"] = [h["hostid"] for h in hosts]
                 elif group:
-                    groups = await client.call("hostgroup.get", {
-                        "output": ["groupid"],
-                        "filter": {"name": [group]},
-                    })
-                    if not groups:
+                    gids = await resolve_group_ids(client, group)
+                    if gids is None:
                         return f"Host group '{group}' not found."
-                    params["groupids"] = [g["groupid"] for g in groups]
+                    params["groupids"] = gids
 
                 data = await client.call("problem.get", params)
 
