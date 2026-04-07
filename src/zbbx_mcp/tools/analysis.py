@@ -14,11 +14,12 @@ from zbbx_mcp.resolver import InstanceResolver
 from zbbx_mcp.utils import resolve_group_ids
 
 _PHYSICAL_PREFIXES = ("eth", "eno", "enp", "ens", "bond", "ppp")
-_TUNNEL_PREFIXES = ("tun", "wg", "vti", "gre", "tap", "squid_")
+_KNOWN_SYSTEM = ("lo", "docker", "br-", "veth", "virbr")
 
 
 def _is_tunnel(iface: str) -> bool:
-    return any(iface.startswith(p) for p in _TUNNEL_PREFIXES)
+    """Detect tunnel interfaces by exclusion: not physical and not system."""
+    return not _is_physical(iface) and not any(iface.startswith(p) for p in _KNOWN_SYSTEM)
 
 
 def _is_physical(iface: str) -> bool:
