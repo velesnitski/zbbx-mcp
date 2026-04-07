@@ -1,4 +1,4 @@
-"""Geo-level monitoring: traffic analysis, traffic trends, availability."""
+"""Geo-level monitoring: traffic analysis, trends, service availability."""
 
 from __future__ import annotations
 
@@ -43,7 +43,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
             product: str = "",
             instance: str = "",
         ) -> str:
-            """Detect country-level traffic disruptions by analyzing traffic drops per country.
+            """Detect country-level regional traffic anomalies by analyzing traffic drops per country.
 
             Args:
                 period: Current period to analyze (default: 1d)
@@ -146,10 +146,10 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                         healthy.append(ctry)
 
                 if not blocked:
-                    return f"No regional anomalys detected across {len(countries)} countries ({sum(len(v) for v in countries.values())} servers)."
+                    return f"No regional anomalies detected across {len(countries)} countries ({sum(len(v) for v in countries.values())} servers)."
 
                 parts = [
-                    f"**Geo-Block Detection: {len(blocked)} countries affected**\n",
+                    f"**Regional Anomaly Detection: {len(blocked)} countries affected**\n",
                     "| Country | Servers | Affected | Drop Avg | service DOWN | Severity |",
                     "|---------|---------|----------|----------|----------|----------|",
                 ]
@@ -328,7 +328,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
             period: str = "30d",
             instance: str = "",
         ) -> str:
-            """Protocol availability per server — uptime % over a period.
+            """Service uptime per server — uptime % over a period.
 
             Args:
                 country: Country code filter (optional)
@@ -450,7 +450,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 omitted = len(rows) - len(shown)
 
                 parts = [
-                    f"**service Availability ({period}): {total_all} servers ({healthy_count} healthy)**\n",
+                    f"**Service Availability ({period}): {total_all} servers ({healthy_count} healthy)**\n",
                     "| Server | Country | service Primary | service Secondary | Status |",
                     "|--------|---------|-------------|-------------|--------|",
                 ]
@@ -490,7 +490,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
             min_servers: int = 2,
             instance: str = "",
         ) -> str:
-            """service health status matrix by country.
+            """Service health status matrix by country.
 
             Args:
                 min_servers: Minimum servers per country to include (default: 2)
@@ -547,7 +547,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                         pass
 
                 parts = [
-                    "**Protocol Failure Matrix**\n",
+                    "**Service Health Matrix**\n",
                     "| Country | Servers | Proto 1 | Proto 2 | Proto 3 | Recommendation |",
                     "|---------|---------|------|-------|---------|----------------|",
                 ]
@@ -609,7 +609,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
             min_servers: int = 2,
             instance: str = "",
         ) -> str:
-            """Timeline of traffic disruption start dates per country.
+            """Traffic drop timeline per country — when drops started and duration.
 
             Args:
                 period: How far back to look (default: 30d)
@@ -648,7 +648,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                                 cd[day] = cd.get(day, 0) + val
                             break
 
-                # Find block start date for each country
+                # Find traffic drop start date for each country
                 blocks = []
                 for ctry, daily in country_daily.items():
                     days = sorted(daily)
@@ -681,13 +681,13 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                         })
 
                 if not blocks:
-                    return f"No traffic disruptions detected in {period} across {len(countries)} countries."
+                    return f"No traffic drops detected in {period} across {len(countries)} countries."
 
                 blocks.sort(key=lambda b: -b["duration"])
 
                 parts = [
-                    f"**Block Timeline ({period})**\n",
-                    "| Country | Servers | Block Started | Duration | Pre-block Traffic | Current |",
+                    f"**Traffic Drop Timeline ({period})**\n",
+                    "| Country | Servers | Drop Started | Duration | Pre-drop Traffic | Current |",
                     "|---------|---------|--------------|----------|-------------------|---------|",
                 ]
                 for b in blocks:

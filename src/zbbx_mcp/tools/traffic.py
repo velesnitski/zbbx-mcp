@@ -552,7 +552,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     prov_drops.setdefault(d["provider"], []).append(d)
 
                 if len(prov_drops) > 1:
-                    parts.append("\n### Drops by Provider (spot provider-level issues)\n")
+                    parts.append("\n### Drops by Provider\n")
                     for prov in sorted(prov_drops, key=lambda x: -len(prov_drops[x])):
                         plist = prov_drops[prov]
                         avg_drop = sum(d["drop_pct"] for d in plist) / len(plist)
