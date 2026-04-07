@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "zbbx-mcp"
-version = "1.5.0"
+version = "1.6.0"
 description = "Zabbix MCP server for Claude Code, GitHub Copilot, Codex CLI, n8n, and any MCP-compatible client"
 readme = "README.md"
 license = "MIT"

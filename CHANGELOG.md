@@ -5,6 +5,26 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.6.0] - 2026-04-07
+
+### Added
+- **112 tools** — 4 new analysis tools:
+  - `analyze_server_roles`: find servers acting as proxies (tunnel interfaces without physical traffic)
+  - `correlate_logs`: cross-reference log entries across hosts by time window
+  - `audit_host_ips`: find hosts where Zabbix IP differs from actual agent IP
+  - `classify_external_ips`: map service external IP IPs to countries and providers
+- Tunnel interface detection via exclusion-based logic (not physical + not system = tunnel)
+
+### Changed
+- Path validation added across report modules
+- DRY refactor: shared helpers used in 16 files
+- Version sync between pyproject.toml and __init__.py
+
+### Fixed
+- Tunnel detection no longer uses protocol-specific prefixes
+- Test assertions updated after codebase cleanup
+- Sentry import sorting
+
 ## [1.5.1] - 2026-04-04
 
 ### Added
