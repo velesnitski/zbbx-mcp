@@ -45,12 +45,12 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
             max_results: int = 50,
             instance: str = "",
         ) -> str:
-            """Classify servers as endpoint, service, mixed, or idle based on interface traffic.
+            """Classify servers as relay, endpoint, mixed, or idle based on interface traffic.
 
             Args:
                 country: Filter by 2-letter country code
                 product: Filter by product name
-                server_type: Filter: endpoint, service, mixed, idle
+                server_type: Filter: relay, endpoint, mixed, idle
                 max_results: Max results (default: 50)
                 instance: Zabbix instance (optional)
             """
@@ -94,11 +94,11 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     if phys >= min_traffic and tun < min_traffic:
                         stype = "relay"
                     elif tun >= min_traffic and phys < min_traffic:
-                        stype = "service"
+                        stype = "endpoint"
                     elif phys >= min_traffic and tun >= min_traffic:
                         stype = "mixed"
                     else:
-                        stype = "idle" if phys < 0.01 and tun < 0.01 else "service" if tun >= phys else "relay"
+                        stype = "idle" if phys < 0.01 and tun < 0.01 else "endpoint" if tun >= phys else "relay"
 
                     if server_type and stype != server_type.lower():
                         continue
@@ -248,7 +248,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
             max_results: int = 50,
             instance: str = "",
         ) -> str:
-            """Find hosts with interfaces in different /24 subnets.
+            """IP consistency audit — find hosts with interfaces in different /24 subnets.
 
             Args:
                 group: Filter by host group name
@@ -332,7 +332,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
             max_ips: int = 500,
             instance: str = "",
         ) -> str:
-            """Classify exit/destination IPs by hosting provider. Accepts IPs or JSON logs.
+            """Classify external IPs by hosting provider. Accepts IPs or JSON logs.
 
             Args:
                 input_data: Comma-separated IPs or JSON log lines (auto-detected)
@@ -386,7 +386,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 total = len(ip_list)
                 sorted_provs = sorted(provider_data.values(), key=lambda x: -x["count"])
 
-                parts = [f"Exit Node Distribution: {total} unique IPs, {len(provider_data)} providers\n"]
+                parts = [f"External IP Distribution: {total} unique IPs, {len(provider_data)} providers\n"]
                 parts.append("| Provider | City | Count | % | Sample IPs |")
                 parts.append("|----------|------|-------|---|------------|")
                 for pd in sorted_provs:
