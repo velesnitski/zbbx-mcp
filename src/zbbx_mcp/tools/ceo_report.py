@@ -275,7 +275,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 for cc, cd in sorted_countries:
                     if cd.get("change", 0) < -30 and cd.get("avg_gbps", 0) > 1 and cd["trend"] != "dead":
                         name = _COUNTRY_NAMES.get(cc, cc)
-                        alerts.append(("yellow", f"<b>{name}: Traffic declining {cd['change']}%.</b> Now {cd['traffic_gbps']} Gbps (avg {cd['avg_gbps']}). Possible regional anomalying."))
+                        alerts.append(("yellow", f"<b>{name}: Traffic declining {cd['change']}%.</b> Now {cd['traffic_gbps']} Gbps (avg {cd['avg_gbps']}). Possible regional traffic anomaly."))
 
                 if not alerts:
                     alerts.append(("green", "<b>All systems healthy.</b> No critical issues detected."))
@@ -542,7 +542,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                         elif "explosive growth" in reasons:
                             rec = f"Traffic +{cd.get('change', 0)}%. Monitor capacity — may need more servers soon."
                         elif "traffic drop" in reasons:
-                            rec = f"Traffic declined {cd.get('change', 0)}%. Check for regional anomalying or routing issues."
+                            rec = f"Traffic declined {cd.get('change', 0)}%. Check for regional anomalies or routing issues."
                         elif "no service checks" in reasons:
                             rec = f"{cd['servers']} servers without service health monitoring. Add standard check items."
                         elif "requested" in reasons:
@@ -700,7 +700,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 html.append('<table><thead><tr><th>Status</th><th>Meaning</th><th>Business Impact</th><th>Recommended Action</th></tr></thead><tbody>')
                 html.append(f'<tr><td>{_badge("critical", "CRITICAL")}</td><td>service service DOWN, active users affected</td><td>Users cannot connect, revenue impact</td><td>Fix within 24h &mdash; rotate IPs or switch protocol</td></tr>')
                 html.append(f'<tr><td>{_badge("dead", "DEAD")}</td><td>All servers offline 30+ days, zero traffic</td><td>Country fully lost, paying for idle servers</td><td>Decommission or rotate to save costs</td></tr>')
-                html.append(f'<tr><td>{_badge("dropping", "DROPPING")}</td><td>Traffic declining &gt;15% vs average</td><td>Users leaving or blocked by ISP</td><td>Investigate regional anomalying or routing issues</td></tr>')
+                html.append(f'<tr><td>{_badge("dropping", "DROPPING")}</td><td>Traffic declining &gt;15% vs average</td><td>Users leaving or blocked by ISP</td><td>Investigate regional anomalies or routing issues</td></tr>')
                 html.append(f'<tr><td>{_badge("overloaded", "OVERLOADED")}</td><td>Server density &gt;3 Gbps/server</td><td>Risk of outage if one server fails</td><td>Add servers within 2 weeks</td></tr>')
                 html.append(f'<tr><td>{_badge("high", "HIGH")}</td><td>Server density 1.5&ndash;3 Gbps/server</td><td>Close to capacity, no room for growth</td><td>Plan expansion next quarter</td></tr>')
                 html.append(f'<tr><td>{_badge("rising", "RISING")}</td><td>Traffic growing &gt;15% vs period start</td><td>Healthy growth, may need more capacity</td><td>Monitor, prepare to scale</td></tr>')
