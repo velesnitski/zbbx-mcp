@@ -130,9 +130,9 @@ get_traffic_report(country="us")
 | `ZABBIX_COMPACT_TOOLS` | No | Trim tool descriptions to save tokens (default: `true`). Set `false` for full descriptions |
 | `ZABBIX_COMPACT` | No | Strip markdown from tool responses for ~40% token savings. Set `true` to enable |
 | `ZABBIX_RESPONSE_BUDGET` | No | Max chars per tool response (default: `6000`). Set `0` to disable truncation |
-| `ZABBIX_service_CHECK_KEY` | No | Zabbix item key for primary service health check (empty = skip service monitoring) |
-| `ZABBIX_service2_CHECK_KEY` | No | Zabbix item key for secondary service health check |
-| `ZABBIX_service3_CHECK_KEY` | No | Zabbix item key for tertiary service health check |
+| `ZABBIX_SERVICE_CHECK_KEY` | No | Zabbix item key for primary service health check (empty = skip service monitoring) |
+| `ZABBIX_SERVICE2_CHECK_KEY` | No | Zabbix item key for secondary service health check |
+| `ZABBIX_SERVICE3_CHECK_KEY` | No | Zabbix item key for tertiary service health check |
 | `ZABBIX_CONNECTIONS_KEY` | No | Zabbix item key for connection count metric |
 | `ZABBIX_HIDE_PRODUCTS` | No | Comma-separated product names to hide from all reports |
 | `ZABBIX_LOG_FILE` | No | Error log path (default: `~/.zbbx-mcp/zbbx-mcp.log`) |
