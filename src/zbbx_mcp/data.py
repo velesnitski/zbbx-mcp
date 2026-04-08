@@ -41,9 +41,9 @@ GB_BYTES = 1_073_741_824  # 1 GB in bytes
 # Zabbix API filter values used across many calls
 STATUS_ENABLED = "0"
 # service health check item keys — configurable per deployment
-KEY_service_PRIMARY = os.environ.get("ZABBIX_service_CHECK_KEY", "")
-KEY_service_SECONDARY = os.environ.get("ZABBIX_service2_CHECK_KEY", "")
-KEY_service_TERTIARY = os.environ.get("ZABBIX_service3_CHECK_KEY", "")
+KEY_service_PRIMARY = os.environ.get("ZABBIX_SERVICE_CHECK_KEY", "")
+KEY_service_SECONDARY = os.environ.get("ZABBIX_SERVICE2_CHECK_KEY", "")
+KEY_service_TERTIARY = os.environ.get("ZABBIX_SERVICE3_CHECK_KEY", "")
 KEY_CONNECTIONS = os.environ.get("ZABBIX_CONNECTIONS_KEY", "")
 # Products to hide from all reports (comma-separated)
 # Read fresh from env on every call — no caching, avoids import-time race
