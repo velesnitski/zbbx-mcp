@@ -16,7 +16,7 @@ Before approving any PR, verify:
 ### Security
 - No hardcoded tokens, passwords, or API keys
 - No real server hostnames or internal domain names in code, docstrings, or tests
-- No service protocol names (use generic labels)
+- No hardcoded service-specific identifiers (use generic labels)
 - Write operations must be in `WRITE_TOOLS` and gated by `ZABBIX_READ_ONLY`
 - Rollback: mutations must call `snapshot_and_record()` before changing data
 

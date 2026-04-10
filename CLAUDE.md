@@ -39,7 +39,7 @@ uv run pytest -k "test_name"               # single test by name
 
 - **Never commit `tasks.md`** — it's in `.gitignore` and contains internal planning notes
 - **No sensitive data in code or git** — no real hostnames, company names, product names, or server naming patterns. Use generic examples like `srv-nl01`, `srv-us01` in docstrings and tests
-- **No service protocol names** — use generic labels (Primary, Secondary, Tertiary) in public output
+- **No hardcoded service identifiers** — use generic labels (Primary, Secondary, Tertiary) in public output
 - **Country filter** — always use `extract_country(hostname)` for exact 2-letter match, never substring `country in hostname`
 - **Compact by default** — tools should return concise output. Use `max_results` with sensible defaults, group repetitive entries, show omitted count
 - **Error handling** — catch `(httpx.HTTPError, ValueError)`, return user-friendly string, never raise
