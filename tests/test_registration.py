@@ -45,6 +45,7 @@ EXPECTED_TOOLS = {
     "update_item",
     "delete_item",
     "get_host_items",
+    "search_items",
     "get_item_history",
     "get_graphs",
     # triggers.py
