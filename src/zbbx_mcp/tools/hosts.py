@@ -24,16 +24,20 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
             query: str = "",
             group: str = "",
             country: str = "",
+            product: str = "",
+            status: str = "enabled",
             max_results: int = 50,
             format: str = "table",
             instance: str = "",
         ) -> str:
-            """Search Zabbix hosts by name pattern, host group, or country.
+            """Search Zabbix hosts by name, group, country, or product.
 
             Args:
                 query: Host name substring search
                 group: Host group name filter
                 country: 2-letter country code filter
+                product: Product name filter (substring match)
+                status: 'enabled' (default), 'disabled', or 'all'
                 max_results: Max results (default: 50)
                 format: 'table' (default) or 'list'
                 instance: Zabbix instance (optional)
@@ -46,6 +50,10 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     "selectGroups": ["name"],
                     "sortfield": "host",
                 }
+                if status == "enabled":
+                    params["filter"] = {"status": "0"}
+                elif status == "disabled":
+                    params["filter"] = {"status": "1"}
                 if query:
                     q = query if "*" in query else f"*{query}*"
                     params["search"] = {"host": q, "name": q}
@@ -58,13 +66,15 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     else:
                         return f"Host group '{group}' not found."
 
-                if not country:
+                if not country and not product:
                     params["limit"] = max_results
 
                 data = await client.call("host.get", params)
 
                 if country:
                     data = [h for h in data if extract_country(h["host"]).lower() == country.lower()]
+                if product:
+                    data = [h for h in data if product.lower() in (_classify_host(h.get("groups", []))[0] or "").lower()]
 
                 if not data:
                     return "No hosts found."
@@ -79,9 +89,9 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     lines = ["| Host | Name | Host ID | Status | IP |",
                              "|------|------|---------|--------|----|"]
                     for h in data:
-                        status = "Enabled" if h.get("status") == "0" else "Disabled"
+                        st = "Enabled" if h.get("status") == "0" else "Disabled"
                         ip = host_ip(h)
-                        lines.append(f"| {h.get('host', '?')} | {h.get('name', '')} | {h.get('hostid', '?')} | {status} | {ip} |")
+                        lines.append(f"| {h.get('host', '?')} | {h.get('name', '')} | {h.get('hostid', '?')} | {st} | {ip} |")
                     return f"{header}\n\n" + "\n".join(lines)
                 else:
                     result = format_host_list(data)

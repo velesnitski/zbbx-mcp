@@ -228,6 +228,82 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
             except (httpx.HTTPError, ValueError) as e:
                 return f"Error querying Zabbix: {e}"
 
+    if "search_items" not in skip:
+
+        @mcp.tool()
+        async def search_items(
+            search: str,
+            group: str = "",
+            country: str = "",
+            max_results: int = 30,
+            instance: str = "",
+        ) -> str:
+            """Search items across ALL hosts by name or key pattern.
+
+            Args:
+                search: Item name or key pattern (substring match)
+                group: Filter by host group name (optional)
+                country: Filter by country code (optional)
+                max_results: Maximum results (default: 30)
+                instance: Zabbix instance name (optional)
+            """
+            try:
+                client = resolver.resolve(instance)
+                from zbbx_mcp.data import extract_country
+
+                # Build host filter
+                host_params: dict = {"output": ["hostid", "host"], "filter": {"status": "0"}}
+                if group:
+                    groups = await client.call("hostgroup.get", {
+                        "output": ["groupid"], "filter": {"name": [group]},
+                    })
+                    if groups:
+                        host_params["groupids"] = [g["groupid"] for g in groups]
+                    else:
+                        return f"Host group '{group}' not found."
+
+                hosts = await client.call("host.get", host_params)
+                if country:
+                    hosts = [h for h in hosts if extract_country(h["host"]).lower() == country.lower()]
+
+                if not hosts:
+                    return "No hosts match the filter."
+
+                hids = [h["hostid"] for h in hosts]
+                host_map = {h["hostid"]: h["host"] for h in hosts}
+
+                q = search if "*" in search else f"*{search}*"
+                items = await client.call("item.get", {
+                    "hostids": hids,
+                    "output": ["itemid", "hostid", "name", "key_", "lastvalue", "units", "status"],
+                    "search": {"name": q, "key_": q},
+                    "searchWildcardsEnabled": True,
+                    "searchByAny": True,
+                    "filter": {"status": "0"},
+                    "limit": max_results,
+                    "sortfield": "name",
+                })
+
+                if not items:
+                    return f"No items matching '{search}' found across {len(hosts)} hosts."
+
+                lines = []
+                for item in items:
+                    hostname = host_map.get(item["hostid"], "?")
+                    value = _format_value(item.get("lastvalue", ""), item.get("units", ""))
+                    lines.append(
+                        f"| {hostname} | {item.get('name', '?')} | `{item.get('key_', '?')}` | {value} |"
+                    )
+
+                total = len(items)
+                header = f"**{total} items** matching '{search}' across {len(hosts)} hosts"
+                if total >= max_results:
+                    header += f" (limit {max_results})"
+                table = "| Host | Item | Key | Value |\n|------|------|-----|-------|\n"
+                return f"{header}\n\n{table}" + "\n".join(lines)
+            except (httpx.HTTPError, ValueError) as e:
+                return f"Error: {e}"
+
     if "get_item_history" not in skip:
 
         @mcp.tool()
