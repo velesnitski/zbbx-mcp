@@ -5,9 +5,12 @@ from __future__ import annotations
 import os
 from datetime import datetime
 from statistics import median
+from typing import TYPE_CHECKING
 
 import httpx
-from openpyxl import Workbook
+
+if TYPE_CHECKING:
+    from openpyxl import Workbook
 
 from zbbx_mcp.data import extract_country, fetch_all_data
 from zbbx_mcp.excel import (
@@ -414,6 +417,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 if not rows:
                     return "No servers found."
 
+                from openpyxl import Workbook
                 wb = Workbook()
 
                 # Sheet 1: All Servers
