@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections import defaultdict
 from datetime import datetime, timezone
 from statistics import median
 
@@ -313,7 +314,6 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 )
 
                 # Build hierarchy: Product → Dashboard → Tab → [rows]
-                from collections import defaultdict
                 grouped: dict[str, dict[str, dict[str, list]]] = defaultdict(lambda: defaultdict(lambda: defaultdict(list)))
                 off_dashboard = []
                 for r in rows:
