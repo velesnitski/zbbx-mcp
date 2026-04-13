@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+import asyncio
+import time
+from datetime import datetime, timezone
+
 import httpx
 
 from zbbx_mcp.classify import classify_host
@@ -108,12 +112,10 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 instance: Zabbix instance name (optional)
             """
             try:
-                import time
                 client = resolver.resolve(instance)
                 time_from = str(int(time.time()) - hours * 3600)
 
                 # Fetch in parallel: current problems, recent events, recently resolved
-                import asyncio
                 current_problems, recent_events = await asyncio.gather(
                     client.call("problem.get", {
                         "output": ["eventid", "name", "severity", "clock", "acknowledged"],
@@ -135,7 +137,6 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     }),
                 )
 
-                from datetime import datetime, timezone
                 def _fmt_time(ts: str) -> str:
                     return datetime.fromtimestamp(int(ts), tz=timezone.utc).strftime("%m-%d %H:%M")
 
