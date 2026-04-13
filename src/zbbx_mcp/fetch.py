@@ -21,14 +21,14 @@ from zbbx_mcp.data import (
     KEY_CPU_IDLE,
     KEY_CPU_LOAD,
     KEY_MEM_AVAIL,
-    KEY_service_PRIMARY,
-    KEY_service_SECONDARY,
-    KEY_service_TERTIARY,
     METRIC_KEYS,
     STATUS_ENABLED,
     TRAFFIC_IN_KEYS,
     TRAFFIC_OUT_KEYS,
     FetchResult,
+    KEY_service_PRIMARY,
+    KEY_service_SECONDARY,
+    KEY_service_TERTIARY,
     ServerRow,
     TrendRow,
     _parse_period,
@@ -37,7 +37,6 @@ from zbbx_mcp.data import (
     build_parent_map,
     build_value_map,
     extract_country,
-    is_hidden_product,
 )
 from zbbx_mcp.excel import BW_MAX, classify_bandwidth
 
