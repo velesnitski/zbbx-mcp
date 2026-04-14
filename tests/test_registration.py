@@ -111,6 +111,7 @@ EXPECTED_TOOLS = {
     "get_unknown_providers",
     "identify_providers",
     "get_low_disk_servers",
+    "get_low_memory_servers",
     "generate_product_map",
     # report.py
     "generate_server_report",
