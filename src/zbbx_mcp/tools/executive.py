@@ -754,7 +754,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     },
                     "cpu": {
                         "filter": {"key_": "system.cpu.util[,idle]"},
-                        "threshold": 10,  # alert when idle% drops below this (= >90% used)
+                        "threshold": 20,  # alert when idle% drops below this (= >80% used)
                         "direction": "below",
                         "unit": "% idle",
                         "label": "CPU Saturation",
@@ -773,7 +773,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     return f"Unknown metric '{metric}'. Use: disk, cpu, memory, or all."
 
                 now = int(_time.time())
-                time_from = now - 7 * 86400  # 7 days of trend data
+                time_from = now - 14 * 86400  # 14 days of trend data
 
                 alerts = []
 
@@ -795,9 +795,18 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
 
                     items = await client.call("item.get", params)
 
-                    # Filter disk items to pfree only
+                    # Handle disk: accept both pfree and pused items
                     if "filter_key" in cfg:
-                        items = [it for it in items if cfg["filter_key"] in it.get("key_", "")]
+                        pfree_items = [it for it in items if "pfree" in it.get("key_", "")]
+                        pused_items = [it for it in items if "pused" in it.get("key_", "")]
+                        # Convert pused → pfree equivalent (100 - pused)
+                        for it in pused_items:
+                            try:
+                                it["lastvalue"] = str(100 - float(it.get("lastvalue", 0)))
+                                it["_converted"] = True
+                            except (ValueError, TypeError):
+                                pass
+                        items = pfree_items + pused_items
 
                     # Deduplicate: one item per host (pick the one with lowest current value)
                     best_item: dict[str, dict] = {}
@@ -823,7 +832,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                             "itemids": chunk,
                             "time_from": time_from,
                             "output": ["itemid", "clock", "value_avg"],
-                            "limit": len(chunk) * 24 * 7,
+                            "limit": len(chunk) * 24 * 14,
                         })
                         all_trends.extend(trends)
 
@@ -845,7 +854,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     for hid, it in best_item.items():
                         iid = it["itemid"]
                         points = sorted(item_trends.get(iid, []))
-                        if len(points) < 24:  # need at least 1 day of data
+                        if len(points) < 5:  # need at least 5 data points
                             continue
 
                         try:
