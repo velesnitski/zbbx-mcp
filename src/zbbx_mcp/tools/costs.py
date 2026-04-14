@@ -191,6 +191,133 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
             except (httpx.HTTPError, ValueError) as e:
                 return f"Error: {e}"
 
+    if "import_costs_by_ip" not in skip:
+
+        @mcp.tool()
+        async def import_costs_by_ip(
+            costs_json: str,
+            dry_run: bool = True,
+            min_cost: float = 10,
+            max_cost: float = 1000,
+            instance: str = "",
+        ) -> str:
+            """Bulk-set monthly costs by matching server IPs to a price list.
+
+            Args:
+                costs_json: JSON mapping IP addresses to USD cost (e.g. {"1.2.3.4": 85.43})
+                dry_run: Preview only, don't write (default: True)
+                min_cost: Skip prices below this (default: $10)
+                max_cost: Skip prices above this (default: $1000)
+                instance: Zabbix instance (optional)
+            """
+            try:
+                ip_costs = json.loads(costs_json)
+            except json.JSONDecodeError:
+                return "Invalid JSON. Expected: {\"IP\": cost, ...}"
+
+            if not isinstance(ip_costs, dict):
+                return "Expected a JSON object mapping IPs to costs."
+
+            # Filter to safe range
+            safe = {ip: float(cost) for ip, cost in ip_costs.items()
+                    if min_cost <= float(cost) <= max_cost}
+            skipped_range = len(ip_costs) - len(safe)
+
+            try:
+                client = resolver.resolve(instance)
+                hosts = await client.call("host.get", {
+                    "output": ["hostid", "host"],
+                    "selectInterfaces": ["ip"],
+                    "filter": {"status": "0"},
+                })
+
+                # Build IP→host mapping
+                ip_to_host: dict[str, dict] = {}
+                for h in hosts:
+                    ip = host_ip(h)
+                    if ip:
+                        ip_to_host[ip] = h
+
+                # Match
+                matches = []
+                for ip, cost in safe.items():
+                    ip = ip.strip()
+                    if ip.startswith("ip-"):
+                        ip = ip[3:]
+                    if ip in ip_to_host:
+                        h = ip_to_host[ip]
+                        matches.append((h["host"], h["hostid"], ip, cost))
+
+                if not matches:
+                    return f"No matches. Spreadsheet: {len(safe)} IPs, Zabbix: {len(ip_to_host)} hosts with IPs."
+
+                if dry_run:
+                    lines = [f"**DRY RUN — {len(matches)} hosts matched** (of {len(safe)} IPs)\n"]
+                    lines.append("| Host | IP | $/mo |")
+                    lines.append("|------|-----|------|")
+                    total = 0.0
+                    for hostname, _hid, ip, cost in sorted(matches, key=lambda x: -x[3])[:30]:
+                        lines.append(f"| {hostname} | {ip} | ${cost:.2f} |")
+                        total += cost
+                    if len(matches) > 30:
+                        lines.append(f"| ... | {len(matches) - 30} more | |")
+                        total = sum(c for _, _, _, c in matches)
+                    lines.append(f"\n**Total: ${total:,.2f}/mo** (${total*12:,.2f}/yr)")
+                    lines.append(f"Skipped: {skipped_range} outside ${min_cost}-${max_cost} range")
+                    lines.append(f"Unmatched: {len(safe) - len(matches)} IPs not in Zabbix")
+                    lines.append("\nSet `dry_run=false` to apply.")
+                    return "\n".join(lines)
+
+                # Get existing macros
+                existing = await client.call("usermacro.get", {
+                    "hostids": [m[1] for m in matches],
+                    "output": ["hostmacroid", "hostid", "value"],
+                    "filter": {"macro": "{$COST_MONTH}"},
+                })
+                existing_map = {m["hostid"]: m for m in existing}
+
+                created = 0
+                updated = 0
+                unchanged = 0
+                errors = []
+
+                for hostname, hid, _ip, cost in matches:
+                    cost_str = str(round(cost, 2))
+                    try:
+                        if hid in existing_map:
+                            if existing_map[hid]["value"] != cost_str:
+                                await client.call("usermacro.update", {
+                                    "hostmacroid": existing_map[hid]["hostmacroid"],
+                                    "value": cost_str,
+                                })
+                                updated += 1
+                            else:
+                                unchanged += 1
+                        else:
+                            await client.call("usermacro.create", {
+                                "hostid": hid,
+                                "macro": "{$COST_MONTH}",
+                                "value": cost_str,
+                                "description": "Monthly server cost (USD)",
+                            })
+                            created += 1
+                    except (httpx.HTTPError, ValueError) as e:
+                        errors.append(f"{hostname}: {e}")
+                        if len(errors) >= 10:
+                            break
+
+                total = sum(c for _, _, _, c in matches)
+                parts = [
+                    f"**Cost import complete — {len(matches)} servers**",
+                    f"Created: {created} | Updated: {updated} | Unchanged: {unchanged}",
+                    f"Total: ${total:,.2f}/mo (${total*12:,.2f}/yr)",
+                ]
+                if errors:
+                    parts.append(f"Errors: {len(errors)}")
+                return "\n".join(parts)
+            except (httpx.HTTPError, ValueError) as e:
+                return f"Error: {e}"
+
     if "get_cost_summary" not in skip:
 
         @mcp.tool()
