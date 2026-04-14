@@ -60,7 +60,7 @@ You should see `zabbix` listed when Claude starts. Try asking: *"Show current pr
 
 ## What it does
 
-**112 tools** across 36 modules:
+**121 tools** across 42 modules:
 
 | Category | Tools |
 |----------|-------|
@@ -69,7 +69,7 @@ You should see `zabbix` listed when Claude starts. Try asking: *"Show current pr
 | **Host Groups** | `get_hostgroups`, `create_hostgroup`, `delete_hostgroup` |
 | **Triggers** | `get_triggers`, `create_trigger`, `update_trigger`, `delete_trigger` |
 | **Templates** | `get_templates`, `link_template`, `unlink_template` |
-| **Items & Metrics** | `get_host_items`, `create_item`, `update_item`, `delete_item`, `get_item_history`, `get_graphs` |
+| **Items & Metrics** | `get_host_items`, `search_items`, `create_item`, `update_item`, `delete_item`, `get_item_history`, `get_graphs` |
 | **Events & Trends** | `get_events`, `get_trends`, `get_event_frequency`, `get_correlated_events`, `get_error_rate`, `get_incident_report` |
 | **Dashboards** | `get_dashboards`, `get_dashboard_detail`, `find_host_dashboard` |
 | **Maintenance** | `get_maintenance`, `create_maintenance`, `delete_maintenance` |
@@ -77,13 +77,15 @@ You should see `zabbix` listed when Claude starts. Try asking: *"Show current pr
 | **Configuration** | `export_configuration`, `import_configuration`, `get_audit_log` |
 | **Scripts** | `get_scripts`, `execute_script` |
 | **Services & SLA** | `get_services`, `get_sla` |
-| **Macros** | `get_host_macros`, `get_global_macros`, `set_host_macro`, `delete_host_macro` |
-| **Inventory** | `get_server_map`, `get_product_summary`, `get_server_load`, `get_high_cpu_servers`, `get_underloaded_servers`, `get_provider_summary`, `get_unknown_providers`, `identify_providers` |
+| **Macros** | `get_host_macros`, `get_global_macros`, `set_host_macro`, `set_bulk_macro`, `delete_host_macro` |
+| **Inventory** | `get_server_map`, `get_product_summary`, `get_server_load`, `get_high_cpu_servers`, `get_underloaded_servers`, `get_low_disk_servers`, `get_low_memory_servers`, `get_provider_summary`, `get_unknown_providers`, `identify_providers` |
 | **Rollback** | `get_rollback_history`, `rollback_last`, `rollback_by_index` |
 | **Alerts** | `get_alerts`, `get_alert_summary` |
 | **Users** | `get_users` |
 | **Proxies** | `get_proxies` |
 | **Maps** | `get_maps`, `get_map_detail` |
+| **Web Scenarios** | `get_web_scenarios`, `get_web_scenario_status` |
+| **Domains** | `get_domain_status`, `get_ssl_expiry`, `get_domain_list` |
 | **Media & Actions** | `get_media_types`, `get_actions` |
 | **Slack** | `send_slack_message`, `send_slack_report` |
 | **Costs** | `import_server_costs`, `set_bulk_cost`, `get_cost_summary` |
@@ -134,6 +136,7 @@ get_traffic_report(country="us")
 | `ZABBIX_SERVICE2_CHECK_KEY` | No | Zabbix item key for secondary service health check |
 | `ZABBIX_SERVICE3_CHECK_KEY` | No | Zabbix item key for tertiary service health check |
 | `ZABBIX_CONNECTIONS_KEY` | No | Zabbix item key for connection count metric |
+| `ZABBIX_TRAFFIC_UNIT` | No | Set to `bytes` if Zabbix `net.if.in` returns bytes/sec instead of bits/sec. Default: bits/sec |
 | `ZABBIX_HIDE_PRODUCTS` | No | Comma-separated product names to hide from all reports |
 | `ZABBIX_LOG_FILE` | No | Error log path (default: `~/.zbbx-mcp/zbbx-mcp.log`) |
 | `ZABBIX_ANALYTICS_FILE` | No | Analytics log path (default: `~/.zbbx-mcp/analytics.log`) |

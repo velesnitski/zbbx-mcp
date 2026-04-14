@@ -11,7 +11,7 @@ uv pip install -e ".[test]"
 pip install -e ".[test]"
 ```
 
-**Run all tests (128 tests, ~2s):**
+**Run all tests (~2s):**
 ```bash
 uv run pytest
 ```
@@ -64,7 +64,7 @@ Every file under `tools/` exports `register(mcp, resolver, skip)`. Each tool is 
 4. Add the tool name to `EXPECTED_TOOLS` in `tests/test_registration.py`
 5. Update the tool count assertion in `tests/test_server.py`
 6. Update the tool table in `README.md`
-7. Run `uv run pytest` — all 128 tests must pass
+7. Run `uv run pytest` — all tests must pass
 
 ### ZabbixClient (`client.py`)
 Wraps Zabbix's JSON-RPC API via `httpx.AsyncClient` with HTTP/2 and a connection pool. Key methods:
@@ -96,7 +96,7 @@ Each `ZabbixClient` holds its own `RollbackLog` (bounded deque, max 50 entries).
 
 ### Test notes
 - `test_registration.py` — fast unit test; update `EXPECTED_TOOLS` and run this when adding/removing tools
-- `test_server.py` — spawns the real server as a subprocess and sends JSON-RPC messages over stdio; asserts exactly **96 tools** are registered
+- `test_server.py` — spawns the real server as a subprocess and sends JSON-RPC messages over stdio; asserts exactly **121 tools** are registered
 - Tests use `unittest.mock.patch.dict(os.environ, ..., clear=True)` to isolate config loading from the ambient environment
 
 ## Rules
