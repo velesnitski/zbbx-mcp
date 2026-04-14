@@ -83,6 +83,7 @@ WRITE_TOOLS = frozenset({
     "rollback_by_index",
     # Costs
     "import_server_costs",
+    "import_costs_by_ip",
     "set_bulk_cost",
 })
 
