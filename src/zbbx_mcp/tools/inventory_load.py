@@ -727,3 +727,75 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()):
                 return "\n".join(lines)
             except (httpx.HTTPError, ValueError) as e:
                 return f"Error: {e}"
+
+    if "get_low_memory_servers" not in skip:
+
+        @mcp.tool()
+        async def get_low_memory_servers(
+            threshold_gb: float = 0.5,
+            max_results: int = 30,
+            instance: str = "",
+        ) -> str:
+            """Find servers with low available memory.
+
+            Args:
+                threshold_gb: Flag servers below this GB free (default: 0.5)
+                max_results: Maximum results (default: 30)
+                instance: Zabbix instance name (optional)
+            """
+            try:
+                client = resolver.resolve(instance)
+                items = await client.call("item.get", {
+                    "output": ["hostid", "lastvalue"],
+                    "filter": {"key_": "vm.memory.size[available]", "status": "0"},
+                })
+
+                host_mem: dict[str, float] = {}
+                for it in items:
+                    try:
+                        avail_gb = float(it.get("lastvalue", 0)) / 1_073_741_824
+                        hid = it["hostid"]
+                        if hid not in host_mem or avail_gb < host_mem[hid]:
+                            host_mem[hid] = round(avail_gb, 2)
+                    except (ValueError, TypeError):
+                        pass
+
+                if not host_mem:
+                    return "No memory data found."
+
+                flagged = [(hid, mem) for hid, mem in host_mem.items() if mem < threshold_gb]
+                flagged.sort(key=lambda x: x[1])
+
+                if not flagged:
+                    return f"No servers below {threshold_gb} GB free memory."
+
+                hids = [hid for hid, _ in flagged[:max_results]]
+                hosts = await client.call("host.get", {
+                    "hostids": hids,
+                    "output": ["hostid", "host"],
+                    "selectGroups": ["name"],
+                    "selectInterfaces": ["ip"],
+                })
+                host_map = {h["hostid"]: h for h in hosts}
+
+                lines = [f"**{len(flagged)} servers below {threshold_gb} GB free**\n"]
+                lines.append("| Host | Free GB | Product | Provider |")
+                lines.append("|------|---------|---------|----------|")
+                for hid, mem in flagged[:max_results]:
+                    h = host_map.get(hid, {})
+                    hostname = h.get("host", hid)
+                    prod, _ = _classify_host(h.get("groups", []))
+                    ip = ""
+                    for iface in h.get("interfaces", []):
+                        if iface.get("ip") and iface["ip"] != "127.0.0.1":
+                            ip = iface["ip"]
+                            break
+                    prov = detect_provider(ip) if ip else "?"
+                    tag = "CRITICAL" if mem < 0.1 else "WARNING" if mem < 0.3 else "LOW"
+                    lines.append(f"| {hostname} | **{mem} GB** ({tag}) | {prod} | {prov} |")
+
+                if len(flagged) > max_results:
+                    lines.append(f"\n*{len(flagged) - max_results} more not shown*")
+                return "\n".join(lines)
+            except (httpx.HTTPError, ValueError) as e:
+                return f"Error: {e}"
