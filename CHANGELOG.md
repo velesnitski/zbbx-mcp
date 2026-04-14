@@ -45,6 +45,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - CEO report change %: uses trend-vs-trend comparison (same data source)
 - CEO report avg: uses TrendRow.avg (proper mean) instead of broken daily running average
 - Dead server count: requires actual traffic monitoring data (was counting hosts without items)
+- TrendRow.daily: proper sum/count mean replaces broken (old+new)/2 running average
+- `ZABBIX_TRAFFIC_UNIT` env var: set to `bytes` for deployments where net.if.in returns bytes/sec
+- All traffic conversions use configurable divisor (bits: /1M, bytes: /8M)
+- Dependabot: bumped pytest>=9.0.3, pytest-asyncio>=1 (CVE fix)
+- Domain CSV export: 19 fields including SSL expiry days, issuer, response time, HSTS, IPv6
 - Provider "Unknown": hosts without IP skipped from distribution
 - UK → GB country code normalization
 - Service DOWN: don't mark as broken if server has real traffic (>2 Mbps)
