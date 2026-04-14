@@ -109,11 +109,14 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     "output": ["eventid", "name", "severity", "clock"],
                     "selectHosts": ["host"],
                     "severities": list(range(min_severity, 6)),
-                    "sortfield": ["severity", "clock"],
-                    "sortorder": ["DESC", "DESC"],
+                    "sortfield": "eventid",
+                    "sortorder": "DESC",
                     "limit": 500,
                     "recent": True,
                 })
+
+                # Sort by severity desc (Zabbix 6.4 doesn't support severity sort)
+                problems.sort(key=lambda p: (-int(p.get("severity", "0")), -int(p.get("clock", "0"))))
 
                 if not problems:
                     return f"No active problems (severity >= {min_severity})."
