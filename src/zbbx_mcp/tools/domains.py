@@ -2,9 +2,21 @@
 
 from __future__ import annotations
 
+import socket
+
 import httpx
 
+from zbbx_mcp.classify import detect_provider
 from zbbx_mcp.resolver import InstanceResolver
+
+
+def _resolve_domain(domain: str) -> tuple[str, str]:
+    """Resolve domain to IP and detect provider. Returns (ip, provider)."""
+    try:
+        ip = socket.gethostbyname(domain)
+        return ip, detect_provider(ip)
+    except (socket.gaierror, OSError):
+        return "", ""
 
 # Item keys for domain health checks (configurable via env in future)
 _KEY_CERT = "web_cert_check.sh[{HOST.NAME}]"
@@ -40,7 +52,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 items = await client.call("item.get", {
                     "output": ["itemid", "hostid", "key_", "lastvalue", "lastclock"],
                     "filter": {"key_": [_KEY_CERT, _KEY_WHOIS, _KEY_HTTPS], "status": "0"},
-                    "selectHosts": ["hostid", "host"],
+                    "selectHosts": ["hostid", "host", "groups"],
                     "sortfield": "key_",
                 })
 
@@ -56,7 +68,8 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                         continue  # not a real domain name
                     if search and search.lower() not in hostname.lower():
                         continue
-                    d = domains.setdefault(hostname, {"cert": None, "whois": None, "https": None})
+                    groups = ", ".join(g.get("name", "") for g in host.get("groups", []))
+                    d = domains.setdefault(hostname, {"cert": None, "whois": None, "https": None, "groups": groups})
                     key = it.get("key_", "")
                     val = it.get("lastvalue", "")
                     try:
@@ -90,7 +103,13 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     cert_s = "OK" if cert_ok else ("EXPIRED" if d["cert"] == 0 else "N/A")
                     whois_s = "OK" if whois_ok else ("EXPIRED" if d["whois"] == 0 else "N/A")
                     https_s = "UP" if https_ok else ("DOWN" if d["https"] == 0 else "N/A")
-                    rows.append((name, cert_s, whois_s, https_s))
+
+                    # Resolve IP and provider (async-safe via thread)
+                    import asyncio
+                    loop = asyncio.get_event_loop()
+                    ip, provider = await loop.run_in_executor(None, _resolve_domain, name)
+
+                    rows.append((name, cert_s, whois_s, https_s, ip, provider, d.get("groups", "")))
 
                 shown = rows[:max_results]
                 total = len(domains)
@@ -102,9 +121,9 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     date_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
                     filepath = os.path.join(output_dir, f"domains-{date_str}.csv")
                     with open(filepath, "w") as f:
-                        f.write("Domain,SSL Cert,WHOIS,HTTPS\n")
-                        for name, cert, whois, https in shown:
-                            f.write(f"{name},{cert},{whois},{https}\n")
+                        f.write("Domain,SSL Cert,WHOIS,HTTPS,IP,Provider,Group\n")
+                        for name, cert, whois, https, ip, prov, grp in shown:
+                            f.write(f"{name},{cert},{whois},{https},{ip},{prov},{grp}\n")
                     return f"**Exported {len(shown)} domains to `{filepath}`**\n{problems} with issues" if problems else f"**Exported {len(shown)} domains to `{filepath}`**\nAll healthy"
 
                 header = f"**Domain Status: {total} domains"
@@ -112,10 +131,10 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     header += f", {problems} with issues"
                 header += "**\n"
 
-                lines = [f"| {n} | {c} | {w} | {h} |" for n, c, w, h in shown]
+                lines = [f"| {n} | {c} | {w} | {h} | {ip} | {p} |" for n, c, w, h, ip, p, _g in shown]
                 result = header + "\n".join([
-                    "| Domain | SSL Cert | WHOIS | HTTPS |",
-                    "|--------|---------|-------|-------|",
+                    "| Domain | SSL | WHOIS | HTTPS | IP | Provider |",
+                    "|--------|-----|-------|-------|----|---------:|",
                 ] + lines)
                 if len(rows) > max_results:
                     result += f"\n\n*{len(rows) - max_results} more omitted*"
