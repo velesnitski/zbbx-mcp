@@ -79,7 +79,7 @@ class TestServerStartup:
         assert tools_resp is not None, f"No tools/list response found in: {responses}"
         tools = tools_resp["result"]["tools"]
         tool_names = {t["name"] for t in tools}
-        assert len(tool_names) == 122, f"Expected 122 tools, got {len(tool_names)}: {sorted(tool_names)}"
+        assert len(tool_names) == 125, f"Expected 125 tools, got {len(tool_names)}: {sorted(tool_names)}"
         # Spot check core tools
         assert "search_hosts" in tool_names
         assert "get_problems" in tool_names

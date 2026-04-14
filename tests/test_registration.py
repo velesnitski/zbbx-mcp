@@ -36,6 +36,9 @@ EXPECTED_TOOLS = {
     "delete_hostgroup",
     # health.py
     "check_connection",
+    "get_agent_unreachable",
+    "get_active_problems",
+    "get_stale_servers",
     # dashboards.py
     "get_dashboards",
     "get_dashboard_detail",
