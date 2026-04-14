@@ -142,6 +142,7 @@ EXPECTED_TOOLS = {
     "send_slack_report",
     # costs.py
     "import_server_costs",
+    "import_costs_by_ip",
     "set_bulk_cost",
     "get_cost_summary",
     # traffic.py
