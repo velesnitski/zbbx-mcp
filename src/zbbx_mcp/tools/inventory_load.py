@@ -648,17 +648,23 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()):
             try:
                 client = resolver.resolve(instance)
 
-                # Get all disk utilization items in one call
-                items = await client.call("item.get", {
-                    "output": ["itemid", "hostid", "key_", "lastvalue", "name"],
+                # Get disk utilization from both standard and custom keys
+                import asyncio as _aio
+                vfs_task = client.call("item.get", {
+                    "output": ["itemid", "hostid", "key_", "lastvalue"],
                     "search": {"key_": "vfs.fs.size"},
                     "searchWildcardsEnabled": True,
                     "filter": {"status": "0"},
                 })
+                custom_task = client.call("item.get", {
+                    "output": ["itemid", "hostid", "key_", "lastvalue"],
+                    "filter": {"key_": "disk.fs.root", "status": "0"},
+                })
+                vfs_items, custom_items = await _aio.gather(vfs_task, custom_task)
 
                 # Group by host: pick the highest utilization per host
                 host_disk: dict[str, dict] = {}
-                for it in items:
+                for it in (vfs_items if isinstance(vfs_items, list) else []):
                     key = it.get("key_", "")
                     if ",pused]" not in key:
                         continue
@@ -670,6 +676,15 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()):
                     mount = key.split("[")[1].split(",")[0] if "[" in key else "/"
                     if hid not in host_disk or pct > host_disk[hid]["pct"]:
                         host_disk[hid] = {"pct": round(pct, 1), "mount": mount}
+
+                for it in (custom_items if isinstance(custom_items, list) else []):
+                    try:
+                        pct = float(it.get("lastvalue", 0))
+                    except (ValueError, TypeError):
+                        continue
+                    hid = it["hostid"]
+                    if hid not in host_disk or pct > host_disk[hid]["pct"]:
+                        host_disk[hid] = {"pct": round(pct, 1), "mount": "/"}
 
                 if not host_disk:
                     return "No disk utilization data found."
