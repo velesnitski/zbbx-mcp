@@ -42,6 +42,7 @@ from zbbx_mcp.tools import (
     trends_health,
     triggers,
     users,
+    web_scenarios,
 )
 
 # Tools that modify data — blocked in read-only mode
@@ -74,6 +75,7 @@ WRITE_TOOLS = frozenset({
     "execute_script",
     # Macros
     "set_host_macro",
+    "set_bulk_macro",
     "delete_host_macro",
     # Rollback
     "rollback_last",
@@ -106,6 +108,7 @@ def register_all(
         infra_report, costs, traffic, dashboard_report, full_report,
         trends_compare, trends_health,
         html_report, geo_traffic, geo_health, executive, ceo_report, analysis,
+        web_scenarios,
     ]
     for module in modules:
         module.register(mcp, resolver, skip=skip)

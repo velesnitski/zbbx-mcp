@@ -92,7 +92,11 @@ EXPECTED_TOOLS = {
     "get_host_macros",
     "get_global_macros",
     "set_host_macro",
+    "set_bulk_macro",
     "delete_host_macro",
+    # web_scenarios.py
+    "get_web_scenarios",
+    "get_web_scenario_status",
     # rollback_tools.py
     "get_rollback_history",
     "rollback_last",
