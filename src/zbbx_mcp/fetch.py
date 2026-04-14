@@ -672,7 +672,8 @@ async def fetch_trends_batch(
             trend_dir = ""
 
         # Build daily breakdown
-        daily: dict[str, float] = {}
+        daily_sum: dict[str, float] = {}
+        daily_count: dict[str, int] = {}
         for t in t_data:
             dt = datetime.fromtimestamp(int(t["clock"]), tz=timezone.utc)
             day_key = dt.strftime("%b %d")
@@ -685,11 +686,9 @@ async def fetch_trends_batch(
                 day_val = round(day_val / GB_BYTES, 1)
             else:
                 day_val = round(day_val, 2)
-            # Average per day (multiple hourly records)
-            if day_key in daily:
-                daily[day_key] = round((daily[day_key] + day_val) / 2, 1)
-            else:
-                daily[day_key] = day_val
+            daily_sum[day_key] = daily_sum.get(day_key, 0) + day_val
+            daily_count[day_key] = daily_count.get(day_key, 0) + 1
+        daily = {k: round(daily_sum[k] / daily_count[k], 1) for k in daily_sum}
 
         rows.append(TrendRow(
             hostid=hid,
