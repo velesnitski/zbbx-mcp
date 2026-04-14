@@ -98,17 +98,21 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
     if "get_problem_detail" not in skip:
 
         @mcp.tool()
-        async def get_problem_detail(event_id: str, instance: str = "") -> str:
+        async def get_problem_detail(problem_id: str = "", event_id: str = "", instance: str = "") -> str:
             """Get full details of a specific problem/event.
 
             Args:
-                event_id: Zabbix event ID
-                instance: Zabbix instance name (optional, for multi-instance setups)
+                problem_id: Problem/event ID (preferred)
+                event_id: Alias for problem_id (backward compatible)
+                instance: Zabbix instance name (optional)
             """
             try:
+                eid = problem_id or event_id
+                if not eid:
+                    return "Either problem_id or event_id is required."
                 client = resolver.resolve(instance)
                 data = await client.call("problem.get", {
-                    "eventids": [event_id],
+                    "eventids": [eid],
                     "output": "extend",
                     "selectAcknowledges": ["userid", "alias", "message", "clock", "action"],
                     "selectTags": ["tag", "value"],
