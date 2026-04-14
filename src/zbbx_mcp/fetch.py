@@ -7,6 +7,7 @@ All functions take a ZabbixClient and return structured data.
 from __future__ import annotations
 
 import asyncio
+import os
 import time as _time
 from datetime import datetime, timezone
 from typing import Any
@@ -39,6 +40,10 @@ from zbbx_mcp.data import (
     extract_country,
 )
 from zbbx_mcp.excel import BW_MAX, classify_bandwidth
+
+# Traffic unit: bits/sec (default) or bytes/sec — configurable per deployment
+_TRAFFIC_BYTES = os.environ.get("ZABBIX_TRAFFIC_UNIT", "").lower() == "bytes"
+_TRAFFIC_DIVISOR = 8_000_000 if _TRAFFIC_BYTES else 1_000_000  # raw → Mbps
 
 
 async def fetch_enabled_hosts(
@@ -116,7 +121,7 @@ async def fetch_traffic_map(client: ZabbixClient, hostids: list[str]) -> dict[st
             iface = key.split("[")[1].rstrip("]") if "[" in key else ""
             if not any(iface.startswith(p) for p in _PHYSICAL):
                 continue
-            mbps = float(it.get("lastvalue", 0)) / 1_000_000
+            mbps = float(it.get("lastvalue", 0)) / _TRAFFIC_DIVISOR
             hid = it["hostid"]
             if hid not in result or mbps > result[hid]:
                 result[hid] = mbps
@@ -450,8 +455,8 @@ async def fetch_all_data(
         ip = next((i["ip"] for i in h.get("interfaces", []) if i.get("ip") != "127.0.0.1"), "")
         in_traffic = _resolve(in_traffic_map, hid, parent_map)
         out_traffic = _resolve(out_traffic_map, hid, parent_map)
-        in_mbps = round(in_traffic / 1e6, 1) if in_traffic else None
-        out_mbps = round(out_traffic / 1e6, 1) if out_traffic else None
+        in_mbps = round(in_traffic / _TRAFFIC_DIVISOR, 1) if in_traffic else None
+        out_mbps = round(out_traffic / _TRAFFIC_DIVISOR, 1) if out_traffic else None
         total_mbps = round((in_mbps or 0) + (out_mbps or 0), 1) if (in_mbps or out_mbps) else None
         cost = cost_map.get(hid)
         service1_val = service1_map.get(hid)
@@ -638,12 +643,12 @@ async def fetch_trends_batch(
             peak_val = round(100 - min_val, 1)  # min idle = max used
             min_val = round(100 - max(avgs), 1) if avgs else 0
 
-        # For traffic: convert to Mbps
+        # For traffic: convert to Mbps (respects ZABBIX_TRAFFIC_UNIT)
         if metric_name == "traffic":
-            current = round(current / 1e6, 1)
-            avg_val = round(avg_val / 1e6, 1)
-            peak_val = round(peak_val / 1e6, 1)
-            min_val = round(min_val / 1e6, 1)
+            current = round(current / _TRAFFIC_DIVISOR, 1)
+            avg_val = round(avg_val / _TRAFFIC_DIVISOR, 1)
+            peak_val = round(peak_val / _TRAFFIC_DIVISOR, 1)
+            min_val = round(min_val / _TRAFFIC_DIVISOR, 1)
 
         # For memory: convert to GB
         if metric_name == "memory":
@@ -659,8 +664,8 @@ async def fetch_trends_batch(
             if metric_name == "cpu":
                 recent, older = 100 - recent, 100 - older
             if metric_name in ("traffic", "memory"):
-                recent /= 1e6 if metric_name == "traffic" else GB_BYTES
-                older /= 1e6 if metric_name == "traffic" else GB_BYTES
+                recent /= _TRAFFIC_DIVISOR if metric_name == "traffic" else GB_BYTES
+                older /= _TRAFFIC_DIVISOR if metric_name == "traffic" else GB_BYTES
             pct_change = ((recent - older) / older * 100) if older > 0 else 0
             if pct_change > 15:
                 trend_dir = "rising"
@@ -681,7 +686,7 @@ async def fetch_trends_batch(
             if metric_name == "cpu":
                 day_val = round(100 - day_val, 1)
             elif metric_name == "traffic":
-                day_val = round(day_val / 1e6, 1)
+                day_val = round(day_val / _TRAFFIC_DIVISOR, 1)
             elif metric_name == "memory":
                 day_val = round(day_val / GB_BYTES, 1)
             else:
