@@ -666,11 +666,17 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()):
                 host_disk: dict[str, dict] = {}
                 for it in (vfs_items if isinstance(vfs_items, list) else []):
                     key = it.get("key_", "")
-                    if ",pused]" not in key:
-                        continue
-                    try:
-                        pct = float(it.get("lastvalue", 0))
-                    except (ValueError, TypeError):
+                    if ",pused]" in key:
+                        try:
+                            pct = float(it.get("lastvalue", 0))
+                        except (ValueError, TypeError):
+                            continue
+                    elif ",pfree]" in key:
+                        try:
+                            pct = 100 - float(it.get("lastvalue", 0))
+                        except (ValueError, TypeError):
+                            continue
+                    else:
                         continue
                     hid = it["hostid"]
                     mount = key.split("[")[1].split(",")[0] if "[" in key else "/"
