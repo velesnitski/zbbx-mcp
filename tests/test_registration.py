@@ -97,6 +97,10 @@ EXPECTED_TOOLS = {
     # web_scenarios.py
     "get_web_scenarios",
     "get_web_scenario_status",
+    # domains.py
+    "get_domain_status",
+    "get_ssl_expiry",
+    "get_domain_list",
     # rollback_tools.py
     "get_rollback_history",
     "rollback_last",
