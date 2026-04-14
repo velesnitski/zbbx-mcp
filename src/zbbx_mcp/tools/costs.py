@@ -3,12 +3,16 @@
 import asyncio
 import fnmatch
 import json
+import os
+import re
 
 import httpx
 
 from zbbx_mcp.data import host_ip
 from zbbx_mcp.resolver import InstanceResolver
 from zbbx_mcp.utils import resolve_group_ids
+
+_IP_RE = re.compile(r"\b(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})\b")
 
 
 def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> None:
@@ -195,27 +199,41 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
 
         @mcp.tool()
         async def import_costs_by_ip(
-            costs_json: str,
+            file_path: str = "",
+            costs_json: str = "",
             dry_run: bool = True,
-            min_cost: float = 10,
-            max_cost: float = 1000,
+            min_cost: float = 1,
+            max_cost: float = 5000,
+            export_unmatched: str = "",
             instance: str = "",
         ) -> str:
-            """Bulk-set monthly costs by matching server IPs AND hostnames.
+            """Smart cost import: match by IP first, then hostname (5-pass fuzzy).
+
+            Reads a JSON file with "by_ip" and/or "by_name" sections.
+            IP matches win. Name matching uses: exact → split-on-dash → IP-in-name
+            → prefix → contains. max(ip_cost, name_cost) when both match.
 
             Args:
-                costs_json: JSON with "by_ip" and/or "by_name" maps, or flat IP→cost map
+                file_path: Path to JSON cost file (preferred over costs_json)
+                costs_json: Inline JSON (alternative to file_path)
                 dry_run: Preview only, don't write (default: True)
-                min_cost: Skip prices below this (default: $10)
-                max_cost: Skip prices above this (default: $1000)
+                min_cost: Skip prices below this (default: $1)
+                max_cost: Skip prices above this (default: $5000)
+                export_unmatched: File path to save unmatched entries as JSON (optional)
                 instance: Zabbix instance (optional)
             """
+            # Load data
             try:
-                raw = json.loads(costs_json)
-            except json.JSONDecodeError:
-                return "Invalid JSON."
+                if file_path:
+                    with open(os.path.expanduser(file_path)) as f:
+                        raw = json.load(f)
+                elif costs_json:
+                    raw = json.loads(costs_json)
+                else:
+                    return "Provide file_path or costs_json."
+            except (json.JSONDecodeError, FileNotFoundError, OSError) as e:
+                return f"Failed to load: {e}"
 
-            # Support both formats: {"by_ip": {...}, "by_name": {...}} or flat {"IP": cost}
             if isinstance(raw, dict) and ("by_ip" in raw or "by_name" in raw):
                 ip_costs = raw.get("by_ip", {})
                 name_costs = raw.get("by_name", {})
@@ -223,13 +241,16 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 ip_costs = raw
                 name_costs = {}
             else:
-                return "Expected JSON object with IP/hostname→cost mappings."
+                return "Expected JSON object with by_ip/by_name or flat IP→cost map."
 
-            def _safe(d):
-                return {k: float(v) for k, v in d.items() if min_cost <= float(v) <= max_cost}
+            def _in_range(v):
+                try:
+                    return min_cost <= float(v) <= max_cost
+                except (ValueError, TypeError):
+                    return False
 
-            safe_ips = _safe(ip_costs)
-            safe_names = _safe(name_costs)
+            safe_ips = {k: float(v) for k, v in ip_costs.items() if _in_range(v)}
+            safe_names = {k: float(v) for k, v in name_costs.items() if _in_range(v)}
             total_input = len(ip_costs) + len(name_costs)
             skipped_range = total_input - len(safe_ips) - len(safe_names)
 
@@ -244,52 +265,110 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 # Build lookup maps
                 ip_to_host: dict[str, dict] = {}
                 name_to_host: dict[str, dict] = {}
+                name_list: list[str] = []
                 for h in hosts:
                     ip = host_ip(h)
                     if ip:
                         ip_to_host[ip] = h
-                    name_to_host[h["host"].lower()] = h
+                    lname = h["host"].lower()
+                    name_to_host[lname] = h
+                    name_list.append(lname)
 
-                # Match by IP first, then by hostname (avoid duplicates)
-                matched_hids: set[str] = set()
-                matches = []
+                # --- Pass 1: by_ip (IP is source of truth) ---
+                host_costs: dict[str, float] = {}  # hostid → cost
+                host_source: dict[str, str] = {}   # hostid → match method
 
                 for ip, cost in safe_ips.items():
-                    ip = ip.strip().replace("ip-", "")
-                    if ip in ip_to_host:
-                        h = ip_to_host[ip]
-                        if h["hostid"] not in matched_hids:
-                            matches.append((h["host"], h["hostid"], ip, cost))
-                            matched_hids.add(h["hostid"])
+                    ip = ip.strip()
+                    h = ip_to_host.get(ip)
+                    if h:
+                        hid = h["hostid"]
+                        host_costs[hid] = max(host_costs.get(hid, 0), cost)
+                        host_source[hid] = "ip"
+
+                # --- Pass 2-5: by_name (fill gaps, use max if IP already matched) ---
+                unmatched_names: dict[str, float] = {}
 
                 for name, cost in safe_names.items():
-                    h = name_to_host.get(name.lower())
-                    if h and h["hostid"] not in matched_hids:
-                        matches.append((h["host"], h["hostid"], "", cost))
-                        matched_hids.add(h["hostid"])
+                    name_lower = name.lower().strip()
+                    matched_host = None
 
-                total_safe = len(safe_ips) + len(safe_names)
-                if not matches:
-                    return f"No matches. Input: {total_safe} entries, Zabbix: {len(hosts)} hosts."
+                    # Pass 2: exact lowercase match
+                    if name_lower in name_to_host:
+                        matched_host = name_to_host[name_lower]
+
+                    # Pass 3: split on " - ", try last segment
+                    if not matched_host and " - " in name:
+                        segments = name.split(" - ")
+                        for seg in reversed(segments):
+                            seg_clean = seg.strip().lower()
+                            if seg_clean in name_to_host:
+                                matched_host = name_to_host[seg_clean]
+                                break
+
+                    # Pass 4: extract IP from name, match via interface
+                    if not matched_host:
+                        ip_match = _IP_RE.search(name)
+                        if ip_match:
+                            found_ip = ip_match.group(1)
+                            if found_ip in ip_to_host:
+                                matched_host = ip_to_host[found_ip]
+
+                    # Pass 5: prefix match (name is start of a Zabbix hostname)
+                    if not matched_host and len(name_lower) >= 4:
+                        for zname in name_list:
+                            if zname.startswith(name_lower) or name_lower.startswith(zname):
+                                matched_host = name_to_host[zname]
+                                break
+
+                    if matched_host:
+                        hid = matched_host["hostid"]
+                        # max(ip_cost, name_cost) when both exist
+                        host_costs[hid] = max(host_costs.get(hid, 0), cost)
+                        if hid not in host_source:
+                            host_source[hid] = "name"
+                    else:
+                        unmatched_names[name] = cost
+
+                # Build match list
+                host_map = {h["hostid"]: h for h in hosts}
+                matches = []
+                for hid, cost in host_costs.items():
+                    h = host_map.get(hid)
+                    if h:
+                        ip = host_ip(h)
+                        matches.append((h["host"], hid, ip or "", cost, host_source.get(hid, "?")))
+
+                ip_matches = sum(1 for s in host_source.values() if s == "ip")
+                name_matches = sum(1 for s in host_source.values() if s == "name")
+
+                # Export unmatched
+                if export_unmatched and unmatched_names:
+                    path = os.path.expanduser(export_unmatched)
+                    with open(path, "w") as f:
+                        json.dump(unmatched_names, f, indent=2, ensure_ascii=False)
 
                 if dry_run:
-                    lines = [f"**DRY RUN — {len(matches)} hosts matched** (of {total_safe} entries)\n"]
-                    lines.append("| Host | IP | $/mo |")
-                    lines.append("|------|-----|------|")
-                    total = 0.0
-                    for hostname, _hid, ip, cost in sorted(matches, key=lambda x: -x[3])[:30]:
-                        lines.append(f"| {hostname} | {ip or 'name match'} | ${cost:.2f} |")
-                        total += cost
-                    if len(matches) > 30:
-                        lines.append(f"| ... | {len(matches) - 30} more | |")
-                        total = sum(c for _, _, _, c in matches)
-                    lines.append(f"\n**Total: ${total:,.2f}/mo** (${total*12:,.2f}/yr)")
-                    lines.append(f"Skipped: {skipped_range} outside ${min_cost}-${max_cost} range")
-                    lines.append(f"Unmatched: {total_safe - len(matches)} entries not in Zabbix")
+                    total_cost = sum(c for _, _, _, c, _ in matches)
+                    lines = [
+                        f"**DRY RUN — {len(matches)} hosts matched**",
+                        f"By IP: {ip_matches} | By name: {name_matches}",
+                        f"Unmatched: {len(unmatched_names)} name entries",
+                        f"Skipped: {skipped_range} outside ${min_cost}-${max_cost}",
+                        f"**Total: ${total_cost:,.2f}/mo** (${total_cost*12:,.2f}/yr)\n",
+                    ]
+                    lines.append("| Host | Match | $/mo |")
+                    lines.append("|------|-------|------|")
+                    for hostname, _hid, _ip, cost, src in sorted(matches, key=lambda x: -x[3])[:25]:
+                        lines.append(f"| {hostname} | {src} | ${cost:.2f} |")
+                    if len(matches) > 25:
+                        lines.append(f"| ... | +{len(matches) - 25} more | |")
+                    if export_unmatched and unmatched_names:
+                        lines.append(f"\nUnmatched exported to `{export_unmatched}`")
                     lines.append("\nSet `dry_run=false` to apply.")
                     return "\n".join(lines)
 
-                # Get existing macros
+                # Apply: set {$COST_MONTH} macros
                 existing = await client.call("usermacro.get", {
                     "hostids": [m[1] for m in matches],
                     "output": ["hostmacroid", "hostid", "value"],
@@ -297,12 +376,9 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 })
                 existing_map = {m["hostid"]: m for m in existing}
 
-                created = 0
-                updated = 0
-                unchanged = 0
+                created = updated = unchanged = 0
                 errors = []
-
-                for hostname, hid, _ip, cost in matches:
+                for hostname, hid, _ip, cost, _src in matches:
                     cost_str = str(round(cost, 2))
                     try:
                         if hid in existing_map:
@@ -327,12 +403,17 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                         if len(errors) >= 10:
                             break
 
-                total = sum(c for _, _, _, c in matches)
+                total_cost = sum(c for _, _, _, c, _ in matches)
                 parts = [
                     f"**Cost import complete — {len(matches)} servers**",
+                    f"By IP: {ip_matches} | By name: {name_matches}",
                     f"Created: {created} | Updated: {updated} | Unchanged: {unchanged}",
-                    f"Total: ${total:,.2f}/mo (${total*12:,.2f}/yr)",
+                    f"Total: ${total_cost:,.2f}/mo (${total_cost*12:,.2f}/yr)",
                 ]
+                if unmatched_names:
+                    parts.append(f"Unmatched: {len(unmatched_names)} name entries")
+                if export_unmatched and unmatched_names:
+                    parts.append(f"Exported to `{export_unmatched}`")
                 if errors:
                     parts.append(f"Errors: {len(errors)}")
                 return "\n".join(parts)
