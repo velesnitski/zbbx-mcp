@@ -3,6 +3,10 @@
 from __future__ import annotations
 
 import socket
+import ssl
+import time as _time
+import urllib.request
+from datetime import datetime, timezone
 
 import httpx
 
@@ -17,6 +21,33 @@ def _resolve_domain(domain: str) -> tuple[str, str]:
         return ip, detect_provider(ip)
     except (socket.gaierror, OSError):
         return "", ""
+
+
+def _get_ssl_expiry(domain: str) -> tuple[int, str]:
+    """Get SSL certificate days until expiry and issuer. Returns (days, issuer)."""
+    try:
+        ctx = ssl.create_default_context()
+        with ctx.wrap_socket(socket.socket(), server_hostname=domain) as conn:
+            conn.settimeout(5)
+            conn.connect((domain, 443))
+            cert = conn.getpeercert()
+        expiry = datetime.strptime(cert["notAfter"], "%b %d %H:%M:%S %Y %Z").replace(tzinfo=timezone.utc)
+        days = (expiry - datetime.now(timezone.utc)).days
+        issuer_parts = dict(x[0] for x in cert.get("issuer", ()))
+        issuer = issuer_parts.get("organizationName", issuer_parts.get("commonName", "?"))
+        return days, issuer
+    except Exception:
+        return -1, ""
+
+
+def _get_response_time(domain: str) -> int:
+    """HTTPS response time in ms. Returns -1 on failure."""
+    try:
+        start = _time.monotonic()
+        urllib.request.urlopen(f"https://{domain}", timeout=5)  # noqa: S310
+        return round((_time.monotonic() - start) * 1000)
+    except Exception:
+        return -1
 
 # Item keys for domain health checks (configurable via env in future)
 _KEY_CERT = "web_cert_check.sh[{HOST.NAME}]"
@@ -86,10 +117,25 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 if not domains:
                     return "No domains match the filter."
 
-                # Build output
+                # Build output — resolve IP, SSL expiry, response time in parallel
+                import asyncio
+                loop = asyncio.get_event_loop()
+
                 rows = []
                 problems = 0
-                for name in sorted(domains):
+                domain_names = sorted(domains)
+
+                # Batch all DNS/SSL/HTTP lookups via thread pool
+                async def _enrich(name: str):
+                    ip, provider = await loop.run_in_executor(None, _resolve_domain, name)
+                    ssl_days, ssl_issuer = await loop.run_in_executor(None, _get_ssl_expiry, name)
+                    resp_ms = await loop.run_in_executor(None, _get_response_time, name)
+                    return name, ip, provider, ssl_days, ssl_issuer, resp_ms
+
+                enriched = await asyncio.gather(*[_enrich(n) for n in domain_names])
+                enrich_map = {e[0]: e[1:] for e in enriched}
+
+                for name in domain_names:
                     d = domains[name]
                     cert_ok = d["cert"] == 1
                     whois_ok = d["whois"] == 1
@@ -104,12 +150,12 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     whois_s = "OK" if whois_ok else ("EXPIRED" if d["whois"] == 0 else "N/A")
                     https_s = "UP" if https_ok else ("DOWN" if d["https"] == 0 else "N/A")
 
-                    # Resolve IP and provider (async-safe via thread)
-                    import asyncio
-                    loop = asyncio.get_event_loop()
-                    ip, provider = await loop.run_in_executor(None, _resolve_domain, name)
+                    ip, provider, ssl_days, ssl_issuer, resp_ms = enrich_map.get(name, ("", "", -1, "", -1))
+                    ssl_days_s = str(ssl_days) if ssl_days >= 0 else "N/A"
+                    resp_ms_s = f"{resp_ms}" if resp_ms >= 0 else "N/A"
+                    grp = d.get("groups", "")
 
-                    rows.append((name, cert_s, whois_s, https_s, ip, provider, d.get("groups", "")))
+                    rows.append((name, cert_s, whois_s, https_s, ip, provider, ssl_days_s, ssl_issuer, resp_ms_s, grp))
 
                 shown = rows[:max_results]
                 total = len(domains)
@@ -117,13 +163,12 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 if format == "csv":
                     import os
                     output_dir = os.path.expanduser("~/Downloads")
-                    from datetime import datetime, timezone
                     date_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
                     filepath = os.path.join(output_dir, f"domains-{date_str}.csv")
                     with open(filepath, "w") as f:
-                        f.write("Domain,SSL Cert,WHOIS,HTTPS,IP,Provider,Group\n")
-                        for name, cert, whois, https, ip, prov, grp in shown:
-                            f.write(f"{name},{cert},{whois},{https},{ip},{prov},{grp}\n")
+                        f.write("Domain,SSL Cert,WHOIS,HTTPS,IP,Provider,SSL Days Left,SSL Issuer,Response ms,Group\n")
+                        for r in shown:
+                            f.write(",".join(r) + "\n")
                     return f"**Exported {len(shown)} domains to `{filepath}`**\n{problems} with issues" if problems else f"**Exported {len(shown)} domains to `{filepath}`**\nAll healthy"
 
                 header = f"**Domain Status: {total} domains"
@@ -131,10 +176,12 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     header += f", {problems} with issues"
                 header += "**\n"
 
-                lines = [f"| {n} | {c} | {w} | {h} | {ip} | {p} |" for n, c, w, h, ip, p, _g in shown]
+                lines = []
+                for name, cert, whois, https, ip, prov, ssl_d, _ssl_i, resp, _g in shown:
+                    lines.append(f"| {name} | {cert} | {whois} | {https} | {ip} | {prov} | {ssl_d}d | {resp}ms |")
                 result = header + "\n".join([
-                    "| Domain | SSL | WHOIS | HTTPS | IP | Provider |",
-                    "|--------|-----|-------|-------|----|---------:|",
+                    "| Domain | SSL | WHOIS | HTTPS | IP | Provider | SSL Expiry | Response |",
+                    "|--------|-----|-------|-------|----|---------:|-----------|---------|",
                 ] + lines)
                 if len(rows) > max_results:
                     result += f"\n\n*{len(rows) - max_results} more omitted*"
