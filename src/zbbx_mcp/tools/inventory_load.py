@@ -629,3 +629,86 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()):
                 return "\n".join(lines)
             except (httpx.HTTPError, ValueError) as e:
                 return f"Error: {e}"
+
+    if "get_low_disk_servers" not in skip:
+
+        @mcp.tool()
+        async def get_low_disk_servers(
+            threshold: float = 70.0,
+            max_results: int = 30,
+            instance: str = "",
+        ) -> str:
+            """Find servers with low disk space across the fleet.
+
+            Args:
+                threshold: Disk usage % to flag (default: 70)
+                max_results: Maximum results (default: 30)
+                instance: Zabbix instance name (optional)
+            """
+            try:
+                client = resolver.resolve(instance)
+
+                # Get all disk utilization items in one call
+                items = await client.call("item.get", {
+                    "output": ["itemid", "hostid", "key_", "lastvalue", "name"],
+                    "search": {"key_": "vfs.fs.size"},
+                    "searchWildcardsEnabled": True,
+                    "filter": {"status": "0"},
+                })
+
+                # Group by host: pick the highest utilization per host
+                host_disk: dict[str, dict] = {}
+                for it in items:
+                    key = it.get("key_", "")
+                    if ",pused]" not in key:
+                        continue
+                    try:
+                        pct = float(it.get("lastvalue", 0))
+                    except (ValueError, TypeError):
+                        continue
+                    hid = it["hostid"]
+                    mount = key.split("[")[1].split(",")[0] if "[" in key else "/"
+                    if hid not in host_disk or pct > host_disk[hid]["pct"]:
+                        host_disk[hid] = {"pct": round(pct, 1), "mount": mount}
+
+                if not host_disk:
+                    return "No disk utilization data found."
+
+                flagged = [(hid, d) for hid, d in host_disk.items() if d["pct"] >= threshold]
+                flagged.sort(key=lambda x: -x[1]["pct"])
+
+                if not flagged:
+                    return f"No servers above {threshold}% disk usage."
+
+                hids = [hid for hid, _ in flagged[:max_results]]
+                hosts = await client.call("host.get", {
+                    "hostids": hids,
+                    "output": ["hostid", "host"],
+                    "selectGroups": ["name"],
+                    "selectInterfaces": ["ip"],
+                })
+                host_map = {h["hostid"]: h for h in hosts}
+
+                lines = [f"**{len(flagged)} servers above {threshold}% disk usage**\n"]
+                lines.append("| Host | Disk % | Mount | Product | Provider |")
+                lines.append("|------|--------|-------|---------|----------|")
+
+                for hid, d in flagged[:max_results]:
+                    h = host_map.get(hid, {})
+                    hostname = h.get("host", hid)
+                    prod, _ = _classify_host(h.get("groups", []))
+                    ip = ""
+                    for iface in h.get("interfaces", []):
+                        if iface.get("ip") and iface["ip"] != "127.0.0.1":
+                            ip = iface["ip"]
+                            break
+                    prov = detect_provider(ip) if ip else "?"
+                    tag = "CRITICAL" if d["pct"] >= 90 else "WARNING" if d["pct"] >= 80 else "ALERT"
+                    lines.append(f"| {hostname} | **{d['pct']}%** ({tag}) | {d['mount']} | {prod} | {prov} |")
+
+                if len(flagged) > max_results:
+                    lines.append(f"\n*{len(flagged) - max_results} more not shown*")
+
+                return "\n".join(lines)
+            except (httpx.HTTPError, ValueError) as e:
+                return f"Error: {e}"
