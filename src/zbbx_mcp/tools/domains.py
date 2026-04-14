@@ -20,6 +20,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
         async def get_domain_status(
             search: str = "",
             only_problems: bool = False,
+            format: str = "table",
             max_results: int = 50,
             instance: str = "",
         ) -> str:
@@ -28,6 +29,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
             Args:
                 search: Filter domains by name (optional)
                 only_problems: Show only domains with issues (default: False)
+                format: Output format: 'table' or 'csv' (default: table)
                 max_results: Maximum results (default: 50)
                 instance: Zabbix instance name (optional)
             """
@@ -45,11 +47,13 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 if not items:
                     return "No domain monitoring items found."
 
-                # Group by host
+                # Group by host (skip non-domain hostnames)
                 domains: dict[str, dict] = {}
                 for it in items:
                     host = it["hosts"][0] if it.get("hosts") else {}
                     hostname = host.get("host", "?")
+                    if "." not in hostname:
+                        continue  # not a real domain name
                     if search and search.lower() not in hostname.lower():
                         continue
                     d = domains.setdefault(hostname, {"cert": None, "whois": None, "https": None})
@@ -70,7 +74,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     return "No domains match the filter."
 
                 # Build output
-                lines = []
+                rows = []
                 problems = 0
                 for name in sorted(domains):
                     d = domains[name]
@@ -86,22 +90,35 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     cert_s = "OK" if cert_ok else ("EXPIRED" if d["cert"] == 0 else "N/A")
                     whois_s = "OK" if whois_ok else ("EXPIRED" if d["whois"] == 0 else "N/A")
                     https_s = "UP" if https_ok else ("DOWN" if d["https"] == 0 else "N/A")
+                    rows.append((name, cert_s, whois_s, https_s))
 
-                    lines.append(f"| {name} | {cert_s} | {whois_s} | {https_s} |")
-
-                shown = lines[:max_results]
+                shown = rows[:max_results]
                 total = len(domains)
+
+                if format == "csv":
+                    import os
+                    output_dir = os.path.expanduser("~/Downloads")
+                    from datetime import datetime, timezone
+                    date_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+                    filepath = os.path.join(output_dir, f"domains-{date_str}.csv")
+                    with open(filepath, "w") as f:
+                        f.write("Domain,SSL Cert,WHOIS,HTTPS\n")
+                        for name, cert, whois, https in shown:
+                            f.write(f"{name},{cert},{whois},{https}\n")
+                    return f"**Exported {len(shown)} domains to `{filepath}`**\n{problems} with issues" if problems else f"**Exported {len(shown)} domains to `{filepath}`**\nAll healthy"
+
                 header = f"**Domain Status: {total} domains"
                 if problems:
                     header += f", {problems} with issues"
                 header += "**\n"
 
+                lines = [f"| {n} | {c} | {w} | {h} |" for n, c, w, h in shown]
                 result = header + "\n".join([
                     "| Domain | SSL Cert | WHOIS | HTTPS |",
                     "|--------|---------|-------|-------|",
-                ] + shown)
-                if len(lines) > max_results:
-                    result += f"\n\n*{len(lines) - max_results} more omitted*"
+                ] + lines)
+                if len(rows) > max_results:
+                    result += f"\n\n*{len(rows) - max_results} more omitted*"
                 return result
             except (httpx.HTTPError, ValueError) as e:
                 return f"Error: {e}"
