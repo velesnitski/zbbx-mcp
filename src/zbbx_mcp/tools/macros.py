@@ -140,6 +140,111 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
             except (httpx.HTTPError, ValueError) as e:
                 return f"Error setting macro: {e}"
 
+    if "set_bulk_macro" not in skip:
+
+        @mcp.tool()
+        async def set_bulk_macro(
+            macro: str,
+            value: str,
+            group: str = "",
+            country: str = "",
+            min_traffic_mbps: float = 0,
+            dry_run: bool = True,
+            instance: str = "",
+        ) -> str:
+            """Set a macro on multiple hosts at once, filtered by group/country/traffic.
+
+            Args:
+                macro: Macro name (e.g. '{$BW_LIMIT}')
+                value: Macro value to set
+                group: Filter by Zabbix host group (optional)
+                country: Filter by country code (optional)
+                min_traffic_mbps: Only hosts with traffic above this (optional)
+                dry_run: Preview only, don't apply (default: True)
+                instance: Zabbix instance name (optional)
+            """
+            try:
+                client = resolver.resolve(instance)
+                from zbbx_mcp.data import (
+                    extract_country,
+                    fetch_enabled_hosts,
+                    fetch_traffic_map,
+                )
+
+                hosts = await fetch_enabled_hosts(client)
+
+                # Filter by group
+                if group:
+                    hosts = [h for h in hosts if any(
+                        g["name"].lower() == group.lower() for g in h.get("groups", [])
+                    )]
+
+                # Filter by country
+                if country:
+                    hosts = [h for h in hosts if extract_country(h["host"]).lower() == country.lower()]
+
+                # Filter by traffic
+                if min_traffic_mbps > 0:
+                    hids = [h["hostid"] for h in hosts]
+                    traffic_map = await fetch_traffic_map(client, hids)
+                    hosts = [h for h in hosts if traffic_map.get(h["hostid"], 0) >= min_traffic_mbps]
+
+                if not hosts:
+                    return "No hosts match the filters."
+
+                if dry_run:
+                    lines = [f"**Dry run:** would set `{macro}` = `{value}` on {len(hosts)} hosts\n"]
+                    lines.append("| Host | Host ID |")
+                    lines.append("|------|---------|")
+                    for h in hosts[:20]:
+                        lines.append(f"| {h['host']} | {h['hostid']} |")
+                    if len(hosts) > 20:
+                        lines.append(f"\n*+{len(hosts) - 20} more*")
+                    lines.append("\nRun with `dry_run=False` to apply.")
+                    return "\n".join(lines)
+
+                # Apply
+                import asyncio
+                updated = 0
+                created = 0
+                errors = 0
+
+                async def _set_one(h):
+                    nonlocal updated, created, errors
+                    hid = h["hostid"]
+                    try:
+                        existing = await client.call("usermacro.get", {
+                            "hostids": [hid],
+                            "filter": {"macro": macro},
+                            "output": ["hostmacroid"],
+                        })
+                        if existing:
+                            await client.call("usermacro.update", {
+                                "hostmacroid": existing[0]["hostmacroid"],
+                                "value": value,
+                            })
+                            updated += 1
+                        else:
+                            await client.call("usermacro.create", {
+                                "hostid": hid, "macro": macro, "value": value,
+                            })
+                            created += 1
+                    except Exception:
+                        errors += 1
+
+                # Batch in chunks of 20 to avoid overloading
+                chunk_size = 20
+                for i in range(0, len(hosts), chunk_size):
+                    chunk = hosts[i:i + chunk_size]
+                    await asyncio.gather(*[_set_one(h) for h in chunk])
+
+                return (
+                    f"**Bulk macro set:** `{macro}` = `{value}`\n"
+                    f"Updated: {updated} | Created: {created} | Errors: {errors} | Total: {len(hosts)}"
+                )
+            except (httpx.HTTPError, ValueError) as e:
+                return f"Error: {e}"
+
     if "delete_host_macro" not in skip:
 
         @mcp.tool()
