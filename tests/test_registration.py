@@ -172,6 +172,7 @@ EXPECTED_TOOLS = {
     "get_report_snapshot",
     "get_peak_analysis",
     "get_product_audit",
+    "get_predictive_alerts",
     # ceo_report.py
     "generate_ceo_report",
     # analysis.py
