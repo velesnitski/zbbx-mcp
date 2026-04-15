@@ -335,34 +335,32 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                                 break
 
                     # Pass 6: billing name translation
-                    # Billing uses reversed/different naming than Zabbix
+                    # Billing often uses reversed naming: cc+num+product → product+cc+num
                     if not matched_host:
                         candidates = []
-                        # ccXXX-srv-a -> srv-a-cc0XXX
-                        m = re.match(r"^([a-z]{2})(\d+)-srv-a$", name_lower)
+                        # Generic: ccNNN-suffix -> suffix-cc0NNN (reversed + zero-padded)
+                        m = re.match(r"^([a-z]{2})(\d+)-(.+)$", name_lower)
                         if m:
-                            cc, num = m.group(1), m.group(2)
-                            candidates.extend([f"srv-a-{cc}{num.zfill(4)}", f"srv-a-{cc}{num}"])
-                        # ccXXX-product1 -> srv-a-ccXXX or srv-b-ccXXX
-                        m = re.match(r"^([a-z]{2})(\d+)-product1$", name_lower)
+                            cc, num, suffix = m.group(1), m.group(2), m.group(3)
+                            candidates.extend([
+                                f"{suffix}-{cc}{num.zfill(4)}",
+                                f"{suffix}-{cc}{num}",
+                            ])
+                            # Also try common product prefixes
+                            for pfx in ["tier-a", "tier-b"]:
+                                candidates.extend([
+                                    f"{pfx}-{suffix}-{cc}{num.zfill(4)}",
+                                    f"{pfx}-{suffix}-{cc}{num}",
+                                ])
+                        # Product rename: old-product-name → current-product-name
+                        for old, new in [("legacy1", "product1"), ("proto1", "svc")]:
+                            if old in name_lower:
+                                candidates.append(name_lower.replace(old, new))
+                        # Prefix swap: alt-ccNNN-suffix -> alt-suffix-cc0NNN
+                        m = re.match(r"^(vl)-([a-z]{2})(\d+)-(.+)$", name_lower)
                         if m:
-                            cc, num = m.group(1), m.group(2)
-                            for pfx in ["srv-a", "srv-b"]:
-                                candidates.extend([f"{pfx}-{cc}{num.zfill(4)}", f"{pfx}-{cc}{num}"])
-                        # srv-d-ccXXXX -> srv-a-ccXXXX
-                        m = re.match(r"^srv-d-(.+)$", name_lower)
-                        if m:
-                            candidates.append(f"srv-a-{m.group(1)}")
-                        # alt-ccXXX-product1 -> alt-srv-a-ccXXX
-                        m = re.match(r"^alt-([a-z]{2})(\d+)-(tier-a|tier-b)-product1$", name_lower)
-                        if m:
-                            cc, num, tier = m.group(1), m.group(2), m.group(3)
-                            candidates.append(f"alt-{tier}-product1-{cc}{num.zfill(4)}")
-                        # ccXXX-srv-a-proxy -> srv-a-proxy-ccXXX
-                        m = re.match(r"^([a-z]{2})(\d+)-(tier-a|tier-b)-product1-proxy$", name_lower)
-                        if m:
-                            cc, num, tier = m.group(1), m.group(2), m.group(3)
-                            candidates.append(f"{tier}-product1-proxy-{cc}{num}")
+                            pfx, cc, num, suffix = m.group(1), m.group(2), m.group(3), m.group(4)
+                            candidates.append(f"{pfx}-{suffix}-{cc}{num.zfill(4)}")
 
                         for cand in candidates:
                             if cand in name_to_host:
