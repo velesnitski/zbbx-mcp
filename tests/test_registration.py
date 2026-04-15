@@ -75,6 +75,7 @@ EXPECTED_TOOLS = {
     "get_expansion_report",
     "get_regional_density_map",
     "get_latency_estimate",
+    "get_servers_by_ping",
     # availability.py
     "get_host_availability",
     "get_recent_changes",
