@@ -138,6 +138,7 @@ get_traffic_report(country="us")
 | `ZABBIX_CONNECTIONS_KEY` | No | Zabbix item key for connection count metric |
 | `ZABBIX_TRAFFIC_UNIT` | No | Set to `bytes` if Zabbix `net.if.in` returns bytes/sec instead of bits/sec. Default: bits/sec |
 | `ZABBIX_HIDE_PRODUCTS` | No | Comma-separated product names to hide from all reports |
+| `ZABBIX_BILLING_RENAMES` | No | Billing-to-Zabbix name translations for cost import (format: `old1:new1,old2:new2`) |
 | `ZABBIX_LOG_FILE` | No | Error log path (default: `~/.zbbx-mcp/zbbx-mcp.log`) |
 | `ZABBIX_ANALYTICS_FILE` | No | Analytics log path (default: `~/.zbbx-mcp/analytics.log`) |
 
