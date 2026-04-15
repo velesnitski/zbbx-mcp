@@ -469,3 +469,79 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 return "\n".join(lines)
             except (httpx.HTTPError, ValueError) as e:
                 return f"Error: {e}"
+
+    if "get_servers_by_ping" not in skip:
+
+        @mcp.tool()
+        async def get_servers_by_ping(
+            client_country: str = "",
+            product: str = "",
+            max_results: int = 20,
+            instance: str = "",
+        ) -> str:
+            """List servers sorted by estimated latency from a client country.
+
+            Args:
+                client_country: 2-letter country code (required)
+                product: Product name filter (optional)
+                max_results: Max servers (default: 20)
+                instance: Zabbix instance (optional)
+            """
+            def _haversine(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+                R = 6371
+                dlat, dlon = math.radians(lat2 - lat1), math.radians(lon2 - lon1)
+                a = math.sin(dlat/2)**2 + math.cos(math.radians(lat1)) * math.cos(math.radians(lat2)) * math.sin(dlon/2)**2
+                return R * 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+
+            if not client_country:
+                return "client_country is required (2-letter code)."
+
+            cc = client_country.upper()
+            if cc not in CAPITAL_COORDS:
+                return f"Unknown country '{cc}'."
+
+            try:
+                client_inst = resolver.resolve(instance)
+                hosts = await fetch_enabled_hosts(client_inst)
+                all_ids = [h["hostid"] for h in hosts]
+                traffic_map = await fetch_traffic_map(client_inst, all_ids)
+
+                client_lat, client_lon = CAPITAL_COORDS[cc]
+                servers = []
+                for h in hosts:
+                    if product:
+                        prod, _ = _classify_host(h.get("groups", []))
+                        if not prod or product.lower() not in prod.lower():
+                            continue
+                    srv_cc = extract_country(h["host"])
+                    if not srv_cc or srv_cc not in CAPITAL_COORDS:
+                        continue
+                    srv_lat, srv_lon = CAPITAL_COORDS[srv_cc]
+                    dist = _haversine(client_lat, client_lon, srv_lat, srv_lon)
+                    est_ms = round(dist * 6 / 1000)
+                    traffic = traffic_map.get(h["hostid"], 0)
+                    servers.append({
+                        "host": h["host"], "cc": srv_cc,
+                        "km": round(dist), "ms": est_ms,
+                        "traffic": round(traffic, 1),
+                    })
+
+                servers.sort(key=lambda x: x["km"])
+                shown = servers[:max_results]
+
+                if not shown:
+                    return "No servers found."
+
+                lines = [f"**Nearest servers for {cc}** ({len(servers)} total)\n"]
+                lines.append("| Server | Country | Distance | Est. Latency | Traffic Mbps |")
+                lines.append("|--------|---------|----------|-------------|-------------|")
+                for s in shown:
+                    lines.append(
+                        f"| {s['host']} | {s['cc']} | {s['km']:,} km | ~{s['ms']} ms | {s['traffic']} |"
+                    )
+                if len(servers) > max_results:
+                    lines.append(f"\n*{len(servers) - max_results} more omitted*")
+
+                return "\n".join(lines)
+            except (httpx.HTTPError, ValueError) as e:
+                return f"Error: {e}"

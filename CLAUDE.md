@@ -4,7 +4,7 @@ Instructions for Claude Code when working in this repository.
 
 ## Project
 
-Zabbix MCP server — 121 tools across 42 modules. Python 3.10+, FastMCP framework, async httpx HTTP/2 client.
+Zabbix MCP server — 127 tools across 43 modules. Python 3.10+, FastMCP framework, async httpx HTTP/2 client.
 
 ## Commands
 
@@ -22,8 +22,12 @@ uv run pytest -k "test_name"               # single test by name
 - `src/zbbx_mcp/config.py` — env var loading, multi-instance config
 - `src/zbbx_mcp/data.py` — shared data fetching, `ServerRow`, `extract_country()`, metric key constants
 - `src/zbbx_mcp/classify.py` — standalone host classification (no tools/ imports)
-- `src/zbbx_mcp/tools/*.py` — each file exports `register(mcp, resolver, skip)`
+- `src/zbbx_mcp/fetch.py` — shared fetch helpers (`fetch_traffic_map`, `fetch_cpu_map`, `fetch_enabled_hosts`)
+- `src/zbbx_mcp/tools/*.py` — 43 tool modules, each exports `register(mcp, resolver, skip)`
 - `src/zbbx_mcp/tools/__init__.py` — `register_all()`, `WRITE_TOOLS` set
+- `src/zbbx_mcp/tools/ceo_report.py` — full CEO HTML report with all analytics sections
+- `src/zbbx_mcp/tools/geo_health.py` — geo monitoring: uptime, health matrix, latency, ping estimation
+- `src/zbbx_mcp/tools/costs.py` — cost import with 7-pass fuzzy matching + billing name translation
 
 ## Adding a new tool
 
