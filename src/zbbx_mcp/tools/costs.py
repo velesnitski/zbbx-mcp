@@ -207,11 +207,9 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
             export_unmatched: str = "",
             instance: str = "",
         ) -> str:
-            """Smart cost import: match by IP, partial /24, then hostname (6-pass fuzzy).
+            """Smart cost import: match by IP, then hostname (7-pass fuzzy).
 
-            Reads a JSON file with "by_ip" and/or "by_name" sections.
-            IP matches win. Supports partial IPs (3 octets → /24 prefix match).
-            Name matching: exact → split-on-dash → IP-in-name → prefix → contains.
+            Name matching: exact → split-on-dash → IP-in-name → prefix → contains → billing name translation.
 
             Args:
                 file_path: Path to JSON cost file (preferred over costs_json)
@@ -336,6 +334,42 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                                 matched_host = name_to_host[zname]
                                 break
 
+                    # Pass 6: billing name translation
+                    # Billing uses reversed/different naming than Zabbix
+                    if not matched_host:
+                        candidates = []
+                        # ccXXX-srv-a -> srv-a-cc0XXX
+                        m = re.match(r"^([a-z]{2})(\d+)-srv-a$", name_lower)
+                        if m:
+                            cc, num = m.group(1), m.group(2)
+                            candidates.extend([f"srv-a-{cc}{num.zfill(4)}", f"srv-a-{cc}{num}"])
+                        # ccXXX-product1 -> srv-a-ccXXX or srv-b-ccXXX
+                        m = re.match(r"^([a-z]{2})(\d+)-product1$", name_lower)
+                        if m:
+                            cc, num = m.group(1), m.group(2)
+                            for pfx in ["srv-a", "srv-b"]:
+                                candidates.extend([f"{pfx}-{cc}{num.zfill(4)}", f"{pfx}-{cc}{num}"])
+                        # srv-d-ccXXXX -> srv-a-ccXXXX
+                        m = re.match(r"^srv-d-(.+)$", name_lower)
+                        if m:
+                            candidates.append(f"srv-a-{m.group(1)}")
+                        # alt-ccXXX-product1 -> alt-srv-a-ccXXX
+                        m = re.match(r"^alt-([a-z]{2})(\d+)-(tier-a|tier-b)-product1$", name_lower)
+                        if m:
+                            cc, num, tier = m.group(1), m.group(2), m.group(3)
+                            candidates.append(f"alt-{tier}-product1-{cc}{num.zfill(4)}")
+                        # ccXXX-srv-a-proxy -> srv-a-proxy-ccXXX
+                        m = re.match(r"^([a-z]{2})(\d+)-(tier-a|tier-b)-product1-proxy$", name_lower)
+                        if m:
+                            cc, num, tier = m.group(1), m.group(2), m.group(3)
+                            candidates.append(f"{tier}-product1-proxy-{cc}{num}")
+
+                        for cand in candidates:
+                            if cand in name_to_host:
+                                matched_host = name_to_host[cand]
+                                host_source[matched_host["hostid"]] = "translated"
+                                break
+
                     if matched_host:
                         hid = matched_host["hostid"]
                         # max(ip_cost, name_cost) when both exist
@@ -357,6 +391,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 ip_matches = sum(1 for s in host_source.values() if s == "ip")
                 ip24_matches = sum(1 for s in host_source.values() if s == "ip/24")
                 name_matches = sum(1 for s in host_source.values() if s == "name")
+                translated_matches = sum(1 for s in host_source.values() if s == "translated")
 
                 # Export unmatched
                 if export_unmatched and unmatched_names:
@@ -368,7 +403,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     total_cost = sum(c for _, _, _, c, _ in matches)
                     lines = [
                         f"**DRY RUN — {len(matches)} hosts matched**",
-                        f"By IP: {ip_matches} | By /24: {ip24_matches} | By name: {name_matches}",
+                        f"By IP: {ip_matches} | By /24: {ip24_matches} | By name: {name_matches} | Translated: {translated_matches}",
                         f"Unmatched: {len(unmatched_names)} name entries",
                         f"Skipped: {skipped_range} outside ${min_cost}-${max_cost}",
                         f"**Total: ${total_cost:,.2f}/mo** (${total_cost*12:,.2f}/yr)\n",
