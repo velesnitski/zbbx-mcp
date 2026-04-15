@@ -207,11 +207,11 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
             export_unmatched: str = "",
             instance: str = "",
         ) -> str:
-            """Smart cost import: match by IP first, then hostname (5-pass fuzzy).
+            """Smart cost import: match by IP, partial /24, then hostname (6-pass fuzzy).
 
             Reads a JSON file with "by_ip" and/or "by_name" sections.
-            IP matches win. Name matching uses: exact → split-on-dash → IP-in-name
-            → prefix → contains. max(ip_cost, name_cost) when both match.
+            IP matches win. Supports partial IPs (3 octets → /24 prefix match).
+            Name matching: exact → split-on-dash → IP-in-name → prefix → contains.
 
             Args:
                 file_path: Path to JSON cost file (preferred over costs_json)
@@ -286,6 +286,21 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                         host_costs[hid] = max(host_costs.get(hid, 0), cost)
                         host_source[hid] = "ip"
 
+                # --- Pass 1b: partial IP /24 prefix match (3-octet IPs) ---
+                # Matches "x.y.z" against hosts with IP "x.y.z.*"
+                # Runtime only — no IPs stored in code
+                for ip_key, cost in safe_ips.items():
+                    ip_key = ip_key.strip()
+                    parts = ip_key.split(".")
+                    if len(parts) == 3:
+                        prefix = ip_key + "."
+                        for full_ip, h in ip_to_host.items():
+                            if full_ip.startswith(prefix):
+                                hid = h["hostid"]
+                                if hid not in host_costs or cost > host_costs[hid]:
+                                    host_costs[hid] = cost
+                                    host_source[hid] = "ip/24"
+
                 # --- Pass 2-5: by_name (fill gaps, use max if IP already matched) ---
                 unmatched_names: dict[str, float] = {}
 
@@ -340,6 +355,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                         matches.append((h["host"], hid, ip or "", cost, host_source.get(hid, "?")))
 
                 ip_matches = sum(1 for s in host_source.values() if s == "ip")
+                ip24_matches = sum(1 for s in host_source.values() if s == "ip/24")
                 name_matches = sum(1 for s in host_source.values() if s == "name")
 
                 # Export unmatched
@@ -352,7 +368,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     total_cost = sum(c for _, _, _, c, _ in matches)
                     lines = [
                         f"**DRY RUN — {len(matches)} hosts matched**",
-                        f"By IP: {ip_matches} | By name: {name_matches}",
+                        f"By IP: {ip_matches} | By /24: {ip24_matches} | By name: {name_matches}",
                         f"Unmatched: {len(unmatched_names)} name entries",
                         f"Skipped: {skipped_range} outside ${min_cost}-${max_cost}",
                         f"**Total: ${total_cost:,.2f}/mo** (${total_cost*12:,.2f}/yr)\n",
