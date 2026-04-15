@@ -335,10 +335,10 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                                 break
 
                     # Pass 6: billing name translation
-                    # Billing often uses reversed naming: cc+num+product → product+cc+num
+                    # Billing often uses reversed naming: cc+num+suffix → suffix-cc+num
                     if not matched_host:
                         candidates = []
-                        # Generic: ccNNN-suffix -> suffix-cc0NNN (reversed + zero-padded)
+                        # Reverse: ccNNN-suffix -> suffix-cc0NNN
                         m = re.match(r"^([a-z]{2})(\d+)-(.+)$", name_lower)
                         if m:
                             cc, num, suffix = m.group(1), m.group(2), m.group(3)
@@ -346,21 +346,20 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                                 f"{suffix}-{cc}{num.zfill(4)}",
                                 f"{suffix}-{cc}{num}",
                             ])
-                            # Also try common product prefixes
-                            for pfx in ["free", "prem"]:
-                                candidates.extend([
-                                    f"{pfx}-{suffix}-{cc}{num.zfill(4)}",
-                                    f"{pfx}-{suffix}-{cc}{num}",
-                                ])
-                        # Product rename: old-product-name → current-product-name
-                        for old, new in [("legacy1", "product1"), ("proto1", "vpn")]:
-                            if old in name_lower:
-                                candidates.append(name_lower.replace(old, new))
-                        # Prefix swap: vl-ccNNN-suffix -> vl-suffix-cc0NNN
-                        m = re.match(r"^(vl)-([a-z]{2})(\d+)-(.+)$", name_lower)
+                        # Prefix swap: pfx-ccNNN-suffix -> pfx-suffix-cc0NNN
+                        m = re.match(r"^([a-z]{2,4})-([a-z]{2})(\d+)-(.+)$", name_lower)
                         if m:
                             pfx, cc, num, suffix = m.group(1), m.group(2), m.group(3), m.group(4)
                             candidates.append(f"{pfx}-{suffix}-{cc}{num.zfill(4)}")
+                        # Configurable renames via env var
+                        # ZABBIX_BILLING_RENAMES="old1:new1,old2:new2"
+                        renames_raw = os.environ.get("ZABBIX_BILLING_RENAMES", "")
+                        if renames_raw:
+                            for pair in renames_raw.split(","):
+                                if ":" in pair:
+                                    old, new = pair.strip().split(":", 1)
+                                    if old in name_lower:
+                                        candidates.append(name_lower.replace(old, new))
 
                         for cand in candidates:
                             if cand in name_to_host:
