@@ -146,6 +146,8 @@ EXPECTED_TOOLS = {
     "import_costs_by_ip",
     "set_bulk_cost",
     "get_cost_summary",
+    "get_cost_gaps",
+    "get_cost_efficiency",
     # traffic.py
     "detect_traffic_anomalies",
     "get_traffic_report",
