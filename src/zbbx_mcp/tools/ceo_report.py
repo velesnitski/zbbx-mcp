@@ -122,10 +122,23 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     rows, _ = await fetch_trends_batch(client, chunk, ["traffic"], period)
                     trend_rows.extend(rows)
 
-                traffic_map, cpu_map = await asyncio.gather(
+                traffic_map, cpu_map, cost_macros = await asyncio.gather(
                     fetch_traffic_map(client, all_ids),
                     fetch_cpu_map(client, all_ids),
+                    client.call("usermacro.get", {
+                        "hostids": all_ids,
+                        "output": ["hostid", "macro", "value"],
+                        "filter": {"macro": ["{$COST_MONTH}"]},
+                    }),
                 )
+                cost_map: dict[str, float] = {}
+                for m in cost_macros:
+                    try:
+                        val = float(m.get("value", 0))
+                        if val > 0:
+                            cost_map[m["hostid"]] = val
+                    except (ValueError, TypeError):
+                        pass
 
                 # service check (all configured protocols)
                 from zbbx_mcp.data import fetch_service_status
@@ -223,7 +236,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                         cd["trend"] = "rising"
                     elif (change <= -10 and cd["trend"] == "rising") or (change > 0 and cd["trend"] == "dropping"):
                         cd["trend"] = "stable"
-                    if cd["traffic_gbps"] < 0.01 and avg_gbps > 0.05:
+                    if cd["traffic_gbps"] < 0.01 and avg_gbps > 0.5:
                         cd["trend"] = "dead"
 
                 sorted_countries = sorted(country_data.items(), key=lambda x: -x[1]["traffic_gbps"])
@@ -396,6 +409,95 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     tier_str = " &bull; ".join(f"{t}: {c}" for t, c in sorted(pc["tiers"].items(), key=lambda x: -x[1]))
                     html.append(_card(prod, str(pc["total"]), tier_str))
                 html.append('</div></div>')
+
+                # --- Cost Analysis ---
+                if cost_map:
+                    total_monthly = sum(cost_map.values())
+                    total_annual = total_monthly * 12
+                    avg_per_server = total_monthly / len(cost_map) if cost_map else 0
+                    hosts_without_cost = [h for h in hosts if h["hostid"] not in cost_map
+                                          and _classify_host(h.get("groups", []))[0] not in _NON_service]
+                    cost_coverage = round(len(cost_map) / total_servers * 100, 1)
+
+                    html.append('<div class="section"><h2>Cost Analysis</h2>')
+                    html.append(f'<div class="desc">{len(cost_map)} of {total_servers} servers have cost data ({cost_coverage}% coverage)</div>')
+                    html.append('<div class="grid-3">')
+                    html.append(_card("Monthly Cost", f"${total_monthly:,.0f}", f"${total_annual:,.0f}/year"))
+                    html.append(_card("Avg per Server", f"${avg_per_server:.0f}", f"across {len(cost_map)} priced servers"))
+                    html.append(_card("Cost Gap", f"{len(hosts_without_cost)}", "servers without cost macro"))
+                    html.append('</div>')
+
+                    # Cost by Country with $/Gbps efficiency
+                    cc_cost: dict[str, dict] = {}
+                    for h in hosts:
+                        hid = h["hostid"]
+                        if hid not in cost_map:
+                            continue
+                        cc = extract_country(h.get("host", ""))
+                        if not cc:
+                            continue
+                        entry = cc_cost.setdefault(cc, {"cost": 0, "traffic": 0, "count": 0})
+                        entry["cost"] += cost_map[hid]
+                        entry["traffic"] += traffic_map.get(hid, 0)
+                        entry["count"] += 1
+
+                    if cc_cost:
+                        html.append('<h3>Cost by Country</h3>')
+                        html.append('<table><thead><tr><th>Country</th><th class="num">Servers</th><th class="num">Monthly $</th><th class="num">Traffic Mbps</th><th class="num">$/Gbps</th><th>Efficiency</th></tr></thead><tbody>')
+                        for cc, d in sorted(cc_cost.items(), key=lambda x: -x[1]["cost"])[:15]:
+                            name = _COUNTRY_NAMES.get(cc, cc)
+                            gbps = d["traffic"] / 1000
+                            per_gbps = d["cost"] / gbps if gbps > 0.01 else 0
+                            if gbps < 0.01:
+                                eff_badge = _badge("warning", "NO TRAFFIC")
+                            elif per_gbps > 500:
+                                eff_badge = _badge("critical", "POOR")
+                            elif per_gbps > 200:
+                                eff_badge = _badge("warning", "AVG")
+                            else:
+                                eff_badge = _badge("ok", "GOOD")
+                            html.append(
+                                f'<tr><td>{name}</td><td class="num">{d["count"]}</td>'
+                                f'<td class="num">${d["cost"]:,.0f}</td>'
+                                f'<td class="num">{d["traffic"]:,.0f}</td>'
+                                f'<td class="num">${per_gbps:,.0f}</td><td>{eff_badge}</td></tr>'
+                            )
+                        html.append('</tbody></table>')
+
+                    # Waste: high cost + low traffic
+                    waste = []
+                    for h in hosts:
+                        hid = h["hostid"]
+                        cost = cost_map.get(hid, 0)
+                        traffic = traffic_map.get(hid, 0)
+                        if cost > 50 and traffic < 1:
+                            prod, _ = _classify_host(h.get("groups", []))
+                            waste.append((h["host"], prod, cost, traffic))
+                    if waste:
+                        waste.sort(key=lambda x: -x[2])
+                        total_waste = sum(w[2] for w in waste)
+                        html.append(f'<h3>Waste Detection &mdash; {len(waste)} servers, ${total_waste:,.0f}/mo</h3>')
+                        html.append('<div class="desc">Cost &gt; $50 but traffic &lt; 1 Mbps &mdash; candidates for shutdown</div>')
+                        html.append('<table><thead><tr><th>Server</th><th>Product</th><th class="num">Monthly $</th><th class="num">Traffic Mbps</th></tr></thead><tbody>')
+                        for hostname, prod, cost, traffic in waste[:10]:
+                            html.append(f'<tr><td>{hostname}</td><td>{prod or "—"}</td><td class="num">${cost:,.0f}</td><td class="num">{traffic:.2f}</td></tr>')
+                        if len(waste) > 10:
+                            html.append(f'<tr><td colspan="4" style="color:#9ca3af;font-size:11px">+ {len(waste)-10} more not shown</td></tr>')
+                        html.append('</tbody></table>')
+
+                    # Cost gaps by product
+                    if hosts_without_cost:
+                        gap_by_prod: dict[str, int] = {}
+                        for h in hosts_without_cost:
+                            prod, _ = _classify_host(h.get("groups", []))
+                            gap_by_prod[prod or "Unknown"] = gap_by_prod.get(prod or "Unknown", 0) + 1
+                        html.append(f'<h3>Cost Gaps by Product &mdash; {len(hosts_without_cost)} servers</h3>')
+                        html.append('<div class="desc">Need cost data imported for ROI analysis</div>')
+                        html.append('<table><thead><tr><th>Product</th><th class="num">Servers without cost</th></tr></thead><tbody>')
+                        for prod, cnt in sorted(gap_by_prod.items(), key=lambda x: -x[1])[:10]:
+                            html.append(f'<tr><td>{prod}</td><td class="num">{cnt}</td></tr>')
+                        html.append('</tbody></table>')
+                    html.append('</div>')
 
                 dead_servers = []
                 broken_servers = []

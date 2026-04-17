@@ -2,6 +2,7 @@ import time as _time
 
 import httpx
 
+from zbbx_mcp.data import fetch_traffic_map
 from zbbx_mcp.resolver import InstanceResolver
 
 
@@ -54,6 +55,8 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 })
 
                 ping_map = {it["hostid"]: it for it in items}
+                # Fetch traffic to filter false positives — server with traffic is alive
+                traffic_map = await fetch_traffic_map(client, [h["hostid"] for h in hosts])
                 now = int(_time.time())
                 unreachable = []
 
@@ -66,6 +69,9 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                         val = int(float(ping.get("lastvalue", "0")))
                         last = int(ping.get("lastclock", "0"))
                     except (ValueError, TypeError):
+                        continue
+                    # Skip hosts with real traffic — agent.ping may be deprecated there
+                    if traffic_map.get(hid, 0) >= 5:
                         continue
                     stale_hours = round((now - last) / 3600, 1) if last > 0 else 0
                     if val != 1 or stale_hours > 1:
