@@ -144,6 +144,7 @@ EXPECTED_TOOLS = {
     # costs.py
     "import_server_costs",
     "import_costs_by_ip",
+    "import_cluster_ip_fees",
     "analyze_cost_import",
     "set_bulk_cost",
     "get_cost_summary",
