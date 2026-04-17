@@ -157,17 +157,41 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                             lines.append("Likely monitoring-side issue (check script, DNS, proxy) rather than real service failure.")
                             lines.append("Verify by checking traffic on affected hosts — if traffic is normal, alert is noise.\n")
 
-                # Top problems
-                lines.append("| Severity | Host | Problem |")
-                lines.append("|----------|------|---------|")
-                for p in problems[:max_results]:
-                    sev = _SEV.get(int(p.get("severity", 0)), "?")
+                # Group correlated problems: same (name, severity) across 5+ hosts = 1 entry
+                grouped: dict[tuple, list] = {}
+                for p in problems:
+                    sev_int = int(p.get("severity", 0))
+                    name = p.get("name", "?")
                     host = p["hosts"][0]["host"] if p.get("hosts") else "?"
-                    name = p.get("name", "?")[:80]
+                    key = (sev_int, name)
+                    grouped.setdefault(key, []).append(host)
+
+                # Flatten: singles + groups
+                display = []
+                for (sev_int, name), hosts_list in grouped.items():
+                    sev = _SEV.get(sev_int, "?")
+                    if len(hosts_list) >= 5:
+                        # Cluster: show count + sample hosts
+                        sample = ", ".join(hosts_list[:3])
+                        display.append((sev_int, sev, f"{len(hosts_list)} hosts", f"{name[:80]} — {sample}{'...' if len(hosts_list) > 3 else ''}", len(hosts_list)))
+                    else:
+                        for h in hosts_list:
+                            display.append((sev_int, sev, h, name[:80], 1))
+
+                display.sort(key=lambda x: (-x[0], -x[4]))
+                raw_count = len(problems)
+                grouped_count = sum(1 for d in display if d[4] >= 5)
+                collapsed = raw_count - len(display)
+
+                lines.append("| Severity | Host(s) | Problem |")
+                lines.append("|----------|---------|---------|")
+                for _sev_int, sev, host, name, _cnt in display[:max_results]:
                     lines.append(f"| {sev} | {host} | {name} |")
 
-                if len(problems) > max_results:
-                    lines.append(f"\n*{len(problems) - max_results} more omitted*")
+                if grouped_count:
+                    lines.append(f"\n*{grouped_count} cluster incidents collapsed from {collapsed} individual problems*")
+                if len(display) > max_results:
+                    lines.append(f"*{len(display) - max_results} more omitted*")
                 return "\n".join(lines)
             except (httpx.HTTPError, ValueError) as e:
                 return f"Error: {e}"

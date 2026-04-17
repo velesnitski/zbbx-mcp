@@ -917,10 +917,30 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 if not alerts:
                     return f"No predicted issues within {days_ahead} days."
 
-                alerts.sort(key=lambda a: a["days_raw"])
-                shown = alerts[:max_results]
+                # Collapse cluster duplicates: same base hostname + metric + near-identical
+                # current/rate values. Cluster secondaries (e.g. "srv-us165 us167") share
+                # underlying hardware and produce identical trend data.
+                raw_count = len(alerts)
+                groups: dict[str, list] = {}
+                for a in alerts:
+                    base = a["host"].split()[0]
+                    key = f"{base}|{a['label']}|{a['current']}|{a['rate']}"
+                    groups.setdefault(key, []).append(a)
 
-                lines = [f"**{len(alerts)} predicted issues** (next {days_ahead} days)\n"]
+                deduped = []
+                for _key, members in groups.items():
+                    rep = members[0]
+                    if len(members) > 1:
+                        names = [m["host"].split()[-1] for m in members[1:]]
+                        rep = {**rep, "host": f"{rep['host']} (+{len(members) - 1}: {', '.join(names[:3])})"}
+                    deduped.append(rep)
+
+                deduped.sort(key=lambda a: a["days_raw"])
+                shown = deduped[:max_results]
+                collapsed = raw_count - len(deduped)
+
+                header_suffix = f" ({collapsed} cluster duplicates collapsed)" if collapsed else ""
+                lines = [f"**{len(deduped)} predicted issues**{header_suffix} (next {days_ahead} days)\n"]
                 lines.append("| Severity | Issue | Server | Current | Rate | Days Left |")
                 lines.append("|----------|-------|--------|---------|------|----------|")
                 for a in shown:
@@ -930,14 +950,14 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                         f"{a['current']} | {a['rate']} | {a['days']} |"
                     )
 
-                crit = sum(1 for a in alerts if a["severity"] == "CRITICAL")
-                warn = sum(1 for a in alerts if a["severity"] == "WARNING")
+                crit = sum(1 for a in deduped if a["severity"] == "CRITICAL")
+                warn = sum(1 for a in deduped if a["severity"] == "WARNING")
                 if crit:
                     lines.append(f"\n**{crit} CRITICAL** — action needed this week")
                 if warn:
                     lines.append(f"**{warn} WARNING** — action needed within 2 weeks")
-                if len(alerts) > max_results:
-                    lines.append(f"*{len(alerts) - max_results} more omitted*")
+                if len(deduped) > max_results:
+                    lines.append(f"*{len(deduped) - max_results} more omitted*")
 
                 return "\n".join(lines)
             except (httpx.HTTPError, ValueError) as e:
