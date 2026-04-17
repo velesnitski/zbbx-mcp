@@ -487,6 +487,142 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
             except (httpx.HTTPError, ValueError) as e:
                 return f"Error: {e}"
 
+    if "import_cluster_ip_fees" not in skip:
+
+        @mcp.tool()
+        async def import_cluster_ip_fees(
+            file_path: str = "",
+            fees_json: str = "",
+            dry_run: bool = True,
+            instance: str = "",
+        ) -> str:
+            """Add extra-IP billing fees to cluster primary {$COST_MONTH} macros.
+
+            For each entry, finds the Zabbix host by name, reads the existing
+            {$COST_MONTH}, adds the extra_cost_month, and writes back with an
+            audit description ("base X + N extra IPs (Y)").
+
+            Input format: list of {"cluster": str, "extra_ips": [str], "extra_cost_month": float}
+
+            Args:
+                file_path: Path to JSON file with cluster fee entries (optional)
+                fees_json: Inline JSON (optional; use this OR file_path)
+                dry_run: Preview changes without applying (default: True)
+                instance: Zabbix instance (optional)
+            """
+            try:
+                client = resolver.resolve(instance)
+
+                # Parse input
+                if file_path:
+                    with open(os.path.expanduser(file_path)) as f:
+                        data = json.load(f)
+                elif fees_json:
+                    data = json.loads(fees_json)
+                else:
+                    return "Provide either file_path or fees_json."
+
+                if not isinstance(data, list):
+                    return "Expected JSON array of {cluster, extra_ips, extra_cost_month}."
+
+                # Batch lookup: all cluster names in one host.get call
+                host_names = [e.get("cluster", "") for e in data if e.get("cluster")]
+                if not host_names:
+                    return "No cluster names in input."
+
+                hosts = await client.call("host.get", {
+                    "output": ["hostid", "host"],
+                    "filter": {"host": host_names},
+                    "selectMacros": ["hostmacroid", "macro", "value"],
+                })
+                host_by_name = {h["host"]: h for h in hosts}
+
+                # Build update plan
+                updates = []
+                missing = []
+                for entry in data:
+                    name = entry.get("cluster", "")
+                    extras = float(entry.get("extra_cost_month", 0))
+                    ip_count = len(entry.get("extra_ips", []))
+                    if not name or extras <= 0:
+                        continue
+                    h = host_by_name.get(name)
+                    if not h:
+                        missing.append(name)
+                        continue
+
+                    existing_macro = None
+                    current = 0.0
+                    for m in h.get("macros", []):
+                        if m["macro"] == "{$COST_MONTH}":
+                            existing_macro = m
+                            try:
+                                current = float(m["value"])
+                            except (ValueError, TypeError):
+                                current = 0.0
+                            break
+
+                    new_val = round(current + extras, 2)
+                    desc = f"base {current:.2f} + {ip_count} extra IP{'s' if ip_count > 1 else ''} ({extras:.2f})"
+                    updates.append({
+                        "hostid": h["hostid"],
+                        "host": name,
+                        "macroid": existing_macro["hostmacroid"] if existing_macro else None,
+                        "current": current,
+                        "extras": extras,
+                        "new": new_val,
+                        "desc": desc,
+                    })
+
+                # Build response
+                total_delta = sum(u["extras"] for u in updates)
+                header = f"**Cluster IP fees import** — {len(updates)} clusters, ${total_delta:,.2f}/mo added"
+                if missing:
+                    header += f" ({len(missing)} missing)"
+
+                lines = [header + ("  DRY RUN" if dry_run else ""), ""]
+                lines.append("| Cluster | Current | +Extras | New | IPs |")
+                lines.append("|---------|---------|---------|-----|-----|")
+                for u in sorted(updates, key=lambda x: -x["extras"])[:25]:
+                    ip_count = u["desc"].split()[3]
+                    lines.append(f"| {u['host']} | ${u['current']:.2f} | ${u['extras']:.2f} | ${u['new']:.2f} | {ip_count} |")
+                if len(updates) > 25:
+                    lines.append(f"*+{len(updates) - 25} more clusters*")
+                if missing:
+                    lines.append(f"\n**Missing (not found in Zabbix):** {', '.join(missing[:10])}")
+
+                if dry_run:
+                    lines.append("\n*Set dry_run=false to apply.*")
+                    return "\n".join(lines)
+
+                # Apply — parallel usermacro update/create
+                async def _apply(u):
+                    if u["macroid"]:
+                        return await client.call("usermacro.update", {
+                            "hostmacroid": u["macroid"],
+                            "value": str(u["new"]),
+                            "description": u["desc"],
+                        })
+                    return await client.call("usermacro.create", {
+                        "hostid": u["hostid"],
+                        "macro": "{$COST_MONTH}",
+                        "value": str(u["new"]),
+                        "description": u["desc"],
+                    })
+
+                results = await asyncio.gather(*[_apply(u) for u in updates], return_exceptions=True)
+                errors = [str(r)[:80] for r in results if isinstance(r, Exception)]
+                applied = sum(1 for r in results if not isinstance(r, Exception))
+
+                lines.append(f"\n**Applied: {applied}/{len(updates)}**")
+                if errors:
+                    lines.append(f"Errors: {len(errors)}")
+                    for e in errors[:3]:
+                        lines.append(f"  - {e}")
+                return "\n".join(lines)
+            except (httpx.HTTPError, ValueError, OSError) as e:
+                return f"Error: {e}"
+
     if "get_cost_summary" not in skip:
 
         @mcp.tool()
