@@ -727,3 +727,193 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 return "\n".join(lines)
             except (httpx.HTTPError, ValueError) as e:
                 return f"Error: {e}"
+
+    if "analyze_cost_import" not in skip:
+
+        @mcp.tool()
+        async def analyze_cost_import(
+            file_path: str,
+            output_csv: str = "",
+            output_json: str = "",
+            instance: str = "",
+        ) -> str:
+            """Tiered probability analysis of unmatched cost entries.
+
+            Reads a JSON file of {ip: price} entries, finds which don't match
+            Zabbix hosts by IP, then scores each with signals:
+            - /24 subnet match (40pt)
+            - Billing name fuzzy match (35pt strong / 15pt partial)
+            - Known provider CIDR (15pt)
+
+            Tiers: HIGH (>=70), MEDIUM (>=40), LOW (>=15), UNKNOWN (<15).
+            Writes CSV + JSON for human review.
+
+            Args:
+                file_path: Path to JSON cost file {ip: price} or {ip: {name, price, ...}}
+                output_csv: Path for CSV output (default: ~/Downloads/cost_import_analysis.csv)
+                output_json: Path for JSON output (default: ~/Downloads/cost_import_analysis.json)
+                instance: Zabbix instance name (optional)
+            """
+            from collections import defaultdict
+
+            from zbbx_mcp.classify import detect_provider
+
+            try:
+                path = os.path.expanduser(file_path)
+                if not os.path.isfile(path):
+                    return f"File not found: {path}"
+                with open(path) as f:
+                    raw = json.load(f)
+
+                # Normalize input: accept both {ip: price} and {ip: {name, price, ...}}
+                costs: dict[str, dict] = {}
+                for ip, val in raw.items():
+                    if isinstance(val, dict):
+                        price = val.get("price") or val.get("cost") or 0
+                        name = val.get("name", "")
+                    else:
+                        try:
+                            price = float(val)
+                            name = ""
+                        except (ValueError, TypeError):
+                            continue
+                    if price > 0:
+                        costs[ip.strip()] = {"name": str(name), "price": float(price)}
+
+                if not costs:
+                    return "No valid cost entries found in file."
+
+                client = resolver.resolve(instance)
+                hosts = await client.call("host.get", {
+                    "output": ["hostid", "host", "name"],
+                    "selectInterfaces": ["ip"],
+                })
+
+                zabbix_ips: dict[str, str] = {}
+                zabbix_by_24: dict[str, list] = defaultdict(list)
+                zabbix_names: list[str] = []
+                for h in hosts:
+                    zabbix_names.append(h["host"].lower())
+                    for iface in h.get("interfaces", []):
+                        ip = iface.get("ip", "")
+                        if ip and ip != "127.0.0.1":
+                            zabbix_ips[ip] = h["host"]
+                            parts = ip.split(".")
+                            if len(parts) == 4:
+                                zabbix_by_24[f"{parts[0]}.{parts[1]}.{parts[2]}"].append((ip, h["host"]))
+
+                def _tokens(s):
+                    if not s:
+                        return []
+                    tokens = re.findall(r"[a-z]{2,}\d*|\d{2,}", s.lower())
+                    stop = {"dedicated", "server", "custom", "dual", "standard", "gold", "price", "incl", "excl", "taxes"}
+                    return [t for t in tokens if t not in stop and len(t) >= 2]
+
+                results = []
+                _PRIV = ("10.", "192.168.", "172.16.", "172.17.", "172.18.", "172.19.",
+                         "172.20.", "172.21.", "172.22.", "172.23.", "172.24.", "172.25.",
+                         "172.26.", "172.27.", "172.28.", "172.29.", "172.30.", "172.31.")
+
+                for ip, info in costs.items():
+                    if ip.startswith(_PRIV):
+                        continue
+                    if ip in zabbix_ips:
+                        continue  # already matched
+
+                    score = 0
+                    signals = []
+
+                    parts = ip.split(".")
+                    if len(parts) == 4:
+                        subnet = zabbix_by_24.get(f"{parts[0]}.{parts[1]}.{parts[2]}", [])
+                        if subnet:
+                            score += 40
+                            signals.append(f"/24 match: {subnet[0][1]} (+{len(subnet) - 1} more)")
+
+                    name_tokens = _tokens(info["name"])
+                    matched_hosts = []
+                    if name_tokens:
+                        for hn in zabbix_names:
+                            if all(t in hn for t in name_tokens[:2]):
+                                matched_hosts.append(hn)
+                                if len(matched_hosts) >= 3:
+                                    break
+                        if matched_hosts:
+                            score += 35
+                            signals.append(f"name match: {', '.join(matched_hosts[:2])}")
+                        else:
+                            for hn in zabbix_names:
+                                for t in name_tokens:
+                                    if len(t) >= 4 and t in hn:
+                                        matched_hosts.append(hn)
+                                        break
+                                if len(matched_hosts) >= 2:
+                                    break
+                            if matched_hosts:
+                                score += 15
+                                signals.append(f"partial name: {matched_hosts[0]}")
+
+                    prov = detect_provider(ip)
+                    if prov not in ("Unknown", "Other"):
+                        score += 15
+                        signals.append(f"provider: {prov}")
+
+                    if score >= 70:
+                        tier = "HIGH"
+                        sug = "Likely same server (different IP or hostname) — verify then add or update"
+                    elif score >= 40:
+                        tier = "MEDIUM"
+                        sug = "Possible match — review subnet/name before importing"
+                    elif score >= 15:
+                        tier = "LOW"
+                        sug = "Weak signal — new server not onboarded, or decommissioned"
+                    else:
+                        tier = "UNKNOWN"
+                        sug = "No signal — external infra, abandoned, or needs manual investigation"
+
+                    results.append({
+                        "ip": ip, "name": info["name"], "price_monthly": info["price"],
+                        "tier": tier, "confidence": score, "signals": signals, "suggestion": sug,
+                    })
+
+                tier_order = {"HIGH": 0, "MEDIUM": 1, "LOW": 2, "UNKNOWN": 3}
+                results.sort(key=lambda x: (tier_order[x["tier"]], -x["price_monthly"]))
+
+                by_tier: dict[str, dict] = defaultdict(lambda: {"count": 0, "cost": 0.0})
+                for r in results:
+                    by_tier[r["tier"]]["count"] += 1
+                    by_tier[r["tier"]]["cost"] += r["price_monthly"]
+
+                downloads = os.path.expanduser("~/Downloads")
+                out_json = os.path.expanduser(output_json) if output_json else os.path.join(downloads, "cost_import_analysis.json")
+                out_csv = os.path.expanduser(output_csv) if output_csv else os.path.join(downloads, "cost_import_analysis.csv")
+
+                with open(out_json, "w") as f:
+                    json.dump(results, f, indent=2)
+
+                import csv as _csv
+                with open(out_csv, "w", newline="") as f:
+                    w = _csv.writer(f)
+                    w.writerow(["Tier", "Confidence", "IP", "Billing Name", "Monthly $",
+                                "Annual $", "Signals", "Suggestion"])
+                    for r in results:
+                        w.writerow([r["tier"], r["confidence"], r["ip"], r["name"],
+                                    f"{r['price_monthly']:.2f}",
+                                    f"{r['price_monthly'] * 12:.2f}",
+                                    " | ".join(r["signals"]), r["suggestion"]])
+
+                total_unmatched = sum(r["price_monthly"] for r in results)
+                lines = [
+                    f"**Cost Import Analysis: {len(results)} unmatched IPs = ${total_unmatched:,.2f}/mo**\n",
+                    "| Tier | Count | Monthly $ | Annual $ |",
+                    "|------|-------|-----------|----------|",
+                ]
+                for t in ["HIGH", "MEDIUM", "LOW", "UNKNOWN"]:
+                    d = by_tier[t]
+                    lines.append(f"| {t} | {d['count']} | ${d['cost']:,.2f} | ${d['cost'] * 12:,.2f} |")
+                lines.append(f"\nSaved: `{out_json}`")
+                lines.append(f"Saved: `{out_csv}`")
+
+                return "\n".join(lines)
+            except (httpx.HTTPError, ValueError, OSError) as e:
+                return f"Error: {e}"
