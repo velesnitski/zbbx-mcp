@@ -106,14 +106,25 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
             try:
                 client = resolver.resolve(instance)
                 problems = await client.call("problem.get", {
-                    "output": ["eventid", "name", "severity", "clock"],
-                    "selectHosts": ["host"],
+                    "output": ["eventid", "name", "severity", "clock", "objectid"],
                     "severities": list(range(min_severity, 6)),
                     "sortfield": "eventid",
                     "sortorder": "DESC",
                     "limit": 500,
                     "recent": True,
                 })
+
+                # problem.get doesn't reliably return hosts in Zabbix 6.4 — use event.get
+                if problems:
+                    event_ids = [p["eventid"] for p in problems]
+                    events = await client.call("event.get", {
+                        "output": ["eventid"],
+                        "selectHosts": ["host"],
+                        "eventids": event_ids,
+                    })
+                    event_hosts = {e["eventid"]: e.get("hosts", []) for e in events}
+                    for p in problems:
+                        p["hosts"] = event_hosts.get(p["eventid"], [])
 
                 # Sort by severity desc (Zabbix 6.4 doesn't support severity sort)
                 problems.sort(key=lambda p: (-int(p.get("severity", "0")), -int(p.get("clock", "0"))))
@@ -133,6 +144,18 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     if sev in sev_counts:
                         lines.append(f"- **{sev}:** {sev_counts[sev]}")
                 lines.append("")
+
+                # Detect alert storms: same problem name on many hosts within same minute
+                from collections import Counter
+                name_counts = Counter(p.get("name", "?") for p in problems)
+                recent_clocks = [int(p.get("clock", "0")) for p in problems]
+                if recent_clocks:
+                    clock_spread = max(recent_clocks) - min(recent_clocks)
+                    for name, cnt in name_counts.most_common(1):
+                        if cnt >= 10 and clock_spread < 300:  # 10+ alerts in <5min
+                            lines.append(f"**Alert storm detected:** {cnt} simultaneous '{name}' alerts (all within {clock_spread}s).")
+                            lines.append("Likely monitoring-side issue (check script, DNS, proxy) rather than real service failure.")
+                            lines.append("Verify by checking traffic on affected hosts — if traffic is normal, alert is noise.\n")
 
                 # Top problems
                 lines.append("| Severity | Host | Problem |")
