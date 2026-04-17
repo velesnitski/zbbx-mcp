@@ -232,7 +232,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 async def _empty():
                     return []
 
-                service1_items, service2_items, service3_items = await asyncio.gather(
+                service1_items, service2_items, service3_items, traffic_map = await asyncio.gather(
                     client.call("item.get", {
                         "hostids": all_ids, "output": ["hostid", "lastvalue"],
                         "filter": {"key_": KEY_service_PRIMARY, "status": "0"},
@@ -245,6 +245,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                         "hostids": all_ids, "output": ["hostid", "lastvalue"],
                         "filter": {"key_": KEY_service_TERTIARY, "status": "0"},
                     }) if KEY_service_TERTIARY else _empty(),
+                    fetch_traffic_map(client, all_ids),
                 )
 
                 service1_map = build_value_map(service1_items, lambda v: int(float(v)))
@@ -259,6 +260,12 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     except (ValueError, TypeError, KeyError):
                         pass
 
+                # Traffic-validation: if server has real traffic, treat as up
+                # regardless of check item state (fixes false positives from
+                # deprecated check items returning 0)
+                TRAFFIC_VALIDATION_MBPS = 5.0
+                active_by_traffic = {hid for hid, mbps in traffic_map.items() if mbps >= TRAFFIC_VALIDATION_MBPS}
+
                 parts = [
                     "**Service Health Matrix**\n",
                     "| Country | Servers | Proto 1 | Proto 2 | Proto 3 | Recommendation |",
@@ -270,9 +277,10 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     hids = [h["hostid"] for h in hs]
                     total = len(hids)
 
-                    service1_up = sum(1 for hid in hids if service1_map.get(hid) == 1)
-                    service2_up = sum(1 for hid in hids if service2_map.get(hid) == 1)
-                    service3_up = sum(1 for hid in hids if service3_map.get(hid, 0) >= 1)
+                    # "Up" = check returned 1 OR server has real traffic (traffic-validated)
+                    service1_up = sum(1 for hid in hids if service1_map.get(hid) == 1 or hid in active_by_traffic)
+                    service2_up = sum(1 for hid in hids if service2_map.get(hid) == 1 or hid in active_by_traffic)
+                    service3_up = sum(1 for hid in hids if service3_map.get(hid, 0) >= 1 or hid in active_by_traffic)
 
                     service1_checked = sum(1 for hid in hids if hid in service1_map)
                     service2_checked = sum(1 for hid in hids if hid in service2_map)

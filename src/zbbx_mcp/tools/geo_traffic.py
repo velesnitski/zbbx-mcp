@@ -30,6 +30,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
             drop_threshold: float = 50.0,
             country_threshold: float = 50.0,
             min_servers: int = 2,
+            min_avg_mbps: float = 10.0,
             product: str = "",
             instance: str = "",
         ) -> str:
@@ -41,6 +42,8 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 drop_threshold: % drop per server to flag (default: 50)
                 country_threshold: % of servers affected to flag country (default: 50)
                 min_servers: Min servers per country (default: 2)
+                min_avg_mbps: Min avg country traffic to alert (default: 10 Mbps,
+                    filters micro-markets where % drops are statistical noise)
                 product: Filter by product (optional)
                 instance: Zabbix instance (optional)
             """
@@ -98,6 +101,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     total = len(c_hosts)
                     drops = []
                     service_down = 0
+                    country_avg_mbps = 0.0
 
                     for h in c_hosts:
                         hm = host_metrics.get(h["hostid"], {})
@@ -106,6 +110,9 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
 
                         if service1_status == 0:
                             service_down += 1
+
+                        if traffic:
+                            country_avg_mbps += traffic.avg
 
                         if traffic and traffic.avg > 1:
                             drop_pct = ((traffic.avg - traffic.current) / traffic.avg * 100) if traffic.avg > 0 else 0
@@ -118,6 +125,10 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                             drops.append(100.0)
 
                     pct_affected = (affected / total * 100) if total > 0 else 0
+
+                    # Filter micro-markets — % drops on near-zero traffic are noise
+                    if country_avg_mbps < min_avg_mbps:
+                        continue
 
                     if pct_affected >= country_threshold:
                         avg_drop = sum(drops) / len(drops) if drops else 0
