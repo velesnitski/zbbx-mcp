@@ -241,14 +241,33 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
             else:
                 return "Expected JSON object with by_ip/by_name or flat IP→cost map."
 
+            def _extract_price(v):
+                """Extract numeric price from value (may be dict with price/cost field or number)."""
+                if isinstance(v, dict):
+                    for key in ("price", "cost", "price_monthly", "monthly"):
+                        if key in v:
+                            return v[key]
+                    return None
+                return v
+
             def _in_range(v):
+                p = _extract_price(v)
+                if p is None:
+                    return False
                 try:
-                    return min_cost <= float(v) <= max_cost
+                    return min_cost <= float(p) <= max_cost
                 except (ValueError, TypeError):
                     return False
 
-            safe_ips = {k: float(v) for k, v in ip_costs.items() if _in_range(v)}
-            safe_names = {k: float(v) for k, v in name_costs.items() if _in_range(v)}
+            safe_ips = {k: float(_extract_price(v)) for k, v in ip_costs.items() if _in_range(v)}
+            safe_names = {k: float(_extract_price(v)) for k, v in name_costs.items() if _in_range(v)}
+
+            # If IP values are dicts with 'name' field, also populate safe_names for fuzzy matching
+            for _ip, v in ip_costs.items():
+                if isinstance(v, dict) and _in_range(v):
+                    name = (v.get("name") or "").strip()
+                    if name and name not in safe_names:
+                        safe_names[name] = float(_extract_price(v))
             total_input = len(ip_costs) + len(name_costs)
             skipped_range = total_input - len(safe_ips) - len(safe_names)
 
