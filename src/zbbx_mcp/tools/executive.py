@@ -337,6 +337,9 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 traffic_map = await fetch_traffic_map(client, all_ids)
 
                 # Aggregate by product + country (only servers WITH service check item)
+                # Traffic-validation: if server has real traffic, treat as up
+                # (fixes false positives from deprecated check items returning 0)
+                TRAFFIC_VALIDATION_MBPS = 5.0
                 agg: dict[str, dict] = {}
                 for h in hosts:
                     hid = h["hostid"]
@@ -354,9 +357,10 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     key = f"{prod}|{cc}"
                     entry = agg.setdefault(key, {"product": prod, "cc": cc, "up": 0, "total": 0, "traffic": 0})
                     entry["total"] += 1
-                    if service_map[hid] == 1:
+                    traffic_mbps = traffic_map.get(hid, 0)
+                    if service_map[hid] == 1 or traffic_mbps >= TRAFFIC_VALIDATION_MBPS:
                         entry["up"] += 1
-                    entry["traffic"] += traffic_map.get(hid, 0)
+                    entry["traffic"] += traffic_mbps
 
                 if not agg:
                     return "No servers match the filters."
