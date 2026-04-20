@@ -64,12 +64,14 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
         @mcp.tool()
         async def import_server_costs(
             costs_json: str,
+            only_if_empty: bool = False,
             instance: str = "",
         ) -> str:
             """Bulk-set monthly costs on servers using {$COST_MONTH} host macros.
 
             Args:
                 costs_json: JSON mapping hostname patterns to USD cost (e.g. {"srv-nl-*": 20})
+                only_if_empty: Skip hosts that already have a non-zero {$COST_MONTH} set
                 instance: Zabbix instance (optional)
             """
             try:
@@ -123,6 +125,10 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
 
                     try:
                         if hid in existing_map:
+                            existing_val = (existing_map[hid].get("value") or "").strip()
+                            if only_if_empty and existing_val not in ("", "0", "0.0", "0.00"):
+                                skipped += 1
+                                continue
                             # Update if value changed
                             if existing_map[hid]["value"] != cost_str:
                                 await client.call("usermacro.update", {
@@ -247,6 +253,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
             min_cost: float = 1,
             max_cost: float = 5000,
             export_unmatched: str = "",
+            only_if_empty: bool = False,
             instance: str = "",
         ) -> str:
             """Smart cost import: match by IP, then hostname (7-pass fuzzy).
@@ -260,6 +267,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 min_cost: Skip prices below this (default: $1)
                 max_cost: Skip prices above this (default: $5000)
                 export_unmatched: File path to save unmatched entries as JSON (optional)
+                only_if_empty: Skip hosts that already have a non-zero {$COST_MONTH} set
                 instance: Zabbix instance (optional)
             """
             # Load data
@@ -437,6 +445,23 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     else:
                         unmatched_names[name] = cost
 
+                # Filter out hosts with an existing non-zero cost if only_if_empty
+                skipped_existing = 0
+                if only_if_empty and host_costs:
+                    existing_pre = await client.call("usermacro.get", {
+                        "hostids": list(host_costs.keys()),
+                        "output": ["hostid", "value"],
+                        "filter": {"macro": "{$COST_MONTH}"},
+                    })
+                    nonempty = {
+                        m["hostid"] for m in existing_pre
+                        if (m.get("value") or "").strip() not in ("", "0", "0.0", "0.00")
+                    }
+                    skipped_existing = len(nonempty)
+                    for hid in nonempty:
+                        host_costs.pop(hid, None)
+                        host_source.pop(hid, None)
+
                 # Build match list
                 host_map = {h["hostid"]: h for h in hosts}
                 matches = []
@@ -464,8 +489,10 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                         f"By IP: {ip_matches} | By /24: {ip24_matches} | By name: {name_matches} | Translated: {translated_matches}",
                         f"Unmatched: {len(unmatched_names)} name entries",
                         f"Skipped: {skipped_range} outside ${min_cost}-${max_cost}",
-                        f"**Total: ${total_cost:,.2f}/mo** (${total_cost*12:,.2f}/yr)\n",
                     ]
+                    if only_if_empty:
+                        lines.append(f"Skipped (already costed): {skipped_existing}")
+                    lines.append(f"**Total: ${total_cost:,.2f}/mo** (${total_cost*12:,.2f}/yr)\n")
                     lines.append("| Host | Match | $/mo |")
                     lines.append("|------|-------|------|")
                     for hostname, _hid, _ip, cost, src in sorted(matches, key=lambda x: -x[3])[:25]:
