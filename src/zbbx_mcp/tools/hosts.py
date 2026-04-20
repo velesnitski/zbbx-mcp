@@ -4,6 +4,7 @@ from collections import defaultdict
 import httpx
 
 from zbbx_mcp.classify import classify_host as _classify_host
+from zbbx_mcp.classify import resolve_datacenter
 from zbbx_mcp.data import (
     extract_country,
     fetch_enabled_hosts,
@@ -400,16 +401,17 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 hosts = hosts[:max_results]
 
                 lines = [f"**{total} hosts**" + (f" (showing {max_results})" if total > max_results else "")]
-                lines.append("| Host | Country | Product | IP | Traffic Mbps |" + (" Role |" if show_cluster_role else ""))
-                lines.append("|------|---------|---------|----|-----------:|" + ("------|" if show_cluster_role else ""))
+                lines.append("| Host | Country | Product | IP | City | Traffic Mbps |" + (" Role |" if show_cluster_role else ""))
+                lines.append("|------|---------|---------|----|------|-----------:|" + ("------|" if show_cluster_role else ""))
 
                 for h in hosts:
                     hostname = h["host"]
                     cc = extract_country(hostname)
                     prod, _ = _classify_host(h.get("groups", []))
                     ip = host_ip(h)
+                    _, city = resolve_datacenter(ip) if ip else ("", "")
                     mbps = traffic_map.get(h["hostid"], 0)
-                    row = f"| {hostname} | {cc} | {prod or '?'} | {ip} | {mbps:.1f} |"
+                    row = f"| {hostname} | {cc} | {prod or '?'} | {ip} | {city} | {mbps:.1f} |"
                     if show_cluster_role:
                         role = _infer_cluster_role(h.get("name", hostname))
                         row += f" {role} |"
