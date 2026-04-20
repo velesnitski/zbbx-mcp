@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 import asyncio
+import json
+import os
 from datetime import datetime, timezone
+from pathlib import Path
 
 import httpx
 
@@ -84,6 +87,51 @@ def _badge(cls: str, text: str) -> str:
 
 def _card(title: str, value: str, sub: str = "") -> str:
     return f'<div class="card"><div class="card-title">{title}</div><div class="card-value">{value}</div><div class="card-sub">{sub}</div></div>'
+
+
+def _snapshot_dir() -> Path:
+    d = Path(os.path.expanduser("~/.zbbx-mcp/snapshots"))
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def _load_prev_snapshot(today_str: str) -> dict | None:
+    """Return the most recent snapshot strictly older than today_str."""
+    try:
+        files = sorted(_snapshot_dir().glob("ceo_report_*.json"))
+    except OSError:
+        return None
+    for f in reversed(files):
+        stem_date = f.stem.replace("ceo_report_", "")
+        if stem_date >= today_str:
+            continue
+        try:
+            return json.loads(f.read_text())
+        except (json.JSONDecodeError, OSError):
+            continue
+    return None
+
+
+def _save_snapshot(today_str: str, snap: dict) -> None:
+    try:
+        (_snapshot_dir() / f"ceo_report_{today_str}.json").write_text(json.dumps(snap, indent=2))
+    except OSError:
+        pass
+
+
+def _delta_badge(curr: float, prev: float | None, higher_is_better: bool = True, suffix: str = "") -> str:
+    """Small +/- delta badge for KPI header cells."""
+    if prev is None or prev == 0:
+        return ""
+    delta = curr - prev
+    if abs(delta) < 0.01:
+        return ""
+    pct = delta / prev * 100 if prev else 0
+    arrow = "&uarr;" if delta > 0 else "&darr;"
+    good = (delta > 0) == higher_is_better
+    color = "rgba(34,197,94,0.9)" if good else "rgba(248,113,113,0.9)"
+    return (f'<div style="font-size:11px;color:{color};margin-top:2px">'
+            f'{arrow} {abs(pct):.0f}%{suffix}</div>')
 
 
 def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> None:
@@ -243,6 +291,17 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 top_countries = sorted_countries[:18]
                 max_traffic = max((cd["traffic_gbps"] for _, cd in top_countries), default=1)
 
+                # Load previous snapshot for delta tracking
+                prev = _load_prev_snapshot(date_str) or {}
+                prev_countries = prev.get("country_data", {})
+
+                d_servers = _delta_badge(total_servers, prev.get("total_servers"), higher_is_better=True)
+                d_traffic = _delta_badge(total_traffic, prev.get("total_traffic"), higher_is_better=True)
+                d_countries = _delta_badge(total_countries, prev.get("total_countries"), higher_is_better=True)
+                d_avg_cpu = _delta_badge(avg_cpu, prev.get("avg_cpu"), higher_is_better=False)
+
+                prev_date_sub = f' &bull; vs snapshot {prev.get("date")}' if prev.get("date") else ""
+
                 html = [f"""<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1.0">
 <title>Infrastructure Report — {now.strftime("%B %d, %Y")}</title>
@@ -252,14 +311,14 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
 <div class="header">
 <h1>Infrastructure Status Report</h1>
 <div class="subtitle">Server Fleet Overview &amp; Strategic Recommendations</div>
-<div class="date">{now_str} &bull; zbbx-mcp v{__version__}</div>
+<div class="date">{now_str} &bull; zbbx-mcp v{__version__}{prev_date_sub}</div>
 <div class="kpi-row">
-<div class="kpi"><div class="kpi-value">{total_servers}</div><div class="kpi-label">Servers</div></div>
-<div class="kpi"><div class="kpi-value">{total_traffic} Gbps</div><div class="kpi-label">Total Traffic</div></div>
-<div class="kpi"><div class="kpi-value">{total_countries}</div><div class="kpi-label">Countries</div></div>
+<div class="kpi"><div class="kpi-value">{total_servers}</div><div class="kpi-label">Servers</div>{d_servers}</div>
+<div class="kpi"><div class="kpi-value">{total_traffic} Gbps</div><div class="kpi-label">Total Traffic</div>{d_traffic}</div>
+<div class="kpi"><div class="kpi-value">{total_countries}</div><div class="kpi-label">Countries</div>{d_countries}</div>
 <div class="kpi"><div class="kpi-value">{len(products)}</div><div class="kpi-label">Products</div></div>
 <div class="kpi"><div class="kpi-value">{len(providers)}</div><div class="kpi-label">Providers</div></div>
-<div class="kpi"><div class="kpi-value">{avg_cpu}%</div><div class="kpi-label">Avg CPU</div></div>
+<div class="kpi"><div class="kpi-value">{avg_cpu}%</div><div class="kpi-label">Avg CPU</div>{d_avg_cpu}</div>
 </div></div>"""]
 
                 alerts = []
@@ -297,6 +356,62 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 for cls, text in alerts[:8]:
                     html.append(f'<div class="alert alert-{cls}">{text}</div>')
                 html.append('</div>')
+
+                # Changes Since Last Report — only if we have a prior snapshot
+                if prev:
+                    change_rows = []
+                    for cc, cd in sorted_countries:
+                        pcd = prev_countries.get(cc)
+                        if not pcd:
+                            change_rows.append((cc, cd, None, "new"))
+                            continue
+                        curr_g = cd["traffic_gbps"]
+                        prev_g = pcd.get("traffic_gbps", 0)
+                        if prev_g == 0 and curr_g == 0:
+                            continue
+                        pct = (curr_g - prev_g) / prev_g * 100 if prev_g > 0 else 100.0
+                        if abs(pct) < 10 and abs(curr_g - prev_g) < 0.5:
+                            continue
+                        change_rows.append((cc, cd, pcd, pct))
+                    # Countries that disappeared
+                    for cc, pcd in prev_countries.items():
+                        if cc not in country_data and pcd.get("traffic_gbps", 0) > 0.1:
+                            change_rows.append((cc, None, pcd, "gone"))
+
+                    change_rows.sort(key=lambda r: (
+                        -abs(r[3]) if isinstance(r[3], (int, float)) else 999,
+                    ))
+
+                    html.append(f'<div class="section"><h2>Changes Since Last Report</h2>'
+                                f'<div class="desc">Snapshot {prev.get("date", "?")} &rarr; {date_str}</div>')
+                    html.append('<table><thead><tr><th>Country</th><th class="num">Prev</th>'
+                                '<th class="num">Now</th><th class="num">Change</th><th>Status</th></tr></thead><tbody>')
+                    for cc, cd, pcd, pct in change_rows[:15]:
+                        name = _COUNTRY_NAMES.get(cc, cc)
+                        if pct == "new":
+                            html.append(
+                                f'<tr><td><b>{name}</b></td><td class="num">&mdash;</td>'
+                                f'<td class="num">{cd["traffic_gbps"]} Gbps</td>'
+                                f'<td class="num" style="color:#16a34a">new</td>'
+                                f'<td>{_badge("rising", "NEW")}</td></tr>'
+                            )
+                        elif pct == "gone":
+                            html.append(
+                                f'<tr><td><b>{name}</b></td><td class="num">{pcd.get("traffic_gbps", 0)} Gbps</td>'
+                                f'<td class="num">&mdash;</td>'
+                                f'<td class="num" style="color:#dc2626">gone</td>'
+                                f'<td>{_badge("dead", "GONE")}</td></tr>'
+                            )
+                        else:
+                            color = "#16a34a" if pct > 0 else "#dc2626"
+                            arrow = "&uarr;" if pct > 0 else "&darr;"
+                            html.append(
+                                f'<tr><td><b>{name}</b></td><td class="num">{pcd.get("traffic_gbps", 0)} Gbps</td>'
+                                f'<td class="num">{cd["traffic_gbps"]} Gbps</td>'
+                                f'<td class="num" style="color:{color}">{arrow} {abs(pct):.0f}%</td>'
+                                f'<td>{_badge("rising" if pct > 0 else "dropping", f"{pct:+.0f}%")}</td></tr>'
+                            )
+                    html.append('</tbody></table></div>')
 
                 html.append(f'<div class="section"><h2>Traffic by Country ({period})</h2>')
                 html.append(f'<div class="desc">{len(by_country)} countries. Total fleet throughput: {total_traffic} Gbps.</div>')
@@ -820,12 +935,32 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 with open(filepath, "w") as f:
                     f.write("\n".join(html))
 
+                _save_snapshot(date_str, {
+                    "date": date_str,
+                    "total_servers": total_servers,
+                    "total_traffic": total_traffic,
+                    "total_countries": total_countries,
+                    "products": len(products),
+                    "providers": len(providers),
+                    "avg_cpu": avg_cpu,
+                    "country_data": {cc: {
+                        "servers": cd["servers"],
+                        "traffic_gbps": cd["traffic_gbps"],
+                        "avg_cpu": cd["avg_cpu"],
+                        "service_up": cd["service_up"],
+                        "service_total": cd["service_total"],
+                        "trend": cd.get("trend", "stable"),
+                        "change": cd.get("change", 0),
+                    } for cc, cd in country_data.items()},
+                })
+
                 service_down = sum(1 for cc, cd in country_data.items() if cd["service_total"] > 0 and cd["service_up"] < cd["service_total"])
+                delta_note = f" | **vs snapshot:** {prev.get('date')}" if prev else ""
                 return (
                     f"**CEO Report Generated**\n"
                     f"**File:** `{filepath}`\n"
                     f"**Fleet:** {total_servers} servers, {total_countries} countries, {total_traffic} Gbps\n"
-                    f"**Alerts:** {len(alerts)} | **service issues:** {service_down} countries"
+                    f"**Alerts:** {len(alerts)} | **service issues:** {service_down} countries{delta_note}"
                 )
             except (httpx.HTTPError, ValueError) as e:
                 return f"Error: {e}"

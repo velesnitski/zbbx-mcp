@@ -123,12 +123,16 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     return f"No alerts in the last {hours} hours."
 
                 status_counts: dict[str, int] = {}
+                prev_status_counts: dict[str, int] = {}
                 subject_counts: dict[str, int] = {}
                 for a in current:
                     s = ALERT_STATUS.get(a.get("status", "0"), "?")
                     status_counts[s] = status_counts.get(s, 0) + 1
                     subj = a.get("subject", "Unknown")[:60]
                     subject_counts[subj] = subject_counts.get(subj, 0) + 1
+                for a in previous:
+                    s = ALERT_STATUS.get(a.get("status", "0"), "?")
+                    prev_status_counts[s] = prev_status_counts.get(s, 0) + 1
 
                 trend = ""
                 if compare and previous:
@@ -136,13 +140,23 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     arrow = "+" if delta > 0 else ""
                     trend = f" ({arrow}{delta} vs prev {hours}h)"
 
-                parts = [
-                    f"**Alerts (last {hours}h): {len(current)}{trend}**\n",
-                    "| Status | Count |",
-                    "|--------|-------|",
-                ]
-                for s, c in sorted(status_counts.items(), key=lambda x: -x[1]):
-                    parts.append(f"| {s} | {c} |")
+                parts = [f"**Alerts (last {hours}h): {len(current)}{trend}**\n"]
+                if compare and previous:
+                    parts.extend([
+                        "| Status | Current | Previous | Δ |",
+                        "|--------|--------:|---------:|--:|",
+                    ])
+                    for s in sorted(set(status_counts) | set(prev_status_counts),
+                                    key=lambda k: -status_counts.get(k, 0)):
+                        cur = status_counts.get(s, 0)
+                        prv = prev_status_counts.get(s, 0)
+                        d = cur - prv
+                        arrow = "+" if d > 0 else ""
+                        parts.append(f"| {s} | {cur} | {prv} | {arrow}{d} |")
+                else:
+                    parts.extend(["| Status | Count |", "|--------|-------|"])
+                    for s, c in sorted(status_counts.items(), key=lambda x: -x[1]):
+                        parts.append(f"| {s} | {c} |")
 
                 parts.extend([
                     "\n**Top subjects:**",

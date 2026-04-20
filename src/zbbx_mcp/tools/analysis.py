@@ -403,3 +403,210 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 return "\n".join(parts)
             except (httpx.HTTPError, ValueError) as e:
                 return f"Error: {e}"
+
+    if "audit_external_ips" not in skip:
+
+        @mcp.tool()
+        async def audit_external_ips(
+            input_data: str = "",
+            file_path: str = "",
+            max_results: int = 30,
+            min_value: float = 0,
+            instance: str = "",
+        ) -> str:
+            """Audit external IPs against Zabbix presence + provider rDNS lookup.
+
+            For each IP returns presence at /32 (exact host), /24 (cluster), /16 (provider segment),
+            so you can categorize: external infra | in-cluster (add to primary) | abandoned.
+
+            Args:
+                input_data: Comma/newline separated IPs OR CSV with 'ip' column OR JSON
+                file_path: Path to CSV/JSON file (alternative to input_data)
+                max_results: Max IPs to render in output table (default: 30)
+                min_value: When CSV has price column, only show IPs >= this value (default: 0)
+                instance: Zabbix instance (optional)
+            """
+            import asyncio as _aio
+            import csv as _csv
+            import os as _os
+            import socket
+
+            # --- Parse input ---
+            ips_with_meta: list[dict] = []
+            try:
+                if file_path:
+                    path = _os.path.expanduser(file_path)
+                    if not _os.path.isfile(path):
+                        return f"File not found: {path}"
+                    with open(path) as f:
+                        text = f.read()
+                else:
+                    text = input_data
+
+                if not text.strip():
+                    return "Provide input_data or file_path."
+
+                stripped = text.strip()
+                if stripped.startswith("{") or stripped.startswith("["):
+                    raw = json.loads(stripped)
+                    if isinstance(raw, dict):
+                        for ip, val in raw.items():
+                            price = val if isinstance(val, (int, float)) else (
+                                val.get("price_monthly") or val.get("price") or 0
+                            ) if isinstance(val, dict) else 0
+                            ips_with_meta.append({"ip": ip.strip(), "price": float(price or 0), "name": ""})
+                    elif isinstance(raw, list):
+                        for item in raw:
+                            if isinstance(item, str):
+                                ips_with_meta.append({"ip": item.strip(), "price": 0, "name": ""})
+                            elif isinstance(item, dict):
+                                ips_with_meta.append({
+                                    "ip": str(item.get("ip", "")).strip(),
+                                    "price": float(item.get("price_monthly") or item.get("price") or 0),
+                                    "name": str(item.get("name") or item.get("billing_name") or ""),
+                                })
+                elif "," in stripped.split("\n")[0] and stripped.split("\n")[0].count(".") != 3:
+                    # CSV header detected
+                    rdr = _csv.DictReader(stripped.splitlines())
+                    for row in rdr:
+                        ip_val = (row.get("ip") or row.get("IP") or "").strip()
+                        if ip_val:
+                            try:
+                                price = float(row.get("price_monthly") or row.get("price") or row.get("Monthly $") or 0)
+                            except (ValueError, TypeError):
+                                price = 0
+                            name = (row.get("billing_name") or row.get("name") or "").strip()
+                            ips_with_meta.append({"ip": ip_val, "price": price, "name": name})
+                else:
+                    # Plain comma/newline list
+                    for part in stripped.replace("\n", ",").split(","):
+                        ip = part.strip()
+                        if ip:
+                            ips_with_meta.append({"ip": ip, "price": 0, "name": ""})
+            except (json.JSONDecodeError, OSError) as e:
+                return f"Failed to parse input: {e}"
+
+            # Validate IPs
+            valid: list[dict] = []
+            for entry in ips_with_meta:
+                try:
+                    ipaddress.ip_address(entry["ip"])
+                    if entry["price"] >= min_value:
+                        valid.append(entry)
+                except ValueError:
+                    pass
+
+            if not valid:
+                return "No valid IPs in input."
+
+            try:
+                client = resolver.resolve(instance)
+                hosts = await fetch_enabled_hosts(client)
+
+                # Build /32, /24, /16 lookup maps
+                ip_to_host: dict[str, str] = {}
+                slash24_count: dict[str, int] = {}
+                slash16_count: dict[str, int] = {}
+                slash24_sample: dict[str, str] = {}
+                for h in hosts:
+                    ip = host_ip(h)
+                    if not ip:
+                        continue
+                    ip_to_host[ip] = h["host"]
+                    parts = ip.split(".")
+                    s24 = f"{parts[0]}.{parts[1]}.{parts[2]}.0/24"
+                    s16 = f"{parts[0]}.{parts[1]}.0.0/16"
+                    slash24_count[s24] = slash24_count.get(s24, 0) + 1
+                    slash16_count[s16] = slash16_count.get(s16, 0) + 1
+                    if s24 not in slash24_sample:
+                        slash24_sample[s24] = h["host"]
+
+                # rDNS lookups (concurrent, but only for IPs not already in Zabbix)
+                def _rdns(ip: str) -> str:
+                    try:
+                        return socket.gethostbyaddr(ip)[0]
+                    except (socket.herror, socket.gaierror, OSError):
+                        return ""
+
+                loop = _aio.get_event_loop()
+                rdns_tasks = {}
+                for entry in valid:
+                    if entry["ip"] not in ip_to_host:
+                        rdns_tasks[entry["ip"]] = loop.run_in_executor(None, _rdns, entry["ip"])
+
+                rdns_results = {}
+                for ip, task in rdns_tasks.items():
+                    rdns_results[ip] = await task
+
+                # Categorize
+                categories: dict[str, list] = {
+                    "in_zabbix": [],   # exact /32 match
+                    "in_cluster": [],  # /24 has Zabbix hosts
+                    "same_provider": [],  # /16 has Zabbix hosts (different segment)
+                    "external": [],    # nothing nearby
+                }
+
+                rows = []
+                for entry in sorted(valid, key=lambda x: -x["price"]):
+                    ip = entry["ip"]
+                    parts = ip.split(".")
+                    s24 = f"{parts[0]}.{parts[1]}.{parts[2]}.0/24"
+                    s16 = f"{parts[0]}.{parts[1]}.0.0/16"
+                    in_zabbix = ip_to_host.get(ip, "")
+                    s24_n = slash24_count.get(s24, 0)
+                    s16_n = slash16_count.get(s16, 0)
+                    provider = detect_provider(ip)
+                    rdns = rdns_results.get(ip, "—") if ip in rdns_tasks else "—"
+                    rdns_short = rdns[:40] if rdns else "—"
+
+                    if in_zabbix:
+                        cat = "in_zabbix"
+                        action = f"already in Zabbix as {in_zabbix}"
+                    elif s24_n > 0:
+                        cat = "in_cluster"
+                        action = f"add to cluster (sample: {slash24_sample[s24]})"
+                    elif s16_n > 0:
+                        cat = "same_provider"
+                        action = f"new server in {provider} segment"
+                    else:
+                        cat = "external"
+                        action = "external infra OR untracked"
+
+                    categories[cat].append(entry)
+                    rows.append({
+                        "ip": ip, "price": entry["price"], "name": entry["name"][:25],
+                        "s24_n": s24_n, "s16_n": s16_n, "provider": provider,
+                        "rdns": rdns_short, "category": cat, "action": action,
+                    })
+
+                # Build output
+                lines = [
+                    f"**Audit: {len(valid)} IPs** "
+                    f"(${sum(e['price'] for e in valid):,.0f}/mo)\n",
+                    f"- In Zabbix (exact): **{len(categories['in_zabbix'])}** "
+                    f"(${sum(e['price'] for e in categories['in_zabbix']):,.0f}/mo)",
+                    f"- In cluster (/24 has hosts): **{len(categories['in_cluster'])}** "
+                    f"(${sum(e['price'] for e in categories['in_cluster']):,.0f}/mo)",
+                    f"- Same provider (/16): **{len(categories['same_provider'])}** "
+                    f"(${sum(e['price'] for e in categories['same_provider']):,.0f}/mo)",
+                    f"- External / untracked: **{len(categories['external'])}** "
+                    f"(${sum(e['price'] for e in categories['external']):,.0f}/mo)",
+                    "",
+                    "| IP | $/mo | Billing Name | /24 hosts | /16 hosts | Provider | rDNS | Action |",
+                    "|----|-----:|-------------|----------:|----------:|----------|------|--------|",
+                ]
+
+                for r in rows[:max_results]:
+                    name = r["name"] or "—"
+                    lines.append(
+                        f"| {r['ip']} | {r['price']:.0f} | {name} | "
+                        f"{r['s24_n']} | {r['s16_n']} | {r['provider']} | "
+                        f"{r['rdns']} | {r['action']} |"
+                    )
+
+                if len(rows) > max_results:
+                    lines.append(f"\n*{len(rows) - max_results} more IPs not shown*")
+
+                return "\n".join(lines)
+            except (httpx.HTTPError, ValueError) as e:
+                return f"Error: {e}"
