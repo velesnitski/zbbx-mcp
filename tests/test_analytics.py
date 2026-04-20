@@ -120,48 +120,85 @@ class TestHostIp:
 
 
 class TestProviderDetection:
-    def test_fiberhub(self):
-        assert detect_provider("10.0.0.1") == "Fiberhub"
+    """Provider detection tests — iterate the PROVIDER_CIDRS database only.
 
-    def test_turk_telekom(self):
-        assert detect_provider("10.0.0.2") == "Turk Telekom"
+    No provider names or IPs are hardcoded in tests. Test coverage scales
+    automatically with whatever is in the database.
+    """
 
-    def test_m247(self):
-        assert detect_provider("10.0.0.3") == "M247"
+    @staticmethod
+    def _all_nets():
+        import ipaddress
+        return [
+            (prov, ipaddress.ip_network(cidr, strict=False))
+            for prov, cidrs in PROVIDER_CIDRS.items()
+            for cidr in cidrs
+        ]
 
-    def test_kamatera(self):
-        assert detect_provider("10.0.0.4") == "Kamatera"
+    def _pick_sample_ip(self, net, all_nets):
+        """Pick an IP in `net` that is NOT in any more-specific other-provider net."""
+        overlaps = [
+            n for p, n in all_nets
+            if n.subnet_of(net) and n.prefixlen > net.prefixlen
+        ]
+        hosts = net.hosts() if net.prefixlen < 31 else iter([net.network_address])
+        for candidate in hosts:
+            if not any(candidate in o for o in overlaps):
+                return str(candidate)
+        return None  # fully subsumed — unreachable for this provider
 
-    def test_aruba_it(self):
-        assert detect_provider("10.0.0.5") == "Aruba.it"
+    def test_every_provider_detected_via_db(self):
+        """Every provider must be detected from at least one of its own CIDRs."""
+        all_nets = self._all_nets()
+        for prov, cidrs in PROVIDER_CIDRS.items():
+            import ipaddress
+            detected_at_least_once = False
+            for cidr in cidrs:
+                net = ipaddress.ip_network(cidr, strict=False)
+                ip = self._pick_sample_ip(net, all_nets)
+                if ip and detect_provider(ip) == prov:
+                    detected_at_least_once = True
+                    break
+            assert detected_at_least_once, (
+                "Provider has CIDRs but none resolve back to it — check overlaps"
+            )
 
-    def test_cogent_latam(self):
-        assert detect_provider("10.0.0.6") == "Cogent"
-        assert detect_provider("10.0.0.7") == "Cogent"
-
-    def test_ovh_canada(self):
-        assert detect_provider("10.0.0.8") == "OVH"
-
-    def test_hetzner(self):
-        assert detect_provider("10.0.0.9") == "Hetzner"
-
-    def test_aws_16(self):
-        assert detect_provider("10.0.0.10") == "AWS"
-
-    def test_digitalocean(self):
-        assert detect_provider("10.0.0.11") == "DigitalOcean"
-
-    def test_unknown_ip(self):
-        assert detect_provider("1.1.1.1") == "Other"
+    def test_rfc1918_private_is_other(self):
+        """Private RFC 1918 ranges should fall through to 'Other'."""
+        assert detect_provider("192.168.1.1") == "Other"
+        assert detect_provider("10.0.0.1") == "Other"
+        assert detect_provider("172.16.0.1") == "Other"
 
     def test_invalid_ip(self):
         assert detect_provider("not-an-ip") == "Unknown"
+        assert detect_provider("") == "Unknown"
 
     def test_prefix_length_wins(self):
-        """More specific CIDR should win over broad AWS /8."""
-        assert detect_provider("10.0.0.15") == "Google Cloud"
-        assert detect_provider("10.0.0.16") == "OVH"
-        assert detect_provider("10.0.0.17") == "Azure"
+        """More specific CIDR must win over broader one — verified across DB."""
+        import ipaddress
+        # Find any pair where a smaller prefix is contained in a larger one
+        nets = [
+            (prov, ipaddress.ip_network(c, strict=False))
+            for prov, cidrs in PROVIDER_CIDRS.items()
+            for c in cidrs
+        ]
+        found_pair = False
+        for i, (p1, n1) in enumerate(nets):
+            for p2, n2 in nets[i + 1:]:
+                if p1 == p2 or n1.prefixlen == n2.prefixlen:
+                    continue
+                more_specific = n1 if n1.prefixlen > n2.prefixlen else n2
+                broader = n2 if n1.prefixlen > n2.prefixlen else n1
+                specific_prov = p1 if n1.prefixlen > n2.prefixlen else p2
+                if more_specific.subnet_of(broader):
+                    hosts = list(more_specific.hosts()) if more_specific.prefixlen < 31 else [more_specific.network_address]
+                    ip = str(hosts[len(hosts) // 3])
+                    assert detect_provider(ip) == specific_prov
+                    found_pair = True
+                    break
+            if found_pair:
+                break
+        assert found_pair, "Database must contain at least one overlapping pair"
 
     def test_all_providers_have_cidrs(self):
         for prov, cidrs in PROVIDER_CIDRS.items():
@@ -171,29 +208,44 @@ class TestProviderDetection:
 
 
 class TestResolveDatacenter:
-    def test_ovh_gravelines(self):
-        prov, city = resolve_datacenter("10.0.0.13")
-        assert prov == "OVH"
-        assert "Gravelines" in city
+    """Datacenter resolution tests — iterate the DATACENTER_CIDRS database."""
 
-    def test_hetzner_helsinki(self):
-        prov, city = resolve_datacenter("10.0.0.12")
-        assert prov == "Hetzner"
-        assert "Helsinki" in city
+    def _sample_ip(self, cidr: str) -> str:
+        import ipaddress
+        net = ipaddress.ip_network(cidr, strict=False)
+        hosts = list(net.hosts()) if net.prefixlen < 31 else [net.network_address]
+        return str(hosts[len(hosts) // 3]) if hosts else str(net.network_address)
 
-    def test_scaleway_paris(self):
-        prov, city = resolve_datacenter("10.0.0.14")
-        assert prov == "Scaleway"
-        assert "Paris" in city
+    def test_every_dc_entry_resolves(self):
+        """Every datacenter mapping must resolve to its recorded provider+city."""
+        from zbbx_mcp.classify import DATACENTER_CIDRS
+        for prov, mappings in DATACENTER_CIDRS.items():
+            for cidr, city in mappings:
+                ip = self._sample_ip(cidr)
+                got_prov, got_city = resolve_datacenter(ip)
+                assert got_prov == prov, f"{ip}: expected {prov}, got {got_prov}"
+                assert got_city == city, f"{ip}: expected {city}, got {got_city}"
 
-    def test_fallback_provider_only(self):
-        prov, city = resolve_datacenter("10.0.0.5")
-        assert prov == "Aruba.it"
-        assert city == ""
+    def test_fallback_to_provider_only(self):
+        """Provider-known but no DC mapping → provider name, empty city."""
+        from zbbx_mcp.classify import DATACENTER_CIDRS, PROVIDER_CIDRS
+        dc_providers = set(DATACENTER_CIDRS.keys())
+        for prov, cidrs in PROVIDER_CIDRS.items():
+            if prov in dc_providers:
+                continue
+            # Pick first cidr of a provider without DC mapping
+            ip = self._sample_ip(cidrs[0])
+            got_prov, got_city = resolve_datacenter(ip)
+            assert got_prov == prov
+            assert got_city == ""
+            return
+        # If we reach here the test is still valid (all providers have DC mappings)
 
-    def test_unknown(self):
-        prov, city = resolve_datacenter("1.1.1.1")
+    def test_unknown_falls_through(self):
+        """RFC 1918 / unroutable → Other, empty city."""
+        prov, city = resolve_datacenter("10.10.10.10")
         assert prov == "Other"
+        assert city == ""
 
     def test_invalid(self):
         prov, city = resolve_datacenter("bad")
