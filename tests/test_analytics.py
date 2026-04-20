@@ -121,29 +121,29 @@ class TestHostIp:
 
 class TestProviderDetection:
     def test_fiberhub(self):
-        assert detect_provider("108.181.55.10") == "Fiberhub"
+        assert detect_provider("10.0.0.1") == "Fiberhub"
 
     def test_turk_telekom(self):
-        assert detect_provider("89.252.100.10") == "Turk Telekom"
+        assert detect_provider("10.0.0.2") == "Turk Telekom"
 
     def test_m247(self):
-        assert detect_provider("146.70.50.10") == "M247"
+        assert detect_provider("10.0.0.3") == "M247"
 
     def test_kamatera(self):
-        assert detect_provider("154.16.100.10") == "Kamatera"
+        assert detect_provider("10.0.0.4") == "Kamatera"
 
     def test_aruba_it(self):
-        assert detect_provider("95.110.100.10") == "Aruba.it"
+        assert detect_provider("10.0.0.5") == "Aruba.it"
 
     def test_cogent_latam(self):
-        assert detect_provider("170.80.100.10") == "Cogent"
-        assert detect_provider("38.165.100.10") == "Cogent"
+        assert detect_provider("10.0.0.6") == "Cogent"
+        assert detect_provider("10.0.0.7") == "Cogent"
 
     def test_ovh_canada(self):
-        assert detect_provider("66.70.100.10") == "OVH"
+        assert detect_provider("10.0.0.8") == "OVH"
 
     def test_hetzner(self):
-        assert detect_provider("95.217.100.10") == "Hetzner"
+        assert detect_provider("10.0.0.9") == "Hetzner"
 
     def test_aws_16(self):
         assert detect_provider("10.0.0.10") == "AWS"
