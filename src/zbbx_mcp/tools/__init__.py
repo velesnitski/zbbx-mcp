@@ -86,6 +86,7 @@ WRITE_TOOLS = frozenset({
     "import_server_costs",
     "import_costs_by_ip",
     "set_bulk_cost",
+    "fill_cost_median",
 })
 
 
