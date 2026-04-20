@@ -333,6 +333,10 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 ip_to_host: dict[str, dict] = {}
                 name_to_host: dict[str, dict] = {}
                 name_list: list[str] = []
+                # Compound hostnames: "base-cc1 cc3 cc5" monitors multiple
+                # physical servers as one entity. Expand to component names so
+                # each billing entry can be summed.
+                compound_components: dict[str, list[str]] = {}
                 for h in hosts:
                     ip = host_ip(h)
                     if ip:
@@ -340,10 +344,22 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     lname = h["host"].lower()
                     name_to_host[lname] = h
                     name_list.append(lname)
+                    if " " in lname:
+                        parts = lname.split()
+                        m = re.match(r"^(.+?)([a-z]{2}\d+)$", parts[0])
+                        if m:
+                            base = m.group(1)
+                            derivs = [parts[0]]
+                            for p in parts[1:]:
+                                if re.match(r"^[a-z]{2}\d+$", p):
+                                    derivs.append(base + p)
+                            if len(derivs) > 1:
+                                compound_components[h["hostid"]] = derivs
 
                 # --- Pass 1: by_ip (IP is source of truth) ---
                 host_costs: dict[str, float] = {}  # hostid → cost
                 host_source: dict[str, str] = {}   # hostid → match method
+                compound_consumed: set[str] = set()  # billing names consumed by compound sum
 
                 for ip, cost in safe_ips.items():
                     ip = ip.strip()
@@ -368,10 +384,27 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                                     host_costs[hid] = cost
                                     host_source[hid] = "ip/24"
 
+                # --- Pass 1c: compound hostnames (twin clusters) ---
+                # For hosts like "prem-cc1 cc3", sum billing entries for each
+                # component name rather than taking max of one.
+                for hid, comps in compound_components.items():
+                    total = 0.0
+                    hits = []
+                    for comp in comps:
+                        if comp in safe_names:
+                            total += safe_names[comp]
+                            hits.append(comp)
+                    if hits:
+                        host_costs[hid] = max(host_costs.get(hid, 0), total)
+                        host_source[hid] = f"compound({len(hits)})"
+                        compound_consumed.update(hits)
+
                 # --- Pass 2-5: by_name (fill gaps, use max if IP already matched) ---
                 unmatched_names: dict[str, float] = {}
 
                 for name, cost in safe_names.items():
+                    if name.lower().strip() in compound_consumed:
+                        continue
                     name_lower = name.lower().strip()
                     matched_host = None
 
@@ -475,6 +508,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 ip24_matches = sum(1 for s in host_source.values() if s == "ip/24")
                 name_matches = sum(1 for s in host_source.values() if s == "name")
                 translated_matches = sum(1 for s in host_source.values() if s == "translated")
+                compound_matches = sum(1 for s in host_source.values() if s.startswith("compound"))
 
                 # Export unmatched
                 if export_unmatched and unmatched_names:
@@ -486,7 +520,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     total_cost = sum(c for _, _, _, c, _ in matches)
                     lines = [
                         f"**DRY RUN — {len(matches)} hosts matched**",
-                        f"By IP: {ip_matches} | By /24: {ip24_matches} | By name: {name_matches} | Translated: {translated_matches}",
+                        f"By IP: {ip_matches} | By /24: {ip24_matches} | By name: {name_matches} | Translated: {translated_matches} | Compound: {compound_matches}",
                         f"Unmatched: {len(unmatched_names)} name entries",
                         f"Skipped: {skipped_range} outside ${min_cost}-${max_cost}",
                     ]
