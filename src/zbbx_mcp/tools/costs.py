@@ -813,6 +813,145 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
             except (httpx.HTTPError, ValueError) as e:
                 return f"Error: {e}"
 
+    if "fill_cost_median" not in skip:
+
+        @mcp.tool()
+        async def fill_cost_median(
+            group_by: str = "product",
+            dry_run: bool = True,
+            instance: str = "",
+        ) -> str:
+            """Estimate {$COST_MONTH} for empty-cost hosts using peer median.
+
+            For each host without a non-zero {$COST_MONTH}, take the median of
+            costed hosts sharing the same grouping key and assign it. Skips
+            hosts without an IP (monitoring) so they stay out of cost totals.
+
+            Args:
+                group_by: "product" (product/tier from host groups) or "provider" (CIDR detection)
+                dry_run: Preview only (default: True)
+                instance: Zabbix instance (optional)
+            """
+            import statistics
+
+            from zbbx_mcp.classify import classify_host as _classify_host
+            from zbbx_mcp.classify import detect_provider
+
+            try:
+                client = resolver.resolve(instance)
+                hosts, macros = await asyncio.gather(
+                    client.call("host.get", {
+                        "output": ["hostid", "host"],
+                        "selectGroups": ["name"],
+                        "selectInterfaces": ["ip"],
+                        "filter": {"status": "0"},
+                    }),
+                    client.call("usermacro.get", {
+                        "output": ["hostmacroid", "hostid", "value"],
+                        "filter": {"macro": "{$COST_MONTH}"},
+                    }),
+                )
+
+                cost_by_hid: dict[str, float] = {}
+                macro_by_hid: dict[str, str] = {}
+                for m in macros:
+                    macro_by_hid[m["hostid"]] = m["hostmacroid"]
+                    try:
+                        v = float(m.get("value") or 0)
+                        if v > 0:
+                            cost_by_hid[m["hostid"]] = v
+                    except (ValueError, TypeError):
+                        pass
+
+                def _key(h):
+                    if group_by == "provider":
+                        ip = host_ip(h)
+                        return detect_provider(ip) if ip else None
+                    prod, tier = _classify_host(h.get("groups", []))
+                    return f"{prod}/{tier}"
+
+                bucket: dict[str, list[float]] = {}
+                for h in hosts:
+                    if h["hostid"] in cost_by_hid:
+                        k = _key(h)
+                        if k:
+                            bucket.setdefault(k, []).append(cost_by_hid[h["hostid"]])
+
+                medians = {k: statistics.median(v) for k, v in bucket.items() if v}
+
+                candidates = []
+                skipped_no_ip = 0
+                skipped_no_peer = 0
+                for h in hosts:
+                    if h["hostid"] in cost_by_hid:
+                        continue
+                    ip = host_ip(h)
+                    if not ip:
+                        skipped_no_ip += 1
+                        continue
+                    k = _key(h)
+                    if not k or k not in medians:
+                        skipped_no_peer += 1
+                        continue
+                    candidates.append((h, k, medians[k]))
+
+                total_delta = sum(c for _, _, c in candidates)
+                if dry_run:
+                    lines = [
+                        f"**Fill cost by {group_by} median — DRY RUN**",
+                        f"Candidates: {len(candidates)} hosts, ${total_delta:,.2f}/mo",
+                        f"Skipped: {skipped_no_ip} no-IP, {skipped_no_peer} no peer",
+                        "",
+                        f"| Host | {group_by.title()} | Median $/mo |",
+                        "|------|---------|-------------|",
+                    ]
+                    by_group: dict[str, int] = {}
+                    for _h, k, _c in candidates:
+                        by_group[k] = by_group.get(k, 0) + 1
+                    for _h, k, c in sorted(candidates, key=lambda x: -x[2])[:25]:
+                        lines.append(f"| {_h['host']} | {k} | ${c:.2f} |")
+                    if len(candidates) > 25:
+                        lines.append(f"*+{len(candidates) - 25} more*")
+                    lines.append("")
+                    lines.append("**By group:**")
+                    for k, n in sorted(by_group.items(), key=lambda x: -x[1]):
+                        lines.append(f"- {k}: {n} hosts @ ${medians[k]:.2f}")
+                    lines.append("\nSet dry_run=false to apply.")
+                    return "\n".join(lines)
+
+                created = 0
+                errors = []
+                for h, _k, cost in candidates:
+                    val = str(round(cost, 2))
+                    try:
+                        if h["hostid"] in macro_by_hid:
+                            await client.call("usermacro.update", {
+                                "hostmacroid": macro_by_hid[h["hostid"]],
+                                "value": val,
+                                "description": f"estimated from {group_by} median",
+                            })
+                        else:
+                            await client.call("usermacro.create", {
+                                "hostid": h["hostid"],
+                                "macro": "{$COST_MONTH}",
+                                "value": val,
+                                "description": f"estimated from {group_by} median",
+                            })
+                        created += 1
+                    except (httpx.HTTPError, ValueError) as e:
+                        errors.append(f"{h['host']}: {e}")
+                        if len(errors) >= 10:
+                            break
+                parts = [
+                    f"**Filled {created}/{len(candidates)} empty-cost hosts with {group_by} median**",
+                    f"Added: ${total_delta:,.2f}/mo",
+                ]
+                if errors:
+                    parts.append(f"Errors: {len(errors)}")
+                return "\n".join(parts)
+            except (httpx.HTTPError, ValueError) as e:
+                return f"Error: {e}"
+
     if "get_cost_gaps" not in skip:
 
         @mcp.tool()
