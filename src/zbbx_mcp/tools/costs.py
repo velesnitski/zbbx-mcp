@@ -1,6 +1,7 @@
 """Server cost management via {$COST_MONTH} host macros."""
 
 import asyncio
+import csv as _csv
 import fnmatch
 import json
 import os
@@ -13,6 +14,47 @@ from zbbx_mcp.resolver import InstanceResolver
 from zbbx_mcp.utils import resolve_group_ids
 
 _IP_RE = re.compile(r"\b(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})\b")
+
+
+def _load_billing_csv(path: str) -> list[dict]:
+    """Read billing CSV with ip + billing_name + price_monthly columns.
+
+    Tolerates column aliases (ip/ipaddress, name/billing_name/hostname,
+    price/price_monthly/cost). Returns list of {ip, name, price} dicts.
+    Skips invalid/reserved IPs and zero/negative prices.
+    """
+    rows: list[dict] = []
+    with open(os.path.expanduser(path)) as f:
+        reader = _csv.DictReader(f)
+        for raw in reader:
+            # Normalize headers
+            norm = {k.strip().lower(): (v or "").strip() for k, v in raw.items() if k}
+            ip = norm.get("ip") or norm.get("ipaddress") or norm.get("ip_address") or ""
+            name = norm.get("billing_name") or norm.get("name") or norm.get("hostname") or ""
+            price_raw = (
+                norm.get("price_monthly") or norm.get("price")
+                or norm.get("cost") or norm.get("cost_month") or ""
+            )
+            try:
+                price = float(price_raw)
+            except (ValueError, TypeError):
+                continue
+            if price <= 0 or not ip:
+                continue
+            # Skip reserved / bogus IPs
+            octets = ip.split(".")
+            if len(octets) != 4:
+                continue
+            try:
+                a, b = int(octets[0]), int(octets[1])
+            except ValueError:
+                continue
+            if a in (0, 10, 127, 169, 172, 192, 224, 255) and (a != 172 or 16 <= b <= 31):
+                # Allow most, skip only clearly-reserved
+                if a in (0, 127, 224, 255):
+                    continue
+            rows.append({"ip": ip, "name": name, "price": price})
+    return rows
 
 
 def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> None:
@@ -1072,3 +1114,196 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 return "\n".join(lines)
             except (httpx.HTTPError, ValueError, OSError) as e:
                 return f"Error: {e}"
+
+    if "reconcile_billing_audit" not in skip:
+
+        @mcp.tool()
+        async def reconcile_billing_audit(
+            file_path: str,
+            output_dir: str = "",
+            instance: str = "",
+        ) -> str:
+            """Categorize billing entries into finance action buckets.
+
+            Buckets: importable, already_costed, stale_ip, subnet_match, onboard, cancel.
+
+            Args:
+                file_path: CSV with ip, billing_name, price_monthly columns
+                output_dir: Directory to write per-bucket CSVs (default: same as input)
+                instance: Zabbix instance (optional)
+            """
+            try:
+                rows = _load_billing_csv(file_path)
+            except (FileNotFoundError, OSError) as e:
+                return f"Failed to read CSV: {e}"
+            if not rows:
+                return "No valid billing rows found."
+
+            try:
+                client = resolver.resolve(instance)
+                hosts = await client.call("host.get", {
+                    "output": ["hostid", "host"],
+                    "selectInterfaces": ["ip"],
+                    "filter": {"status": "0"},
+                })
+                macros = await client.call("usermacro.get", {
+                    "output": ["hostid", "value"],
+                    "filter": {"macro": "{$COST_MONTH}"},
+                })
+                has_cost = {m["hostid"] for m in macros if m.get("value") and m["value"] != "0"}
+            except httpx.HTTPError as e:
+                return f"Zabbix error: {e}"
+
+            ip_to_host: dict[str, dict] = {}
+            subnet_to_host: dict[str, list] = {}
+            name_to_host: dict[str, dict] = {}
+            for h in hosts:
+                hip = host_ip(h)
+                if hip:
+                    ip_to_host[hip] = h
+                    subnet_to_host.setdefault(".".join(hip.split(".")[:3]), []).append(h)
+                name_to_host[h["host"].lower()] = h
+
+            buckets: dict[str, list] = {
+                "importable": [], "already_costed": [], "stale_ip": [],
+                "subnet_match": [], "onboard": [], "cancel": [],
+            }
+
+            for r in rows:
+                ip, name = r["ip"], r["name"]
+                h = ip_to_host.get(ip)
+                if h:
+                    entry = {**r, "zabbix_host": h["host"]}
+                    buckets["already_costed" if h["hostid"] in has_cost else "importable"].append(entry)
+                    continue
+                low = name.lower()
+                matched = None
+                if low:
+                    for key, hh in name_to_host.items():
+                        first = low.split()[0] if low else ""
+                        if key == low or (first and key == first):
+                            matched = hh
+                            break
+                if matched:
+                    buckets["stale_ip"].append({
+                        **r, "zabbix_host": matched["host"], "zabbix_ip": host_ip(matched),
+                    })
+                    continue
+                subnet = ".".join(ip.split(".")[:3])
+                if subnet in subnet_to_host:
+                    sample = subnet_to_host[subnet][0]
+                    buckets["subnet_match"].append({
+                        **r, "zabbix_host": sample["host"], "zabbix_ip": host_ip(sample),
+                    })
+                    continue
+                if name and any(c.isalpha() for c in name) and "." not in name[:5]:
+                    buckets["onboard"].append(r)
+                else:
+                    buckets["cancel"].append(r)
+
+            if not output_dir:
+                output_dir = os.path.dirname(os.path.expanduser(file_path)) or os.getcwd()
+            base = os.path.splitext(os.path.basename(file_path))[0]
+            written = []
+            for bucket, items in buckets.items():
+                if not items:
+                    continue
+                out = os.path.join(output_dir, f"{base}__{bucket}.csv")
+                cols = sorted({k for it in items for k in it})
+                with open(out, "w", newline="") as f:
+                    w = _csv.DictWriter(f, fieldnames=cols)
+                    w.writeheader()
+                    w.writerows(items)
+                written.append(out)
+
+            actions = {
+                "importable": "Safe to import (IP match, no cost)",
+                "already_costed": "Skip — cost already set",
+                "stale_ip": "Billing team: update IP",
+                "subnet_match": "Likely new member — review",
+                "onboard": "Ops: add host to Zabbix",
+                "cancel": "Finance: cancel or investigate",
+            }
+            lines = [f"**Reconciliation: {len(rows)} billing rows**\n",
+                     "| Bucket | Count | $/mo | Action |",
+                     "|--------|------:|-----:|--------|"]
+            for b, items in buckets.items():
+                if not items:
+                    continue
+                total = sum(i["price"] for i in items)
+                lines.append(f"| {b} | {len(items)} | ${total:,.2f} | {actions[b]} |")
+            lines.append(f"\nWrote {len(written)} bucket CSVs to `{output_dir}`")
+            return "\n".join(lines)
+
+    if "find_stale_billing_ips" not in skip:
+
+        @mcp.tool()
+        async def find_stale_billing_ips(
+            file_path: str,
+            instance: str = "",
+        ) -> str:
+            """Detect billing entries where name matches a Zabbix host but IP differs.
+
+            Args:
+                file_path: CSV with ip, billing_name, price_monthly columns
+                instance: Zabbix instance (optional)
+            """
+            try:
+                rows = _load_billing_csv(file_path)
+            except (FileNotFoundError, OSError) as e:
+                return f"Failed to read CSV: {e}"
+            if not rows:
+                return "No valid billing rows."
+
+            try:
+                client = resolver.resolve(instance)
+                hosts = await client.call("host.get", {
+                    "output": ["hostid", "host"],
+                    "selectInterfaces": ["ip"],
+                    "filter": {"status": "0"},
+                })
+            except httpx.HTTPError as e:
+                return f"Zabbix error: {e}"
+
+            name_to_host: dict[str, dict] = {}
+            ip_to_host: dict[str, dict] = {}
+            for h in hosts:
+                name_to_host[h["host"].lower()] = h
+                hip = host_ip(h)
+                if hip:
+                    ip_to_host[hip] = h
+
+            stale: list[dict] = []
+            for r in rows:
+                ip, name = r["ip"], r["name"].lower()
+                if not name or ip in ip_to_host:
+                    continue
+                matched = name_to_host.get(name)
+                if not matched and name:
+                    first = name.split()[0]
+                    matched = name_to_host.get(first)
+                if matched:
+                    zip_ = host_ip(matched)
+                    if zip_ and zip_ != ip:
+                        stale.append({
+                            "billing_name": r["name"],
+                            "billing_ip": ip,
+                            "zabbix_host": matched["host"],
+                            "zabbix_ip": zip_,
+                            "price_monthly": r["price"],
+                        })
+
+            if not stale:
+                return "No stale billing IPs detected."
+
+            total = sum(s["price_monthly"] for s in stale)
+            lines = [f"**{len(stale)} stale billing IPs** (${total:,.2f}/mo affected)\n",
+                     "| Billing name | Billing IP | Zabbix IP | $/mo |",
+                     "|-------------|-----------|-----------|-----:|"]
+            for s in sorted(stale, key=lambda x: -x["price_monthly"])[:50]:
+                lines.append(
+                    f"| {s['billing_name']} | {s['billing_ip']} | {s['zabbix_ip']} | ${s['price_monthly']:.2f} |"
+                )
+            if len(stale) > 50:
+                lines.append(f"\n*+{len(stale) - 50} more*")
+            return "\n".join(lines)
