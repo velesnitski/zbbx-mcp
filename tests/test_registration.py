@@ -25,6 +25,7 @@ EXPECTED_TOOLS = {
     "update_host",
     "delete_host",
     "get_server_clusters",
+    "search_hosts_by_ip",
     "search_hosts_by_location",
     # problems.py
     "get_problems",
@@ -146,6 +147,8 @@ EXPECTED_TOOLS = {
     "import_costs_by_ip",
     "import_cluster_ip_fees",
     "analyze_cost_import",
+    "reconcile_billing_audit",
+    "find_stale_billing_ips",
     "set_bulk_cost",
     "get_cost_summary",
     "get_cost_gaps",

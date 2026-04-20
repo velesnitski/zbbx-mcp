@@ -1,3 +1,4 @@
+import ipaddress
 import re
 from collections import defaultdict
 
@@ -345,7 +346,86 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
             except (httpx.HTTPError, ValueError) as e:
                 return f"Error: {e}"
 
-    
+    if "search_hosts_by_ip" not in skip:
+
+        @mcp.tool()
+        async def search_hosts_by_ip(
+            query: str,
+            max_results: int = 50,
+            instance: str = "",
+        ) -> str:
+            """Search Zabbix hosts by interface IP.
+
+            Accepts exact IP ('1.2.3.4'), CIDR ('1.2.3.0/24'), or prefix ('1.2.3').
+
+            Args:
+                query: IP, CIDR, or dotted prefix
+                max_results: Max results (default: 50)
+                instance: Zabbix instance (optional)
+            """
+            try:
+                client = resolver.resolve(instance)
+                q = query.strip()
+
+                net = None
+                prefix = None
+                exact = None
+                if "/" in q:
+                    try:
+                        net = ipaddress.ip_network(q, strict=False)
+                    except ValueError:
+                        return f"Invalid CIDR: {q}"
+                else:
+                    try:
+                        exact = str(ipaddress.ip_address(q))
+                    except ValueError:
+                        if re.fullmatch(r"\d{1,3}(\.\d{1,3}){0,3}\.?", q):
+                            prefix = q.rstrip(".") + "."
+                        else:
+                            return f"Invalid IP/CIDR/prefix: {q}"
+
+                hosts = await fetch_enabled_hosts(client, extra_output=["name", "status"])
+
+                matches = []
+                for h in hosts:
+                    for iface in h.get("interfaces", []):
+                        ip = iface.get("ip", "")
+                        if not ip:
+                            continue
+                        ok = False
+                        if exact is not None:
+                            ok = ip == exact
+                        elif net is not None:
+                            try:
+                                ok = ipaddress.ip_address(ip) in net
+                            except ValueError:
+                                ok = False
+                        elif prefix is not None:
+                            ok = ip.startswith(prefix)
+                        if ok:
+                            matches.append((h, ip))
+                            break
+
+                if not matches:
+                    return f"No hosts with IP matching '{query}'."
+
+                total = len(matches)
+                matches = matches[:max_results]
+
+                lines = [f"**{total} hosts** matching `{query}`" + (f" (showing {max_results})" if total > max_results else "")]
+                lines.append("| Host | Name | Host ID | IP | Country | Product |")
+                lines.append("|------|------|---------|----|---------|---------|")
+                for h, ip in matches:
+                    cc = extract_country(h["host"])
+                    prod, _ = _classify_host(h.get("groups", []))
+                    lines.append(f"| {h.get('host', '?')} | {h.get('name', '')} | {h.get('hostid', '?')} | {ip} | {cc} | {prod or '?'} |")
+
+                if total > max_results:
+                    lines.append(f"\n*{total - max_results} more hosts omitted*")
+                return "\n".join(lines)
+            except (httpx.HTTPError, ValueError) as e:
+                return f"Error: {e}"
+
     if "search_hosts_by_location" not in skip:
 
         @mcp.tool()
