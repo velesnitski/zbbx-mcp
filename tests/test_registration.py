@@ -184,11 +184,14 @@ EXPECTED_TOOLS = {
     "get_predictive_alerts",
     # ceo_report.py
     "generate_ceo_report",
+    # service_brief.py
+    "generate_service_brief",
     # analysis.py
     "analyze_server_roles",
     "correlate_logs",
     "audit_host_ips",
     "classify_external_ips",
+    "audit_external_ips",
 }
 
 

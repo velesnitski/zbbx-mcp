@@ -12,11 +12,13 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from zbbx_mcp.classify import classify_host as _classify_host
+from zbbx_mcp.classify import resolve_datacenter  # noqa: F401 — re-export
 
 __all__ = [
     "ServerRow", "FetchResult", "TrendRow",
     "extract_country", "build_value_map", "build_max_map", "build_parent_map",
     "countries_for_region", "group_by_country", "host_ip", "is_hidden_product",
+    "resolve_datacenter",
     "_parse_period", "_resolve",
     "HIDE_PRODUCTS", "TRAFFIC_IN_KEYS", "TRAFFIC_OUT_KEYS", "METRIC_KEYS", "GB_BYTES",
     "REGION_MAP", "CAPITAL_COORDS", "STATUS_ENABLED",

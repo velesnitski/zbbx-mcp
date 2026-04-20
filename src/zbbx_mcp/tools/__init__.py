@@ -35,6 +35,7 @@ from zbbx_mcp.tools import (
     report,
     rollback_tools,
     scripts,
+    service_brief,
     services,
     slack,
     templates,
@@ -109,7 +110,7 @@ def register_all(
         inventory_map, inventory_load, report, alerts, users, proxies, maps, media, slack, domains,
         infra_report, costs, traffic, dashboard_report, full_report,
         trends_compare, trends_health,
-        html_report, geo_traffic, geo_health, executive, ceo_report, analysis,
+        html_report, geo_traffic, geo_health, executive, ceo_report, service_brief, analysis,
         web_scenarios,
     ]
     for module in modules:

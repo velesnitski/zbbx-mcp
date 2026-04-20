@@ -9,6 +9,7 @@ from zbbx_mcp.classify import (
 )
 from zbbx_mcp.classify import (
     detect_provider,
+    resolve_datacenter,
 )
 from zbbx_mcp.data import extract_country
 from zbbx_mcp.resolver import InstanceResolver
@@ -74,17 +75,22 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()):
                     for t in sorted(tree[prod]):
                         hosts_list = tree[prod][t]
                         parts.append(f"\n### {t} ({len(hosts_list)})")
-                        parts.append("| Server | IP | Provider | Groups |")
-                        parts.append("|--------|-----|----------|--------|")
+                        parts.append("| Server | IP | Provider | City | Groups |")
+                        parts.append("|--------|-----|----------|------|--------|")
                         for h in hosts_list:
                             ip = ""
                             for iface in h.get("interfaces", []):
                                 if iface.get("ip") and iface["ip"] != "127.0.0.1":
                                     ip = iface["ip"]
                                     break
-                            provider = detect_provider(ip) if ip else ""
+                            if ip:
+                                provider, city = resolve_datacenter(ip)
+                                if provider in ("Unknown", "Other"):
+                                    provider = detect_provider(ip) or provider
+                            else:
+                                provider, city = "", ""
                             groups = ", ".join(g["name"] for g in h.get("groups", []))
-                            parts.append(f"| {h.get('host', '?')} | {ip} | {provider} | {groups} |")
+                            parts.append(f"| {h.get('host', '?')} | {ip} | {provider} | {city} | {groups} |")
                     parts.append("")
 
                 header = f"**Server Map: {total} servers**\n"

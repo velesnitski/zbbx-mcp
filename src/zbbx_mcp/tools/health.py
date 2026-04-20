@@ -131,6 +131,8 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     event_hosts = {e["eventid"]: e.get("hosts", []) for e in events}
                     for p in problems:
                         p["hosts"] = event_hosts.get(p["eventid"], [])
+                    # Drop ghost events from deleted hosts
+                    problems = [p for p in problems if p.get("hosts")]
 
                 # Sort by severity desc (Zabbix 6.4 doesn't support severity sort)
                 problems.sort(key=lambda p: (-int(p.get("severity", "0")), -int(p.get("clock", "0"))))
