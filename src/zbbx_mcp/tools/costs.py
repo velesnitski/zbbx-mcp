@@ -908,6 +908,211 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
             except (httpx.HTTPError, ValueError) as e:
                 return f"Error: {e}"
 
+    if "export_cost_audit" not in skip:
+
+        @mcp.tool()
+        async def export_cost_audit(
+            output_xlsx: str = "~/Downloads/cost_audit.xlsx",
+            mode: str = "estimated",
+            source_xlsx: str = "",
+            instance: str = "",
+        ) -> str:
+            """Export hosts with {$COST_MONTH} source for accounting review.
+
+            mode:
+              - estimated: only hosts whose cost is NOT backed by an exact
+                billing match (bulk patterns, product/provider medians,
+                manual extrapolations, empty descriptions).
+              - all: every costed host, with classification column.
+
+            source_xlsx: optional path to the source-of-truth workbook.
+              When provided, every row is cross-referenced against the
+              Ip-price / Sheet11 tabs and an `in_source_of_truth` column
+              records whether the host's IP is present there. This is the
+              authoritative "100% sure" signal — independent of macro
+              descriptions.
+
+            Output is a single-tab XLSX with host, IP, provider, product,
+            tier, country, cost, source, and (when applicable)
+            in_source_of_truth.
+            """
+            try:
+                import openpyxl
+                from openpyxl.styles import Alignment, Font, PatternFill
+            except ImportError:
+                return "openpyxl not installed"
+
+            from zbbx_mcp.classify import classify_host as _classify_host
+            from zbbx_mcp.classify import detect_provider
+            from zbbx_mcp.data import extract_country
+
+            try:
+                client = resolver.resolve(instance)
+                hosts, macros = await asyncio.gather(
+                    client.call("host.get", {
+                        "output": ["hostid", "host"],
+                        "selectGroups": ["name"],
+                        "selectInterfaces": ["ip"],
+                        "filter": {"status": "0"},
+                    }),
+                    client.call("usermacro.get", {
+                        "output": ["hostid", "value", "description"],
+                        "filter": {"macro": "{$COST_MONTH}"},
+                    }),
+                )
+            except (httpx.HTTPError, ValueError) as e:
+                return f"Error: {e}"
+
+            # Optional: parse source-of-truth XLSX and record sheet+row for each IP.
+            source_ip_locations: dict[str, list[tuple[str, int]]] = {}
+            source_loaded = False
+            source_abs_path = ""
+            if source_xlsx:
+                try:
+                    import openpyxl
+                    source_abs_path = os.path.expanduser(source_xlsx)
+                    wb_src = openpyxl.load_workbook(source_abs_path, data_only=True)
+                    ip_re_local = _IP_RE
+                    for sheet_name in wb_src.sheetnames:
+                        ws_src = wb_src[sheet_name]
+                        for r_idx, row in enumerate(ws_src.iter_rows(values_only=True), start=1):
+                            for cell in row:
+                                if cell is None:
+                                    continue
+                                for ip in ip_re_local.findall(str(cell)):
+                                    source_ip_locations.setdefault(ip, []).append(
+                                        (sheet_name, r_idx)
+                                    )
+                    source_loaded = True
+                except (ImportError, OSError, ValueError) as e:
+                    return f"Failed to load source_xlsx: {e}"
+
+            host_by_id = {h["hostid"]: h for h in hosts}
+            # Explicit "estimated" markers — anything else is assumed billing-backed
+            # (legacy macros with generic descriptions pre-date the provenance tags
+            # and were almost always written from billing matches).
+            estimated_prefixes = (
+                "src:bulk_pattern",
+                "src:product_median",
+                "src:provider_median",
+                "estimated from",
+                "twin cluster",
+            )
+
+            rows = []
+            for m in macros:
+                try:
+                    cost = float(m.get("value") or 0)
+                except (ValueError, TypeError):
+                    continue
+                if cost <= 0:
+                    continue
+                h = host_by_id.get(m["hostid"])
+                if not h:
+                    continue
+                desc = (m.get("description") or "").strip()
+                is_estimated = any(desc.startswith(p) for p in estimated_prefixes)
+                # Heuristic: our only bulk import in this cycle used $210.82 with a
+                # generic description — catch it explicitly.
+                if not is_estimated and abs(cost - 210.82) < 0.01 and not desc.startswith(("src:billing_", "base ")):
+                    is_estimated = True
+                backed = not is_estimated
+                if mode == "estimated" and backed:
+                    continue
+                ip = host_ip(h) or ""
+                prov = detect_provider(ip) if ip else "?"
+                prod, tier = _classify_host(h.get("groups", []))
+                cc = extract_country(h["host"]) or ""
+                src_locs = source_ip_locations.get(ip, []) if source_loaded else []
+                rows.append({
+                    "host": h["host"],
+                    "host_id": h["hostid"],
+                    "ip": ip,
+                    "provider": prov,
+                    "product": prod,
+                    "tier": tier,
+                    "country": cc,
+                    "cost": cost,
+                    "source": desc or "(no tag)",
+                    "billing_backed": "yes" if backed else "no",
+                    "in_source_of_truth": (
+                        ("yes" if src_locs else "no") if source_loaded else ""
+                    ),
+                    "source_row": "; ".join(f"{s}!{r}" for s, r in src_locs[:3]),
+                })
+
+            rows.sort(key=lambda r: (-r["cost"], r["host"]))
+
+            wb = openpyxl.Workbook()
+            ws = wb.active
+            ws.title = "cost_audit"
+            hdr_font = Font(bold=True, color="FFFFFF")
+            hdr_fill = PatternFill("solid", fgColor="366092")
+            center = Alignment(horizontal="center")
+
+            headers = ["Host", "Host ID", "IP", "Provider", "Product", "Tier",
+                       "Country", "Cost $/mo", "Source", "Billing-backed"]
+            if source_loaded:
+                headers.extend(["In source of truth", "Source row"])
+            for i, h in enumerate(headers, start=1):
+                c = ws.cell(row=1, column=i, value=h)
+                c.font = hdr_font
+                c.fill = hdr_fill
+                c.alignment = center
+
+            green_fill = PatternFill("solid", fgColor="D9EAD3")
+            yes_col_idx = 11  # "In source of truth" column index when present
+
+            for i, r in enumerate(rows, start=2):
+                vals = [r["host"], r["host_id"], r["ip"], r["provider"],
+                        r["product"], r["tier"], r["country"], round(r["cost"], 2),
+                        r["source"], r["billing_backed"]]
+                if source_loaded:
+                    vals.append(r["in_source_of_truth"])
+                    vals.append(r["source_row"])
+                for j, v in enumerate(vals, start=1):
+                    cell = ws.cell(row=i, column=j, value=v)
+                    # Hyperlink the source_row cell back into the workbook
+                    if (source_loaded and j == yes_col_idx + 1
+                            and r["source_row"] and source_abs_path):
+                        first = r["source_row"].split(";")[0].strip()
+                        if "!" in first:
+                            sheet_part, row_part = first.split("!", 1)
+                            cell.hyperlink = (
+                                f"file://{source_abs_path}#'{sheet_part}'!A{row_part}"
+                            )
+                            cell.font = Font(color="0563C1", underline="single")
+                # Highlight row green when present in source of truth
+                if source_loaded and r["in_source_of_truth"] == "yes":
+                    for j in range(1, len(vals) + 1):
+                        ws.cell(row=i, column=j).fill = green_fill
+
+            total_row = len(rows) + 3
+            ws.cell(row=total_row, column=1, value=f"TOTAL ({len(rows)} hosts)").font = Font(bold=True)
+            ws.cell(row=total_row, column=8, value=round(sum(r["cost"] for r in rows), 2)).font = Font(bold=True)
+
+            widths = [30, 10, 16, 14, 18, 14, 10, 12, 38, 14]
+            cols = "ABCDEFGHIJ"
+            if source_loaded:
+                widths.extend([18, 28])
+                cols = "ABCDEFGHIJKL"
+            for col, w in zip(cols, widths, strict=True):
+                ws.column_dimensions[col].width = w
+
+            out = os.path.expanduser(output_xlsx)
+            wb.save(out)
+            total = sum(r["cost"] for r in rows)
+            lines = [
+                f"Exported {len(rows)} hosts (mode={mode}), ${total:,.2f}/mo",
+                f"Wrote: {out}",
+            ]
+            if source_loaded:
+                yes = sum(1 for r in rows if r["in_source_of_truth"] == "yes")
+                lines.append(
+                    f"In source of truth: {yes} yes (green) / {len(rows) - yes} no — review needed"
+                )
+            return "\n".join(lines)
+
     if "detect_cost_anomalies" not in skip:
 
         @mcp.tool()
