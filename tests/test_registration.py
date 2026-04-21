@@ -152,6 +152,7 @@ EXPECTED_TOOLS = {
     "set_bulk_cost",
     "fill_cost_median",
     "detect_cost_anomalies",
+    "export_cost_audit",
     "import_from_xlsx",
     "get_cost_summary",
     "get_cost_gaps",
