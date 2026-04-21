@@ -6,6 +6,7 @@ import fnmatch
 import json
 import os
 import re
+import statistics
 
 import httpx
 
@@ -14,6 +15,81 @@ from zbbx_mcp.resolver import InstanceResolver
 from zbbx_mcp.utils import resolve_group_ids
 
 _IP_RE = re.compile(r"\b(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})\b")
+
+# Cost source provenance tags (written into {$COST_MONTH} description).
+COST_SRC_BILLING_IP = "src:billing_ip"
+COST_SRC_BILLING_NAME = "src:billing_name"
+COST_SRC_BILLING_TRANSLATED = "src:billing_translated"
+COST_SRC_BILLING_COMPOUND = "src:billing_compound"
+COST_SRC_CLUSTER_EXTRAS = "src:cluster_extras"
+COST_SRC_BULK_PATTERN = "src:bulk_pattern"
+COST_SRC_PRODUCT_MEDIAN = "src:product_median"
+COST_SRC_PROVIDER_MEDIAN = "src:provider_median"
+
+
+async def _provider_medians(client) -> dict[str, float]:
+    """Compute median {$COST_MONTH} per detected provider across costed hosts."""
+    from zbbx_mcp.classify import detect_provider
+
+    hosts, macros = await asyncio.gather(
+        client.call("host.get", {
+            "output": ["hostid", "host"],
+            "selectInterfaces": ["ip"],
+            "filter": {"status": "0"},
+        }),
+        client.call("usermacro.get", {
+            "output": ["hostid", "value"],
+            "filter": {"macro": "{$COST_MONTH}"},
+        }),
+    )
+    costs: dict[str, float] = {}
+    for m in macros:
+        try:
+            v = float(m.get("value") or 0)
+            if v > 0:
+                costs[m["hostid"]] = v
+        except (ValueError, TypeError):
+            pass
+    bucket: dict[str, list[float]] = {}
+    for h in hosts:
+        if h["hostid"] not in costs:
+            continue
+        ip = host_ip(h)
+        if not ip:
+            continue
+        prov = detect_provider(ip)
+        bucket.setdefault(prov, []).append(costs[h["hostid"]])
+    return {k: statistics.median(v) for k, v in bucket.items() if v}
+
+
+def _sanity_warnings(
+    matches: list[tuple],
+    ip_to_host: dict,
+    medians: dict[str, float],
+    high_factor: float = 2.0,
+    low_factor: float = 0.3,
+) -> list[str]:
+    """Return human-readable warnings for costs far from provider median."""
+    from zbbx_mcp.classify import detect_provider
+
+    warnings = []
+    # matches: (hostname, hid, ip, cost, source)
+    for name, _hid, ip, cost, _src in matches:
+        if not ip:
+            continue
+        prov = detect_provider(ip)
+        med = medians.get(prov)
+        if not med:
+            continue
+        if cost >= med * high_factor:
+            warnings.append(
+                f"{name}: ${cost:.2f} is {cost / med:.1f}× {prov} median ${med:.2f}"
+            )
+        elif cost <= med * low_factor:
+            warnings.append(
+                f"{name}: ${cost:.2f} is {cost / med:.1f}× {prov} median ${med:.2f} (low)"
+            )
+    return warnings
 
 
 def _load_billing_csv(path: str) -> list[dict]:
@@ -144,7 +220,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                                 "hostid": hid,
                                 "macro": "{$COST_MONTH}",
                                 "value": cost_str,
-                                "description": "Monthly server cost in USD",
+                                "description": COST_SRC_BULK_PATTERN,
                             })
                             created += 1
                     except (httpx.HTTPError, ValueError) as e:
@@ -518,6 +594,8 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
 
                 if dry_run:
                     total_cost = sum(c for _, _, _, c, _ in matches)
+                    medians = await _provider_medians(client)
+                    warnings = _sanity_warnings(matches, ip_to_host, medians)
                     lines = [
                         f"**DRY RUN — {len(matches)} hosts matched**",
                         f"By IP: {ip_matches} | By /24: {ip24_matches} | By name: {name_matches} | Translated: {translated_matches} | Compound: {compound_matches}",
@@ -533,6 +611,12 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                         lines.append(f"| {hostname} | {src} | ${cost:.2f} |")
                     if len(matches) > 25:
                         lines.append(f"| ... | +{len(matches) - 25} more | |")
+                    if warnings:
+                        lines.append(f"\n**⚠ Sanity check: {len(warnings)} prices far from provider median**")
+                        for w in warnings[:10]:
+                            lines.append(f"- {w}")
+                        if len(warnings) > 10:
+                            lines.append(f"- ...+{len(warnings) - 10} more")
                     if export_unmatched and unmatched_names:
                         lines.append(f"\nUnmatched exported to `{export_unmatched}`")
                     lines.append("\nSet `dry_run=false` to apply.")
@@ -546,16 +630,27 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 })
                 existing_map = {m["hostid"]: m for m in existing}
 
+                def _src_tag(src: str) -> str:
+                    if src == "ip" or src == "ip/24":
+                        return COST_SRC_BILLING_IP
+                    if src == "translated":
+                        return COST_SRC_BILLING_TRANSLATED
+                    if src.startswith("compound"):
+                        return COST_SRC_BILLING_COMPOUND
+                    return COST_SRC_BILLING_NAME
+
                 created = updated = unchanged = 0
                 errors = []
-                for hostname, hid, _ip, cost, _src in matches:
+                for hostname, hid, _ip, cost, src in matches:
                     cost_str = str(round(cost, 2))
+                    desc = _src_tag(src)
                     try:
                         if hid in existing_map:
                             if existing_map[hid]["value"] != cost_str:
                                 await client.call("usermacro.update", {
                                     "hostmacroid": existing_map[hid]["hostmacroid"],
                                     "value": cost_str,
+                                    "description": desc,
                                 })
                                 updated += 1
                             else:
@@ -565,7 +660,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                                 "hostid": hid,
                                 "macro": "{$COST_MONTH}",
                                 "value": cost_str,
-                                "description": "Monthly server cost (USD)",
+                                "description": desc,
                             })
                             created += 1
                     except (httpx.HTTPError, ValueError) as e:
@@ -666,7 +761,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                             break
 
                     new_val = round(current + extras, 2)
-                    desc = f"base {current:.2f} + {ip_count} extra IP{'s' if ip_count > 1 else ''} ({extras:.2f})"
+                    desc = f"{COST_SRC_CLUSTER_EXTRAS} base {current:.2f} + {ip_count} extra IP{'s' if ip_count > 1 else ''} ({extras:.2f})"
                     updates.append({
                         "hostid": h["hostid"],
                         "host": name,
@@ -813,6 +908,240 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
             except (httpx.HTTPError, ValueError) as e:
                 return f"Error: {e}"
 
+    if "detect_cost_anomalies" not in skip:
+
+        @mcp.tool()
+        async def detect_cost_anomalies(
+            high_factor: float = 2.5,
+            low_factor: float = 0.3,
+            max_results: int = 50,
+            instance: str = "",
+        ) -> str:
+            """Flag hosts whose {$COST_MONTH} is far from its provider median.
+
+            Useful after an import to catch mis-allocations (e.g. a bulk
+            aggregate applied as a per-server rate). Compares each costed
+            host's value to its provider median and reports the outliers.
+
+            Args:
+                high_factor: flag hosts at or above this multiple of median (default: 2.5)
+                low_factor: flag hosts at or below this multiple of median (default: 0.3)
+                max_results: cap on rows shown
+                instance: Zabbix instance (optional)
+            """
+            from zbbx_mcp.classify import detect_provider
+
+            try:
+                client = resolver.resolve(instance)
+                medians = await _provider_medians(client)
+                hosts, macros = await asyncio.gather(
+                    client.call("host.get", {
+                        "output": ["hostid", "host"],
+                        "selectInterfaces": ["ip"],
+                        "filter": {"status": "0"},
+                    }),
+                    client.call("usermacro.get", {
+                        "output": ["hostid", "value", "description"],
+                        "filter": {"macro": "{$COST_MONTH}"},
+                    }),
+                )
+                host_by_id = {h["hostid"]: h for h in hosts}
+                anomalies = []
+                for m in macros:
+                    try:
+                        v = float(m.get("value") or 0)
+                    except (ValueError, TypeError):
+                        continue
+                    if v <= 0:
+                        continue
+                    h = host_by_id.get(m["hostid"])
+                    if not h:
+                        continue
+                    ip = host_ip(h)
+                    if not ip:
+                        continue
+                    prov = detect_provider(ip)
+                    med = medians.get(prov)
+                    if not med:
+                        continue
+                    ratio = v / med
+                    if ratio >= high_factor or ratio <= low_factor:
+                        anomalies.append({
+                            "host": h["host"],
+                            "provider": prov,
+                            "cost": v,
+                            "median": med,
+                            "ratio": ratio,
+                            "source": (m.get("description") or "").strip() or "(no tag)",
+                        })
+                anomalies.sort(key=lambda a: -abs(a["ratio"] - 1))
+                if not anomalies:
+                    return "No cost anomalies detected."
+                lines = [
+                    f"**{len(anomalies)} cost anomalies detected**",
+                    f"Thresholds: >{high_factor}× or <{low_factor}× provider median\n",
+                    "| Host | Provider | $/mo | Median | Ratio | Source |",
+                    "|------|----------|------|--------|-------|--------|",
+                ]
+                for a in anomalies[:max_results]:
+                    lines.append(
+                        f"| {a['host']} | {a['provider']} | ${a['cost']:.2f} | "
+                        f"${a['median']:.2f} | {a['ratio']:.1f}× | {a['source']} |"
+                    )
+                if len(anomalies) > max_results:
+                    lines.append(f"*+{len(anomalies) - max_results} more*")
+                return "\n".join(lines)
+            except (httpx.HTTPError, ValueError) as e:
+                return f"Error: {e}"
+
+    if "import_from_xlsx" not in skip:
+
+        @mcp.tool()
+        async def import_from_xlsx(
+            file_path: str,
+            output_csv: str = "/tmp/billing_xlsx.csv",
+            eur_usd: float = 1.08,
+        ) -> str:
+            """Parse billing XLSX (Ip-price + Sheet11 structures) to a flat CSV.
+
+            Expects two sheet shapes used by the current accounting file:
+
+            - A detailed sheet with a primary IP column and a price-per-server
+              column (columns L–O in the current layout). Addons in the next
+              column are summed into the per-server price.
+            - A simple sheet with columns: Name, NS, IPv4, Price (EUR) — prices
+              may use comma decimal separator.
+
+            Output CSV columns: ip, billing_name, price_monthly (USD).
+            Only the primary IP of each row gets the price; siblings in the
+            same row are written with price 0 so reconcile_billing_audit can
+            still bucket them without double-counting.
+
+            Args:
+                file_path: Path to the XLSX file
+                output_csv: Where to write the flat CSV (default /tmp/billing_xlsx.csv)
+                eur_usd: EUR→USD conversion rate for sheets priced in EUR (default 1.08)
+            """
+            try:
+                import openpyxl
+            except ImportError:
+                return "openpyxl not installed. Run: uv pip install openpyxl"
+
+            try:
+                path = os.path.expanduser(file_path)
+                if not os.path.isfile(path):
+                    return f"File not found: {path}"
+                wb = openpyxl.load_workbook(path, data_only=True)
+            except (OSError, ValueError) as e:
+                return f"Failed to open XLSX: {e}"
+
+            rows: list[dict] = []
+            ip_re = _IP_RE
+
+            def _pick_price(values, max_idx=17):
+                """Return first positive price in cols 13–16 (server/Price$/Addons)."""
+                p1 = values[13] if len(values) > 13 else None
+                p2 = values[14] if len(values) > 14 else None
+                p_add = values[16] if len(values) > 16 else None
+                price = None
+                for p in (p1, p2):
+                    if isinstance(p, (int, float)) and 0 < p < 5000:
+                        price = float(p)
+                        break
+                if price is None:
+                    return None
+                if isinstance(p_add, (int, float)) and p_add > 0:
+                    price += float(p_add)
+                return price
+
+            # Structured detailed sheets (Ip-price style)
+            for sheet_name in wb.sheetnames:
+                ws = wb[sheet_name]
+                headers = [
+                    str(c or "").strip().lower()
+                    for c in next(ws.iter_rows(values_only=True), ())
+                ]
+                # Heuristic: detailed sheet has an "ip server" and "price server" header
+                has_ip_col = any("ip server" in h or "ip сервера" in h for h in headers)
+                has_price_col = any("price server" in h or h.startswith("price") for h in headers)
+                if not (has_ip_col and has_price_col):
+                    continue
+                for i, row in enumerate(ws.iter_rows(values_only=True)):
+                    if i < 1:
+                        continue
+                    name = row[11] if len(row) > 11 else None
+                    ip_cell = row[12] if len(row) > 12 else None
+                    if not ip_cell:
+                        continue
+                    ips = ip_re.findall(str(ip_cell))
+                    if not ips:
+                        continue
+                    price = _pick_price(row)
+                    if price is None:
+                        continue
+                    for j, ip in enumerate(ips):
+                        rows.append({
+                            "ip": ip,
+                            "name": str(name or "").strip(),
+                            "price": price if j == 0 else 0.0,
+                        })
+
+            # Simple sheets (Sheet11 style): Name | NS | IPv4 | Price
+            for sheet_name in wb.sheetnames:
+                ws = wb[sheet_name]
+                first = next(ws.iter_rows(values_only=True), ())
+                headers = [str(c or "").strip().lower() for c in first]
+                if len(headers) < 4:
+                    continue
+                if not (headers[0] in ("name", "hostname") and
+                        headers[2] in ("ipv4", "ip", "ip address") and
+                        headers[3].startswith("price")):
+                    continue
+                for i, row in enumerate(ws.iter_rows(values_only=True)):
+                    if i < 1:
+                        continue
+                    name, _ns, ip, pr = row[:4]
+                    if not ip:
+                        continue
+                    if isinstance(pr, str):
+                        try:
+                            price = float(pr.replace(",", "."))
+                        except ValueError:
+                            continue
+                    elif isinstance(pr, (int, float)):
+                        price = float(pr)
+                    else:
+                        continue
+                    # Sheet11 prices are in EUR — convert.
+                    rows.append({
+                        "ip": str(ip).strip(),
+                        "name": str(name or "").strip(),
+                        "price": price * eur_usd,
+                    })
+
+            # Dedupe by ip, keep max price
+            by_ip: dict[str, dict] = {}
+            for r in rows:
+                if r["ip"] in by_ip and r["price"] <= by_ip[r["ip"]]["price"]:
+                    continue
+                by_ip[r["ip"]] = r
+
+            out_path = os.path.expanduser(output_csv)
+            with open(out_path, "w", newline="") as f:
+                w = _csv.writer(f)
+                w.writerow(["ip", "billing_name", "price_monthly"])
+                for r in by_ip.values():
+                    w.writerow([r["ip"], r["name"], f"{r['price']:.2f}"])
+
+            total = sum(r["price"] for r in by_ip.values())
+            paid = sum(1 for r in by_ip.values() if r["price"] > 0)
+            return (
+                f"Parsed {len(by_ip)} unique IPs from {len(wb.sheetnames)} sheets\n"
+                f"Priced: {paid} | Extras (price=0): {len(by_ip) - paid}\n"
+                f"Total: ${total:,.2f}/mo\n"
+                f"Wrote: {out_path}"
+            )
+
     if "fill_cost_median" not in skip:
 
         @mcp.tool()
@@ -928,14 +1257,14 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                             await client.call("usermacro.update", {
                                 "hostmacroid": macro_by_hid[h["hostid"]],
                                 "value": val,
-                                "description": f"estimated from {group_by} median",
+                                "description": COST_SRC_PRODUCT_MEDIAN if group_by == "product" else COST_SRC_PROVIDER_MEDIAN,
                             })
                         else:
                             await client.call("usermacro.create", {
                                 "hostid": h["hostid"],
                                 "macro": "{$COST_MONTH}",
                                 "value": val,
-                                "description": f"estimated from {group_by} median",
+                                "description": COST_SRC_PRODUCT_MEDIAN if group_by == "product" else COST_SRC_PROVIDER_MEDIAN,
                             })
                         created += 1
                     except (httpx.HTTPError, ValueError) as e:

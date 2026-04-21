@@ -151,6 +151,8 @@ EXPECTED_TOOLS = {
     "find_stale_billing_ips",
     "set_bulk_cost",
     "fill_cost_median",
+    "detect_cost_anomalies",
+    "import_from_xlsx",
     "get_cost_summary",
     "get_cost_gaps",
     "get_cost_efficiency",
