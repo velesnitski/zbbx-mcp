@@ -1,5 +1,7 @@
+import pytest
+
 from zbbx_mcp.data import build_max_map, build_value_map, extract_country
-from zbbx_mcp.utils import ROLLBACK_STRIP_FIELDS, format_results
+from zbbx_mcp.utils import ROLLBACK_STRIP_FIELDS, format_results, parse_time
 
 
 class TestFormatResults:
@@ -88,6 +90,57 @@ class TestBuildMaxMap:
         result = build_max_map(items)
         assert result["1"] == 100.0
         assert result["2"] == 200.0
+
+
+class TestParseTime:
+    def test_epoch_int(self):
+        assert parse_time(1715000000) == 1715000000
+
+    def test_epoch_string(self):
+        assert parse_time("1715000000") == 1715000000
+
+    def test_iso_date(self):
+        # UTC midnight of 2026-04-19
+        assert parse_time("2026-04-19") == 1776556800
+
+    def test_iso_datetime_space(self):
+        # 2026-04-19T10:30:00 UTC
+        assert parse_time("2026-04-19 10:30:00") == 1776594600
+
+    def test_iso_datetime_t(self):
+        assert parse_time("2026-04-19T10:30:00") == 1776594600
+
+    def test_relative_hours(self):
+        result = parse_time("24h", now=1_000_000)
+        assert result == 1_000_000 - 24 * 3600
+
+    def test_relative_days(self):
+        result = parse_time("7d", now=1_000_000)
+        assert result == 1_000_000 - 7 * 86400
+
+    def test_relative_minutes(self):
+        result = parse_time("30m", now=1_000_000)
+        assert result == 1_000_000 - 30 * 60
+
+    def test_relative_seconds(self):
+        result = parse_time("90s", now=1_000_000)
+        assert result == 1_000_000 - 90
+
+    def test_relative_weeks(self):
+        result = parse_time("2w", now=1_000_000)
+        assert result == 1_000_000 - 2 * 604800
+
+    def test_relative_case_insensitive(self):
+        result = parse_time("1H", now=1_000_000)
+        assert result == 1_000_000 - 3600
+
+    def test_invalid_empty(self):
+        with pytest.raises(ValueError):
+            parse_time("")
+
+    def test_invalid_garbage(self):
+        with pytest.raises(ValueError):
+            parse_time("not-a-time")
 
 
 class TestRollbackStripFields:

@@ -2,6 +2,7 @@ import httpx
 
 from zbbx_mcp.formatters import _ts
 from zbbx_mcp.resolver import InstanceResolver
+from zbbx_mcp.utils import parse_time
 
 ITEM_TYPES = {
     "0": "Zabbix agent",
@@ -312,6 +313,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
             value_type: int = 0,
             limit: int = 20,
             time_from: str = "",
+            time_till: str = "",
             instance: str = "",
         ) -> str:
             """Get history data for a specific Zabbix item.
@@ -320,7 +322,8 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 item_id: Zabbix item ID
                 value_type: 0=float, 1=character, 2=log, 3=unsigned int, 4=text (default: 0)
                 limit: Number of history records to return (default: 20)
-                time_from: Unix timestamp to start from (optional, default: last records)
+                time_from: Start time — epoch, ISO ("2026-04-19"), ISO datetime, or relative ("24h", "7d")
+                time_till: End time — same formats as time_from (optional)
                 instance: Zabbix instance name (optional, for multi-instance setups)
             """
             try:
@@ -347,7 +350,15 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     "output": "extend",
                 }
                 if time_from:
-                    params["time_from"] = int(time_from)
+                    try:
+                        params["time_from"] = parse_time(time_from)
+                    except ValueError as e:
+                        return f"Invalid time_from: {e}"
+                if time_till:
+                    try:
+                        params["time_till"] = parse_time(time_till)
+                    except ValueError as e:
+                        return f"Invalid time_till: {e}"
 
                 data = await client.call("history.get", params)
 
