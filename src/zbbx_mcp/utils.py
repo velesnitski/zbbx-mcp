@@ -8,7 +8,6 @@ from datetime import datetime, timezone
 
 from zbbx_mcp.client import ZabbixClient
 
-
 _RELATIVE_RE = re.compile(r"^\s*(\d+)\s*([smhdw])\s*$", re.IGNORECASE)
 _RELATIVE_UNITS = {"s": 1, "m": 60, "h": 3600, "d": 86400, "w": 604800}
 
