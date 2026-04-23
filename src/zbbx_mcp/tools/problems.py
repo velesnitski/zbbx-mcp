@@ -349,3 +349,48 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 return " ".join(parts)
             except (httpx.HTTPError, ValueError) as e:
                 return f"Error querying Zabbix: {e}"
+
+    if "bulk_acknowledge" not in skip:
+
+        @mcp.tool()
+        async def bulk_acknowledge(
+            event_ids: str,
+            message: str = "",
+            close: bool = False,
+            instance: str = "",
+        ) -> str:
+            """Acknowledge many events in one API call (mass-incident response).
+
+            Args:
+                event_ids: Comma- or space-separated Zabbix event IDs
+                message: Optional acknowledgement message applied to all
+                close: Also mark each problem for closing (default: False)
+                instance: Zabbix instance name (optional, for multi-instance setups)
+            """
+            try:
+                ids = [e.strip() for e in event_ids.replace(",", " ").split() if e.strip()]
+                if not ids:
+                    return "No event IDs provided."
+
+                client = resolver.resolve(instance)
+
+                action = 2
+                if close:
+                    action |= 1
+                if message:
+                    action |= 4
+
+                await client.call("event.acknowledge", {
+                    "eventids": ids,
+                    "action": action,
+                    "message": message,
+                })
+
+                parts = [f"Acknowledged {len(ids)} event(s)."]
+                if close:
+                    parts.append("Marked for closing.")
+                if message:
+                    parts.append(f"Message: {message}")
+                return " ".join(parts)
+            except (httpx.HTTPError, ValueError) as e:
+                return f"Error querying Zabbix: {e}"

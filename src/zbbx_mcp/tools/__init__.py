@@ -50,6 +50,7 @@ from zbbx_mcp.tools import (
 # Tools that modify data — blocked in read-only mode
 WRITE_TOOLS = frozenset({
     "acknowledge_problem",
+    "bulk_acknowledge",
     # Host CRUD
     "create_host",
     "update_host",
