@@ -57,6 +57,25 @@ def _strip_prior_cluster_extras(current: float, description: str) -> float:
             return current
 
 
+def _cluster_new_val(
+    current: float,
+    existing_desc: str,
+    extras: float,
+    overwrite_base: float = -1.0,
+) -> tuple[float, float]:
+    """Return (base, new_val) for a cluster_extras update.
+
+    overwrite_base >= 0 replaces the base directly. Otherwise we strip any
+    prior cluster_extras contribution so re-runs with the same extras
+    converge instead of stacking.
+    """
+    if overwrite_base >= 0:
+        base = round(float(overwrite_base), 2)
+    else:
+        base = _strip_prior_cluster_extras(current, existing_desc)
+    return base, round(base + extras, 2)
+
+
 async def _provider_medians(client) -> dict[str, float]:
     """Compute median {$COST_MONTH} per detected provider across costed hosts."""
     from zbbx_mcp.classify import detect_provider
@@ -797,12 +816,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                                 current = 0.0
                             break
 
-                    if overwrite_base >= 0:
-                        base = round(float(overwrite_base), 2)
-                    else:
-                        base = _strip_prior_cluster_extras(current, existing_desc)
-
-                    new_val = round(base + extras, 2)
+                    base, new_val = _cluster_new_val(current, existing_desc, extras, overwrite_base)
                     desc = f"{COST_SRC_CLUSTER_EXTRAS} base {base:.2f} + {ip_count} extra IP{'s' if ip_count > 1 else ''} ({extras:.2f})"
                     updates.append({
                         "hostid": h["hostid"],

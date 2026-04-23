@@ -5,6 +5,7 @@ from pathlib import Path
 
 from zbbx_mcp.tools.costs import (
     COST_SRC_CLUSTER_EXTRAS,
+    _cluster_new_val,
     _load_billing_csv,
     _strip_prior_cluster_extras,
 )
@@ -131,3 +132,47 @@ class TestStripPriorClusterExtras:
         # If the base number is corrupt, we fall back to current (safe)
         desc = f"{COST_SRC_CLUSTER_EXTRAS} base N/A + 1 extra IP (50.00)"
         assert _strip_prior_cluster_extras(200.0, desc) == 200.0
+
+
+class TestClusterNewVal:
+    def test_fresh_host_no_prior_description(self):
+        base, new_val = _cluster_new_val(current=100.0, existing_desc="", extras=25.0)
+        assert (base, new_val) == (100.0, 125.0)
+
+    def test_idempotent_rerun_with_prior_cluster_extras(self):
+        # Simulate calling again with the same extras: new_val should match
+        # what the prior run already wrote (120.50).
+        desc = f"{COST_SRC_CLUSTER_EXTRAS} base 80.50 + 2 extra IPs (40.00)"
+        base, new_val = _cluster_new_val(current=120.50, existing_desc=desc, extras=40.0)
+        assert (base, new_val) == (80.50, 120.50)
+
+    def test_rerun_with_changed_extras_uses_prior_base(self):
+        # New extras amount comes in; we still start from the recorded base.
+        desc = f"{COST_SRC_CLUSTER_EXTRAS} base 80.00 + 2 extra IPs (40.00)"
+        base, new_val = _cluster_new_val(current=120.0, existing_desc=desc, extras=55.0)
+        assert (base, new_val) == (80.0, 135.0)
+
+    def test_overwrite_base_replaces_current(self):
+        # overwrite_base wins even when the macro already has a billing-backed
+        # description. This is the "reset a stale base" escape hatch.
+        desc = "src:billing_ip exact-match"
+        base, new_val = _cluster_new_val(
+            current=450.0, existing_desc=desc, extras=20.0, overwrite_base=100.0,
+        )
+        assert (base, new_val) == (100.0, 120.0)
+
+    def test_overwrite_base_zero_is_honoured(self):
+        # overwrite_base=0 is a legal request (reset to zero then add extras)
+        base, new_val = _cluster_new_val(
+            current=999.0, existing_desc="anything", extras=42.0, overwrite_base=0.0,
+        )
+        assert (base, new_val) == (0.0, 42.0)
+
+    def test_overwrite_negative_skipped(self):
+        # overwrite_base=-1 is the default sentinel; behaviour must match the
+        # no-override path.
+        desc = f"{COST_SRC_CLUSTER_EXTRAS} base 50.00 + 1 extra IP (10.00)"
+        base, new_val = _cluster_new_val(
+            current=60.0, existing_desc=desc, extras=10.0, overwrite_base=-1.0,
+        )
+        assert (base, new_val) == (50.0, 60.0)
