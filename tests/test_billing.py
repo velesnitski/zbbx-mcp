@@ -3,7 +3,11 @@
 import tempfile
 from pathlib import Path
 
-from zbbx_mcp.tools.costs import _load_billing_csv
+from zbbx_mcp.tools.costs import (
+    COST_SRC_CLUSTER_EXTRAS,
+    _load_billing_csv,
+    _strip_prior_cluster_extras,
+)
 
 
 def _write_csv(content: str) -> str:
@@ -96,3 +100,34 @@ class TestLoadBillingCsv:
         assert len(rows) == 1
         assert rows[0]["ip"] == "1.2.3.4"
         Path(path).unlink()
+
+
+class TestStripPriorClusterExtras:
+    def test_no_description(self):
+        assert _strip_prior_cluster_extras(100.0, "") == 100.0
+
+    def test_unrelated_description(self):
+        assert _strip_prior_cluster_extras(100.0, "src:billing_ip exact match") == 100.0
+
+    def test_single_extra_ip(self):
+        desc = f"{COST_SRC_CLUSTER_EXTRAS} base 150.00 + 1 extra IP (50.00)"
+        # Current = 200 (= base 150 + extras 50). Expect base = 150.
+        assert _strip_prior_cluster_extras(200.0, desc) == 150.0
+
+    def test_multiple_extra_ips(self):
+        desc = f"{COST_SRC_CLUSTER_EXTRAS} base 100.00 + 3 extra IPs (75.00)"
+        assert _strip_prior_cluster_extras(175.0, desc) == 100.0
+
+    def test_idempotency_recompute(self):
+        # Simulate a re-run: existing macro was written by a previous
+        # cluster_extras pass, and we're applying the same input again.
+        # The true base stays put; new_val will stay put too.
+        desc = f"{COST_SRC_CLUSTER_EXTRAS} base 80.50 + 2 extra IPs (40.00)"
+        base = _strip_prior_cluster_extras(120.50, desc)
+        assert base == 80.50
+        # Next call would compute new_val = base + extras = 80.50 + 40 = 120.50.
+
+    def test_malformed_base_falls_back_to_current(self):
+        # If the base number is corrupt, we fall back to current (safe)
+        desc = f"{COST_SRC_CLUSTER_EXTRAS} base N/A + 1 extra IP (50.00)"
+        assert _strip_prior_cluster_extras(200.0, desc) == 200.0
