@@ -26,6 +26,36 @@ COST_SRC_BULK_PATTERN = "src:bulk_pattern"
 COST_SRC_PRODUCT_MEDIAN = "src:product_median"
 COST_SRC_PROVIDER_MEDIAN = "src:provider_median"
 
+# Matches an existing cluster-extras description so re-runs can strip the
+# prior contribution instead of stacking it on top.
+_CLUSTER_EXTRAS_RE = re.compile(
+    r"^\s*" + re.escape(COST_SRC_CLUSTER_EXTRAS) +
+    r"\s+base\s+([\d.]+)\s*\+\s*\d+\s+extra\s+IPs?\s*\(([\d.]+)\)\s*$"
+)
+
+
+def _strip_prior_cluster_extras(current: float, description: str) -> float:
+    """Return the true base cost, stripping any prior src:cluster_extras addition.
+
+    If description is a previous cluster_extras write, we trust the base
+    recorded there (authoritative value at the time of that write).
+    Otherwise fall back to current - parsed_extras, then to current.
+    """
+    if not description:
+        return current
+    m = _CLUSTER_EXTRAS_RE.match(description)
+    if not m:
+        return current
+    try:
+        prior_base = float(m.group(1))
+        return prior_base
+    except (ValueError, TypeError):
+        try:
+            prior_extras = float(m.group(2))
+            return round(current - prior_extras, 2)
+        except (ValueError, TypeError):
+            return current
+
 
 async def _provider_medians(client) -> dict[str, float]:
     """Compute median {$COST_MONTH} per detected provider across costed hosts."""
@@ -692,13 +722,15 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
             file_path: str = "",
             fees_json: str = "",
             dry_run: bool = True,
+            overwrite_base: float = -1.0,
             instance: str = "",
         ) -> str:
             """Add extra-IP billing fees to cluster primary {$COST_MONTH} macros.
 
-            For each entry, finds the Zabbix host by name, reads the existing
-            {$COST_MONTH}, adds the extra_cost_month, and writes back with an
-            audit description ("base X + N extra IPs (Y)").
+            Idempotent: if the existing macro was written by a prior
+            cluster_extras run, the previous extras contribution is stripped
+            before adding new ones. Re-running with the same input produces
+            the same final value.
 
             Input format: list of {"cluster": str, "extra_ips": [str], "extra_cost_month": float}
 
@@ -706,6 +738,9 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 file_path: Path to JSON file with cluster fee entries (optional)
                 fees_json: Inline JSON (optional; use this OR file_path)
                 dry_run: Preview changes without applying (default: True)
+                overwrite_base: If >= 0, replace the existing base with this value
+                    (per cluster) instead of trusting what is already in the macro.
+                    Use to reset a stale base without first wiping {$COST_MONTH}.
                 instance: Zabbix instance (optional)
             """
             try:
@@ -731,7 +766,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 hosts = await client.call("host.get", {
                     "output": ["hostid", "host"],
                     "filter": {"host": host_names},
-                    "selectMacros": ["hostmacroid", "macro", "value"],
+                    "selectMacros": ["hostmacroid", "macro", "value", "description"],
                 })
                 host_by_name = {h["host"]: h for h in hosts}
 
@@ -751,22 +786,30 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
 
                     existing_macro = None
                     current = 0.0
+                    existing_desc = ""
                     for m in h.get("macros", []):
                         if m["macro"] == "{$COST_MONTH}":
                             existing_macro = m
+                            existing_desc = m.get("description", "") or ""
                             try:
                                 current = float(m["value"])
                             except (ValueError, TypeError):
                                 current = 0.0
                             break
 
-                    new_val = round(current + extras, 2)
-                    desc = f"{COST_SRC_CLUSTER_EXTRAS} base {current:.2f} + {ip_count} extra IP{'s' if ip_count > 1 else ''} ({extras:.2f})"
+                    if overwrite_base >= 0:
+                        base = round(float(overwrite_base), 2)
+                    else:
+                        base = _strip_prior_cluster_extras(current, existing_desc)
+
+                    new_val = round(base + extras, 2)
+                    desc = f"{COST_SRC_CLUSTER_EXTRAS} base {base:.2f} + {ip_count} extra IP{'s' if ip_count > 1 else ''} ({extras:.2f})"
                     updates.append({
                         "hostid": h["hostid"],
                         "host": name,
                         "macroid": existing_macro["hostmacroid"] if existing_macro else None,
                         "current": current,
+                        "base": base,
                         "extras": extras,
                         "new": new_val,
                         "desc": desc,
@@ -779,11 +822,14 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     header += f" ({len(missing)} missing)"
 
                 lines = [header + ("  DRY RUN" if dry_run else ""), ""]
-                lines.append("| Cluster | Current | +Extras | New | IPs |")
-                lines.append("|---------|---------|---------|-----|-----|")
+                lines.append("| Cluster | Current | Base | +Extras | New | IPs |")
+                lines.append("|---------|---------|------|---------|-----|-----|")
                 for u in sorted(updates, key=lambda x: -x["extras"])[:25]:
                     ip_count = u["desc"].split()[3]
-                    lines.append(f"| {u['host']} | ${u['current']:.2f} | ${u['extras']:.2f} | ${u['new']:.2f} | {ip_count} |")
+                    lines.append(
+                        f"| {u['host']} | ${u['current']:.2f} | ${u['base']:.2f} | "
+                        f"${u['extras']:.2f} | ${u['new']:.2f} | {ip_count} |"
+                    )
                 if len(updates) > 25:
                     lines.append(f"*+{len(updates) - 25} more clusters*")
                 if missing:
