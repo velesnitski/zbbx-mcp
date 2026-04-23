@@ -1,5 +1,6 @@
 from zbbx_mcp.formatters import (
     _ts,
+    cell,
     format_host_detail,
     format_host_list,
     format_hostgroup_list,
@@ -92,6 +93,23 @@ class TestFormatHostDetail:
         assert "Web servers" in result
         assert "Agent" in result
         assert "10.0.0.1" in result
+
+
+class TestCell:
+    def test_plain(self):
+        assert cell("hello") == "hello"
+
+    def test_none(self):
+        assert cell(None) == ""
+
+    def test_escapes_pipe(self):
+        assert cell("a|b") == "a\\|b"
+
+    def test_flattens_newline(self):
+        assert cell("line1\nline2") == "line1 line2"
+
+    def test_non_string(self):
+        assert cell(42) == "42"
 
 
 class TestFormatHostgroupList:

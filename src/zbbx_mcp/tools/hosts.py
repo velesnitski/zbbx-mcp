@@ -12,7 +12,7 @@ from zbbx_mcp.data import (
     fetch_traffic_map,
     host_ip,
 )
-from zbbx_mcp.formatters import format_host_detail, format_host_list
+from zbbx_mcp.formatters import cell, format_host_detail, format_host_list
 from zbbx_mcp.resolver import InstanceResolver
 from zbbx_mcp.utils import resolve_group_ids
 
@@ -93,7 +93,10 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     for h in data:
                         st = "Enabled" if h.get("status") == "0" else "Disabled"
                         ip = host_ip(h)
-                        lines.append(f"| {h.get('host', '?')} | {h.get('name', '')} | {h.get('hostid', '?')} | {st} | {ip} |")
+                        lines.append(
+                            f"| {cell(h.get('host', '?'))} | {cell(h.get('name', ''))} "
+                            f"| {cell(h.get('hostid', '?'))} | {st} | {cell(ip)} |"
+                        )
                     return f"{header}\n\n" + "\n".join(lines)
                 else:
                     result = format_host_list(data)
