@@ -143,6 +143,37 @@ class TestParseTime:
             parse_time("not-a-time")
 
 
+class TestParseDelaySeconds:
+    def test_bare_seconds(self):
+        from zbbx_mcp.tools.items import _parse_delay_seconds
+        assert _parse_delay_seconds("60") == 60
+
+    def test_suffix_s(self):
+        from zbbx_mcp.tools.items import _parse_delay_seconds
+        assert _parse_delay_seconds("30s") == 30
+
+    def test_minutes(self):
+        from zbbx_mcp.tools.items import _parse_delay_seconds
+        assert _parse_delay_seconds("5m") == 300
+
+    def test_hours(self):
+        from zbbx_mcp.tools.items import _parse_delay_seconds
+        assert _parse_delay_seconds("2h") == 7200
+
+    def test_complex_schedule_falls_back(self):
+        from zbbx_mcp.tools.items import _parse_delay_seconds
+        # Scheduled interval — use the plain-interval head if parseable, else default
+        assert _parse_delay_seconds("30s;wd1-5,9:00-18:00/1m") == 30
+
+    def test_empty(self):
+        from zbbx_mcp.tools.items import _parse_delay_seconds
+        assert _parse_delay_seconds("") == 300
+
+    def test_unparseable(self):
+        from zbbx_mcp.tools.items import _parse_delay_seconds
+        assert _parse_delay_seconds("weird-expression") == 300
+
+
 class TestRollbackStripFields:
     def test_contains_required(self):
         assert "lastchange" in ROLLBACK_STRIP_FIELDS
