@@ -76,6 +76,42 @@ def _cluster_new_val(
     return base, round(base + extras, 2)
 
 
+def _prefix_name_match(
+    name_lower: str,
+    name_list: list[str],
+    name_to_host: dict,
+) -> dict | None:
+    """Bidirectional prefix match with ambiguity-skip and digit-extension guard.
+
+    Returns the matching host dict, or None if no safe match.
+
+    Guards:
+    - "digit extension" pairs like ``srv10`` ↔ ``srv100`` are rejected — when
+      names share a root and differ only by appended digits they are almost
+      always distinct hosts, not a truncation/rename of one another.
+    - If multiple Zabbix names satisfy the prefix relation, the match is
+      ambiguous and we skip rather than pick one arbitrarily.
+    """
+    if len(name_lower) < 4:
+        return None
+    candidates = []
+    for zname in name_list:
+        if zname == name_lower:
+            continue
+        if zname.startswith(name_lower):
+            rest = zname[len(name_lower):]
+        elif name_lower.startswith(zname):
+            rest = name_lower[len(zname):]
+        else:
+            continue
+        if rest and rest[0].isdigit():
+            continue
+        candidates.append(zname)
+    if len(candidates) != 1:
+        return None
+    return name_to_host[candidates[0]]
+
+
 async def _provider_medians(client) -> dict[str, float]:
     """Compute median {$COST_MONTH} per detected provider across costed hosts."""
     from zbbx_mcp.classify import detect_provider
@@ -379,6 +415,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
             max_cost: float = 5000,
             export_unmatched: str = "",
             only_if_empty: bool = False,
+            name_match_strict: bool = False,
             instance: str = "",
         ) -> str:
             """Smart cost import: match by IP, then hostname (7-pass fuzzy).
@@ -393,6 +430,10 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 max_cost: Skip prices above this (default: $5000)
                 export_unmatched: File path to save unmatched entries as JSON (optional)
                 only_if_empty: Skip hosts that already have a non-zero {$COST_MONTH} set
+                name_match_strict: Disable the permissive prefix pass. Only exact,
+                    dash-split, IP-in-name and billing-name-translation passes run.
+                    Use for reconciliation against an authoritative source where a
+                    wrong bind is costlier than a missed match.
                 instance: Zabbix instance (optional)
             """
             # Load data
@@ -555,11 +596,8 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                                 matched_host = ip_to_host[found_ip]
 
                     # Pass 5: prefix match (name is start of a Zabbix hostname)
-                    if not matched_host and len(name_lower) >= 4:
-                        for zname in name_list:
-                            if zname.startswith(name_lower) or name_lower.startswith(zname):
-                                matched_host = name_to_host[zname]
-                                break
+                    if not matched_host and not name_match_strict:
+                        matched_host = _prefix_name_match(name_lower, name_list, name_to_host)
 
                     # Pass 6: billing name translation
                     # Billing often uses reversed naming: cc+num+suffix → suffix-cc+num

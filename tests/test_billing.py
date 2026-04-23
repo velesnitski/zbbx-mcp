@@ -7,6 +7,7 @@ from zbbx_mcp.tools.costs import (
     COST_SRC_CLUSTER_EXTRAS,
     _cluster_new_val,
     _load_billing_csv,
+    _prefix_name_match,
     _strip_prior_cluster_extras,
 )
 
@@ -176,3 +177,67 @@ class TestClusterNewVal:
             current=60.0, existing_desc=desc, extras=10.0, overwrite_base=-1.0,
         )
         assert (base, new_val) == (50.0, 60.0)
+
+
+class TestPrefixNameMatch:
+    """Regression tests for the Pass-5 prefix matcher.
+
+    The legacy body was ``zname.startswith(name_lower) or name_lower.startswith(zname)``
+    with first-match-wins. That bound densely-numbered host families incorrectly
+    (e.g. ``srv10`` to ``srv100``, ``web1`` to ``web14``) and silently overwrote
+    correct billing-backed prices. The replacement adds two guards: skip when the
+    delta is digits only, skip when multiple Zabbix names satisfy the relation.
+    """
+
+    def _build(self, names):
+        name_list = list(names)
+        name_to_host = {n: {"host": n, "hostid": str(i)} for i, n in enumerate(names)}
+        return name_list, name_to_host
+
+    def test_digit_extension_rejected_short_to_long(self):
+        # Sheet uses ``srv100`` (4-digit), Zabbix uses ``srv10`` (3-digit).
+        # startswith would bind them; we must not.
+        name_list, name_to_host = self._build(["srv10"])
+        assert _prefix_name_match("srv100", name_list, name_to_host) is None
+
+    def test_digit_extension_rejected_long_to_short(self):
+        # Mirror case: Zabbix has the longer name.
+        name_list, name_to_host = self._build(["srv100"])
+        assert _prefix_name_match("srv10", name_list, name_to_host) is None
+
+    def test_non_digit_extension_matches(self):
+        # Legitimate truncation: sheet has ``app-eu1``, Zabbix has ``app-eu1-retired``.
+        # The character after the shared prefix is a separator, not a digit.
+        name_list, name_to_host = self._build(["app-eu1-retired"])
+        match = _prefix_name_match("app-eu1", name_list, name_to_host)
+        assert match is not None
+        assert match["host"] == "app-eu1-retired"
+
+    def test_ambiguous_multiple_candidates_skipped(self):
+        # Two Zabbix names both satisfy the prefix relation — skip rather than
+        # pick one arbitrarily.
+        name_list, name_to_host = self._build(["db-1-shard-a", "db-1-shard-b"])
+        assert _prefix_name_match("db-1", name_list, name_to_host) is None
+
+    def test_exact_name_not_a_prefix_match(self):
+        # If the sheet name equals a Zabbix name, Pass 2 (exact) handles it.
+        # Pass 5 must not also claim it as a prefix match.
+        name_list, name_to_host = self._build(["exact-host"])
+        assert _prefix_name_match("exact-host", name_list, name_to_host) is None
+
+    def test_name_too_short_skipped(self):
+        # Names under 4 chars are too generic — skip.
+        name_list, name_to_host = self._build(["abcdef"])
+        assert _prefix_name_match("abc", name_list, name_to_host) is None
+
+    def test_no_candidates_returns_none(self):
+        name_list, name_to_host = self._build(["unrelated-host"])
+        assert _prefix_name_match("different", name_list, name_to_host) is None
+
+    def test_digit_extension_coexists_with_valid_match(self):
+        # Sheet ``db-primary`` matches Zabbix ``db-primary-v2`` (valid) but not
+        # ``db-primary10`` (digit-extended). Only the valid one survives.
+        name_list, name_to_host = self._build(["db-primary-v2", "db-primary10"])
+        match = _prefix_name_match("db-primary", name_list, name_to_host)
+        assert match is not None
+        assert match["host"] == "db-primary-v2"
