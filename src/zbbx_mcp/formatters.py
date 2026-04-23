@@ -37,6 +37,16 @@ def format_severity(severity: str) -> str:
     return SEVERITY_NAMES.get(str(severity), f"Unknown ({severity})")
 
 
+def cell(value: object) -> str:
+    """Sanitize a value for inclusion in a markdown table cell.
+
+    Escapes literal `|` and flattens newlines so one bad input cannot
+    collapse the whole table back into a single paragraph.
+    """
+    s = "" if value is None else str(value)
+    return s.replace("\\", "\\\\").replace("|", "\\|").replace("\n", " ").replace("\r", " ")
+
+
 def format_host_list(hosts: list) -> str:
     if not hosts:
         return "No hosts found."

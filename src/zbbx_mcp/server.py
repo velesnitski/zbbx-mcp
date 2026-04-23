@@ -18,8 +18,7 @@ _ARGS_RE = re.compile(r"\n\s*Args:\s*\n.*", re.DOTALL)
 # Pre-compiled regexes for _compress_response (avoid re-compiling on every call)
 _RE_BOLD = re.compile(r"\*\*([^*]+)\*\*")
 _RE_HEADERS = re.compile(r"^#{1,4}\s+", re.MULTILINE)
-_RE_TABLE_SEP = re.compile(r"\|[-:\s]+\|[-:\s|]+\|?\n")
-_RE_LONG_DASH = re.compile(r"-{3,}")
+_RE_LONG_DASH = re.compile(r"^-{3,}\s*$", re.MULTILINE)
 _RE_BLANK_LINES = re.compile(r"\n{3,}")
 _RE_TRAILING_SPACES = re.compile(r" +\n")
 
@@ -28,6 +27,10 @@ def _compress_response(text: str) -> str:
 
     When ZABBIX_COMPACT=true: strips markdown formatting.
     Always: enforces response budget truncation.
+
+    Table separator rows (|---|---|) are preserved: stripping them breaks
+    markdown table rendering in MCP clients, which then collapse rows into
+    a single paragraph.
     """
     if not text or len(text) < 200:
         return text
@@ -39,9 +42,7 @@ def _compress_response(text: str) -> str:
         # Strip markdown bold/headers
         text = _RE_BOLD.sub(r"\1", text)
         text = _RE_HEADERS.sub("", text)
-        # Collapse table separators
-        text = _RE_TABLE_SEP.sub("", text)
-        text = _RE_LONG_DASH.sub("---", text)
+        text = _RE_LONG_DASH.sub("", text)
         # Collapse blank lines
         text = _RE_BLANK_LINES.sub("\n\n", text)
         # Strip trailing spaces
