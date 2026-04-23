@@ -1,8 +1,10 @@
+import time
+
 import httpx
 
 from zbbx_mcp.formatters import _ts, format_severity
 from zbbx_mcp.resolver import InstanceResolver
-from zbbx_mcp.utils import resolve_group_ids
+from zbbx_mcp.utils import parse_time, resolve_group_ids
 
 TRIGGER_STATES = {"0": "Normal", "1": "Unknown"}
 TRIGGER_STATUS = {"0": "Enabled", "1": "Disabled"}
@@ -182,3 +184,108 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 return f"Trigger {trigger_id} deleted."
             except (httpx.HTTPError, ValueError) as e:
                 return f"Error deleting trigger: {e}"
+
+    if "get_trigger_timeline" not in skip:
+
+        @mcp.tool()
+        async def get_trigger_timeline(
+            trigger_id: str,
+            hours: int = 24,
+            time_from: str = "",
+            time_till: str = "",
+            max_results: int = 100,
+            instance: str = "",
+        ) -> str:
+            """Return OK↔PROBLEM transitions for a trigger over a window.
+
+            Distinguishes flapping (many short transitions) from a stable outage
+            (one PROBLEM without recovery) by showing every state change.
+
+            Args:
+                trigger_id: Zabbix trigger ID
+                hours: Lookback window (default: 24; ignored if time_from is set)
+                time_from: Start of window — epoch, ISO, or relative (optional)
+                time_till: End of window (optional, defaults to now)
+                max_results: Max transitions to return (default: 100)
+                instance: Zabbix instance name (optional)
+            """
+            try:
+                client = resolver.resolve(instance)
+                now = int(time.time())
+
+                if time_from:
+                    try:
+                        tf = parse_time(time_from)
+                    except ValueError as e:
+                        return f"Invalid time_from: {e}"
+                else:
+                    tf = now - hours * 3600
+
+                tt = now
+                if time_till:
+                    try:
+                        tt = parse_time(time_till)
+                    except ValueError as e:
+                        return f"Invalid time_till: {e}"
+
+                triggers = await client.call("trigger.get", {
+                    "triggerids": [trigger_id],
+                    "output": ["triggerid", "description", "priority"],
+                    "selectHosts": ["host"],
+                    "expandDescription": True,
+                })
+                if not triggers:
+                    return f"Trigger '{trigger_id}' not found."
+
+                trig = triggers[0]
+                trig_hosts = ", ".join(h.get("host", "?") for h in trig.get("hosts", []))
+
+                events = await client.call("event.get", {
+                    "objectids": [trigger_id],
+                    "source": 0, "object": 0,
+                    "time_from": tf, "time_till": tt,
+                    "output": ["eventid", "clock", "value", "acknowledged"],
+                    "sortfield": ["clock"],
+                    "sortorder": ["ASC"],
+                    "limit": max_results,
+                })
+
+                if not events:
+                    return (
+                        f"No transitions for trigger '{trig.get('description', trigger_id)}' "
+                        f"in window ({_ts(str(tf))} → {_ts(str(tt))})."
+                    )
+
+                transitions = 0
+                last_state = None
+                for e in events:
+                    if e.get("value") != last_state:
+                        transitions += 1
+                        last_state = e.get("value")
+
+                parts = [
+                    f"# Timeline: {trig.get('description', '?')}",
+                    "",
+                    f"**Trigger ID:** {trigger_id}",
+                    f"**Hosts:** {trig_hosts or '?'}",
+                    f"**Severity:** {format_severity(trig.get('priority', '0'))}",
+                    f"**Window:** {_ts(str(tf))} → {_ts(str(tt))}",
+                    f"**Transitions:** {transitions}",
+                    "",
+                    "| Time | State | Event ID | Ack |",
+                    "|------|-------|----------|-----|",
+                ]
+                for e in events:
+                    state = "PROBLEM" if e.get("value") == "1" else "OK"
+                    ack = "yes" if e.get("acknowledged") == "1" else "no"
+                    parts.append(
+                        f"| {_ts(e.get('clock', '0'))} | {state} | "
+                        f"{e.get('eventid', '?')} | {ack} |"
+                    )
+
+                if len(events) >= max_results:
+                    parts.append(f"\n*limit {max_results} reached — narrow the window for full history*")
+
+                return "\n".join(parts)
+            except (httpx.HTTPError, ValueError) as e:
+                return f"Error: {e}"

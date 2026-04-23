@@ -31,6 +31,7 @@ EXPECTED_TOOLS = {
     "get_problems",
     "get_problem_detail",
     "acknowledge_problem",
+    "bulk_acknowledge",
     # hostgroups.py
     "get_hostgroups",
     "create_hostgroup",
@@ -57,6 +58,7 @@ EXPECTED_TOOLS = {
     "create_trigger",
     "update_trigger",
     "delete_trigger",
+    "get_trigger_timeline",
     # templates.py
     "get_templates",
     "link_template",
