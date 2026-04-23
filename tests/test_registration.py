@@ -52,6 +52,7 @@ EXPECTED_TOOLS = {
     "get_host_items",
     "search_items",
     "get_item_history",
+    "get_stale_items",
     "get_graphs",
     # triggers.py
     "get_triggers",
