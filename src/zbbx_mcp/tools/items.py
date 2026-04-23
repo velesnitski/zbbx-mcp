@@ -1,8 +1,33 @@
+import re
+import time
+
 import httpx
 
-from zbbx_mcp.formatters import _ts
+from zbbx_mcp.formatters import _ts, cell
 from zbbx_mcp.resolver import InstanceResolver
-from zbbx_mcp.utils import parse_time
+from zbbx_mcp.utils import parse_time, resolve_group_ids
+
+
+_DELAY_UNITS = {"s": 1, "m": 60, "h": 3600, "d": 86400}
+_DELAY_RE = re.compile(r"^\s*(\d+)\s*([smhd]?)\s*$", re.IGNORECASE)
+
+
+def _parse_delay_seconds(delay: str, default: int = 300) -> int:
+    """Parse a Zabbix item delay into seconds.
+
+    Simple forms: "60", "60s", "5m", "1h". Complex schedules
+    (e.g. "30s;wd1-5,9:00-18:00/1m") fall back to default.
+    """
+    if not delay:
+        return default
+    head = delay.split(";", 1)[0].strip()
+    m = _DELAY_RE.match(head)
+    if not m:
+        return default
+    qty = int(m.group(1))
+    unit = (m.group(2) or "s").lower()
+    return qty * _DELAY_UNITS.get(unit, 1)
+
 
 ITEM_TYPES = {
     "0": "Zabbix agent",
@@ -383,6 +408,135 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 return "\n".join(parts)
             except (httpx.HTTPError, ValueError) as e:
                 return f"Error querying Zabbix: {e}"
+
+    if "get_stale_items" not in skip:
+
+        @mcp.tool()
+        async def get_stale_items(
+            host_id: str = "",
+            group: str = "",
+            stale_multiplier: float = 3.0,
+            include_triggers: bool = True,
+            max_results: int = 30,
+            instance: str = "",
+        ) -> str:
+            """Find items whose monitoring is broken — unsupported or polling stopped.
+
+            Flags two failure modes that keep triggers in PROBLEM after a service is fixed:
+              - state=1 (unsupported): agent reported an error
+              - lastclock older than stale_multiplier x polling interval
+
+            Args:
+                host_id: Filter by host ID (optional)
+                group: Filter by host group name (optional)
+                stale_multiplier: Flag items whose lastclock is older than N x delay (default: 3.0)
+                include_triggers: Also list triggers that depend on stale items (default: True)
+                max_results: Max items to report (default: 30)
+                instance: Zabbix instance name (optional)
+            """
+            try:
+                client = resolver.resolve(instance)
+                now = int(time.time())
+
+                params = {
+                    "output": ["itemid", "hostid", "name", "key_", "state",
+                               "lastclock", "delay", "error"],
+                    "selectHosts": ["host"],
+                    "filter": {"status": "0"},
+                    "sortfield": "name",
+                    "limit": 5000,
+                }
+                if include_triggers:
+                    params["selectTriggers"] = ["triggerid", "description", "value", "status"]
+                if host_id:
+                    params["hostids"] = [host_id]
+                if group:
+                    gids = await resolve_group_ids(client, group)
+                    if gids is None:
+                        return f"Host group '{group}' not found."
+                    params["groupids"] = gids
+
+                items = await client.call("item.get", params)
+
+                stale = []
+                for it in items:
+                    state = it.get("state", "0")
+                    lastclock = int(it.get("lastclock") or 0)
+                    delay_s = _parse_delay_seconds(it.get("delay", ""))
+                    threshold = max(int(delay_s * stale_multiplier), 60)
+
+                    unsupported = state == "1"
+                    frozen = lastclock > 0 and (now - lastclock) > threshold
+                    never_collected = lastclock == 0
+
+                    if not (unsupported or frozen or never_collected):
+                        continue
+
+                    if unsupported:
+                        reason = "UNSUPPORTED"
+                    elif never_collected:
+                        reason = "no data"
+                    else:
+                        age = now - lastclock
+                        reason = f"frozen {age // 60}m (expected ≤ {threshold // 60}m)"
+
+                    host = (it.get("hosts") or [{}])[0].get("host", "?")
+                    stale.append({
+                        "itemid": it.get("itemid", "?"),
+                        "host": host,
+                        "name": it.get("name", "?"),
+                        "key": it.get("key_", "?"),
+                        "reason": reason,
+                        "error": it.get("error", "") or "",
+                        "triggers": it.get("triggers", []) if include_triggers else [],
+                        "lastclock": lastclock,
+                    })
+
+                if not stale:
+                    return (
+                        f"No stale items found (checked {len(items)} items, "
+                        f"threshold {stale_multiplier}x delay)."
+                    )
+
+                total = len(stale)
+                stale.sort(key=lambda x: (x["reason"], x["host"]))
+                stale = stale[:max_results]
+
+                lines = [f"**{total} stale items** (checked {len(items)}; threshold {stale_multiplier}x delay)\n"]
+                lines.append("| Host | Item | Key | Reason | Last value |")
+                lines.append("|------|------|-----|--------|-----------|")
+                for s in stale:
+                    lv = _ts(str(s["lastclock"])) if s["lastclock"] else "never"
+                    lines.append(
+                        f"| {cell(s['host'])} | {cell(s['name'])} | `{cell(s['key'])}` | "
+                        f"{cell(s['reason'])} | {lv} |"
+                    )
+
+                if include_triggers:
+                    affected = [s for s in stale if s["triggers"]]
+                    if affected:
+                        lines.append("\n**Triggers depending on stale items:**")
+                        for s in affected:
+                            active = [
+                                t for t in s["triggers"]
+                                if t.get("status") == "0" and t.get("value") == "1"
+                            ]
+                            if not active:
+                                continue
+                            lines.append(f"- *{s['host']} / {s['name']}*")
+                            for t in active[:5]:
+                                lines.append(
+                                    f"  - [PROBLEM] {t.get('description', '?')} "
+                                    f"(triggerid: {t.get('triggerid', '?')}) — "
+                                    f"monitoring broken, not service"
+                                )
+
+                if total > max_results:
+                    lines.append(f"\n*{total - max_results} more stale items omitted*")
+
+                return "\n".join(lines)
+            except (httpx.HTTPError, ValueError) as e:
+                return f"Error: {e}"
 
     if "get_graphs" not in skip:
 
