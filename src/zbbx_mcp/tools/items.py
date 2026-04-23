@@ -7,7 +7,6 @@ from zbbx_mcp.formatters import _ts, cell
 from zbbx_mcp.resolver import InstanceResolver
 from zbbx_mcp.utils import parse_time, resolve_group_ids
 
-
 _DELAY_UNITS = {"s": 1, "m": 60, "h": 3600, "d": 86400}
 _DELAY_RE = re.compile(r"^\s*(\d+)\s*([smhd]?)\s*$", re.IGNORECASE)
 

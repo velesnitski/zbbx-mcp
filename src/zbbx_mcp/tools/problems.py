@@ -6,7 +6,6 @@ from zbbx_mcp.formatters import _ts, format_problem_list, format_severity
 from zbbx_mcp.resolver import InstanceResolver
 from zbbx_mcp.utils import parse_time, resolve_group_ids
 
-
 _EVENT_VALUE_LABEL = {"0": "OK", "1": "PROBLEM"}
 
 
