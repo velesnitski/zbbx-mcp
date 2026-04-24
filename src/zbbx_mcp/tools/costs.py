@@ -76,6 +76,45 @@ def _cluster_new_val(
     return base, round(base + extras, 2)
 
 
+def _dedup_name_from_ip_entries(
+    ip_costs: dict,
+    in_range,
+    extract_price,
+) -> tuple[dict, dict]:
+    """Derive a name→price map from ip_costs entries of the form
+    ``{"<ip>": {"name": ..., "price": ...}}``.
+
+    Returns ``(unique, duplicates)``:
+
+    - ``unique`` — names that appeared with a single consistent price across
+      all their ip entries.
+    - ``duplicates`` — names seen with two or more distinct prices. These are
+      dropped from the matchable set (caller should surface them in the
+      dry-run output so the sheet can be fixed upstream).
+
+    Rationale: without dedup, a name keyed to three different prices would
+    silently bind whichever row iterated first. See ADR 009.
+    """
+    alternates: dict[str, list[float]] = {}
+    for v in ip_costs.values():
+        if not isinstance(v, dict) or not in_range(v):
+            continue
+        name = (v.get("name") or "").strip()
+        if not name:
+            continue
+        alternates.setdefault(name, []).append(float(extract_price(v)))
+
+    unique: dict[str, float] = {}
+    duplicates: dict[str, list[float]] = {}
+    for name, prices in alternates.items():
+        distinct = sorted({round(p, 2) for p in prices})
+        if len(distinct) == 1:
+            unique[name] = distinct[0]
+        else:
+            duplicates[name] = distinct
+    return unique, duplicates
+
+
 def _prefix_name_match(
     name_lower: str,
     name_list: list[str],
@@ -478,12 +517,19 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
             safe_ips = {k: float(_extract_price(v)) for k, v in ip_costs.items() if _in_range(v)}
             safe_names = {k: float(_extract_price(v)) for k, v in name_costs.items() if _in_range(v)}
 
-            # If IP values are dicts with 'name' field, also populate safe_names for fuzzy matching
-            for _ip, v in ip_costs.items():
-                if isinstance(v, dict) and _in_range(v):
-                    name = (v.get("name") or "").strip()
-                    if name and name not in safe_names:
-                        safe_names[name] = float(_extract_price(v))
+            # If IP values are dicts with 'name' field, derive a consistent
+            # name→price map. Names whose entries disagree on price are
+            # dropped from name-matching and reported instead.
+            ip_derived_names, duplicated_names = _dedup_name_from_ip_entries(
+                ip_costs, _in_range, _extract_price,
+            )
+            for name, price in ip_derived_names.items():
+                if name not in safe_names:
+                    safe_names[name] = price
+            # If a duplicated name also exists in name_costs, pull it — we
+            # cannot trust either price in isolation.
+            for name in duplicated_names:
+                safe_names.pop(name, None)
             total_input = len(ip_costs) + len(name_costs)
             skipped_range = total_input - len(safe_ips) - len(safe_names)
 
@@ -634,8 +680,12 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
 
                     if matched_host:
                         hid = matched_host["hostid"]
-                        # max(ip_cost, name_cost) when both exist
-                        host_costs[hid] = max(host_costs.get(hid, 0), cost)
+                        # Prefer earliest pass. An IP-backed or compound-sum
+                        # match (passes 1/1b/1c) is always stronger than a
+                        # name-match — do not overwrite it.
+                        if hid in host_costs:
+                            continue
+                        host_costs[hid] = cost
                         if hid not in host_source:
                             host_source[hid] = "name"
                     else:
@@ -704,6 +754,13 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                             lines.append(f"- {w}")
                         if len(warnings) > 10:
                             lines.append(f"- ...+{len(warnings) - 10} more")
+                    if duplicated_names:
+                        lines.append(f"\n**⚠ Duplicate-name entries (dropped from name-match): {len(duplicated_names)}**")
+                        for name, prices in sorted(duplicated_names.items())[:10]:
+                            prices_str = ", ".join(f"${p:.2f}" for p in prices)
+                            lines.append(f"- `{name}`: {prices_str}")
+                        if len(duplicated_names) > 10:
+                            lines.append(f"- ...+{len(duplicated_names) - 10} more")
                     if export_unmatched and unmatched_names:
                         lines.append(f"\nUnmatched exported to `{export_unmatched}`")
                     lines.append("\nSet `dry_run=false` to apply.")
@@ -834,7 +891,11 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     name = entry.get("cluster", "")
                     extras = float(entry.get("extra_cost_month", 0))
                     ip_count = len(entry.get("extra_ips", []))
-                    if not name or extras <= 0:
+                    # Allow extras==0: the tool then rewrites the description
+                    # at the current (or overwrite_base) base without changing
+                    # the summed value. Useful for re-tagging legacy macros
+                    # into the `src:cluster_extras` provenance format.
+                    if not name or extras < 0:
                         continue
                     h = host_by_name.get(name)
                     if not h:

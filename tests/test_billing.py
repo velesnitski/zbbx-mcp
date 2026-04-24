@@ -6,6 +6,7 @@ from pathlib import Path
 from zbbx_mcp.tools.costs import (
     COST_SRC_CLUSTER_EXTRAS,
     _cluster_new_val,
+    _dedup_name_from_ip_entries,
     _load_billing_csv,
     _prefix_name_match,
     _strip_prior_cluster_extras,
@@ -241,3 +242,103 @@ class TestPrefixNameMatch:
         match = _prefix_name_match("db-primary", name_list, name_to_host)
         assert match is not None
         assert match["host"] == "db-primary-v2"
+
+
+class TestDedupNameFromIpEntries:
+    """Regression tests for duplicate-name detection (ADR 009).
+
+    When the billing source has multiple IP rows that share a name but disagree
+    on the price (e.g. the same host listed three times at $72, $84, $164
+    because it moved SKU over time and the sheet was never pruned), silently
+    picking the first-inserted price masks a data-quality problem upstream.
+    The helper returns duplicates separately so the caller can surface them.
+    """
+
+    @staticmethod
+    def _in_range(v):
+        p = v.get("price") if isinstance(v, dict) else v
+        try:
+            return 1 <= float(p) <= 5000
+        except (TypeError, ValueError):
+            return False
+
+    @staticmethod
+    def _extract_price(v):
+        return v.get("price") if isinstance(v, dict) else v
+
+    def _run(self, ip_costs):
+        return _dedup_name_from_ip_entries(ip_costs, self._in_range, self._extract_price)
+
+    def test_single_entry_per_name_is_unique(self):
+        unique, dup = self._run({
+            "10.0.0.1": {"name": "host-a", "price": 50.0},
+            "10.0.0.2": {"name": "host-b", "price": 75.0},
+        })
+        assert unique == {"host-a": 50.0, "host-b": 75.0}
+        assert dup == {}
+
+    def test_duplicate_same_price_stays_unique(self):
+        # Two IPs, same name, same price → not a conflict.
+        unique, dup = self._run({
+            "10.0.0.1": {"name": "host-a", "price": 50.0},
+            "10.0.0.2": {"name": "host-a", "price": 50.0},
+        })
+        assert unique == {"host-a": 50.0}
+        assert dup == {}
+
+    def test_duplicate_conflicting_prices_reported(self):
+        # Same name across three IPs at three distinct prices — drop from
+        # unique, list all prices in duplicates.
+        unique, dup = self._run({
+            "10.0.0.1": {"name": "host-a", "price": 50.0},
+            "10.0.0.2": {"name": "host-a", "price": 75.0},
+            "10.0.0.3": {"name": "host-a", "price": 100.0},
+        })
+        assert "host-a" not in unique
+        assert dup == {"host-a": [50.0, 75.0, 100.0]}
+
+    def test_rounding_to_two_decimals(self):
+        # 50.001 and 50.004 should collapse to a single 50.00; 50.009 rounds
+        # to 50.01 and would count as a second distinct price.
+        unique, dup = self._run({
+            "10.0.0.1": {"name": "host-a", "price": 50.001},
+            "10.0.0.2": {"name": "host-a", "price": 50.004},
+        })
+        assert unique == {"host-a": 50.0}
+        assert dup == {}
+
+    def test_out_of_range_entries_ignored(self):
+        # An out-of-range entry must not contribute to the dup check.
+        unique, dup = self._run({
+            "10.0.0.1": {"name": "host-a", "price": 50.0},
+            "10.0.0.2": {"name": "host-a", "price": 999999.0},  # out of range
+        })
+        assert unique == {"host-a": 50.0}
+        assert dup == {}
+
+    def test_missing_or_empty_name_ignored(self):
+        unique, dup = self._run({
+            "10.0.0.1": {"name": "", "price": 50.0},
+            "10.0.0.2": {"price": 75.0},
+            "10.0.0.3": {"name": "real-host", "price": 100.0},
+        })
+        assert unique == {"real-host": 100.0}
+        assert dup == {}
+
+    def test_non_dict_entries_ignored(self):
+        # Flat IP→cost form doesn't contribute to name-derived map.
+        unique, dup = self._run({
+            "10.0.0.1": 50.0,
+            "10.0.0.2": {"name": "host-a", "price": 75.0},
+        })
+        assert unique == {"host-a": 75.0}
+        assert dup == {}
+
+    def test_mixed_unique_and_duplicate(self):
+        unique, dup = self._run({
+            "10.0.0.1": {"name": "ok", "price": 50.0},
+            "10.0.0.2": {"name": "conflict", "price": 75.0},
+            "10.0.0.3": {"name": "conflict", "price": 90.0},
+        })
+        assert unique == {"ok": 50.0}
+        assert dup == {"conflict": [75.0, 90.0]}
