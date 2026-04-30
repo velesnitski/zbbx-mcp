@@ -15,6 +15,7 @@ from datetime import datetime, timezone
 
 import httpx
 
+from zbbx_mcp.classify import detect_provider
 from zbbx_mcp.data import (
     STATUS_ENABLED,
     TRAFFIC_IN_KEYS,
@@ -22,6 +23,9 @@ from zbbx_mcp.data import (
     host_ip,
 )
 from zbbx_mcp.resolver import InstanceResolver
+
+# Cluster grouping levels, ordered narrowest to broadest.
+_AUTO_LEVELS: tuple[str, ...] = ("subnet24", "subnet16", "provider")
 
 _SEV_LABELS = {0: "Info", 1: "Info", 2: "Warning", 3: "Average", 4: "High", 5: "Disaster"}
 
@@ -160,6 +164,48 @@ def _subnet24(ip: str) -> str:
     return ".".join(parts[:3]) + ".0/24"
 
 
+def _subnet16(ip: str) -> str:
+    """Return the /16 CIDR for an IPv4 address, or '' for non-IPv4."""
+    if not ip or "." not in ip:
+        return ""
+    parts = ip.split(".")
+    if len(parts) != 4:
+        return ""
+    return ".".join(parts[:2]) + ".0.0/16"
+
+
+def _group_key(
+    level: str,
+    *,
+    ip: str = "",
+    hostgroup: str = "",
+    provider: str = "",
+) -> str:
+    """Return the cluster grouping key at the requested level, or '' if N/A.
+
+    Level vocabulary:
+        subnet24    — host's /24
+        subnet16    — host's /16
+        provider    — hosting provider (ASN proxy via PROVIDER_CIDRS)
+        hostgroup   — first hostgroup name
+
+    'auto' is handled at the caller level by trying levels narrowest-first.
+    """
+    if level == "subnet24":
+        return _subnet24(ip)
+    if level == "subnet16":
+        return _subnet16(ip)
+    if level == "provider":
+        # detect_provider() returns 'Other' / 'Unknown' for IPs we cannot map.
+        # Treat those as no key — clustering on 'Other' would lump unrelated hosts.
+        if not provider or provider in {"Other", "Unknown"}:
+            return ""
+        return provider
+    if level == "hostgroup":
+        return hostgroup
+    return ""
+
+
 def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> None:
 
     if "get_idle_relays" not in skip:
@@ -241,12 +287,12 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
         async def get_outage_clusters(
             window_min: int = 30,
             min_hosts: int = 3,
-            group_by: str = "subnet",
+            group_by: str = "auto",
             min_severity: int = 3,
             max_clusters: int = 10,
             instance: str = "",
         ) -> str:
-            """Find waves of outages on hosts sharing a /24 subnet or hostgroup.
+            """Find waves of outages on hosts sharing a network or group key.
 
             Six independent agent-down + service-down alerts on six hosts in the
             same rack within a 20-minute window are almost certainly one
@@ -256,14 +302,22 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
             Args:
                 window_min: Time window in minutes for clustering (default: 30)
                 min_hosts: Minimum unique hosts per cluster (default: 3)
-                group_by: "subnet" (host /24) or "hostgroup" (default: "subnet")
+                group_by: "subnet24" / "subnet16" / "provider" / "hostgroup" /
+                          "auto" (default: "auto" — narrowest level with hits wins)
                 min_severity: Minimum severity 0-5 (default: 3 = Average)
                 max_clusters: Max clusters to render (default: 10)
                 instance: Zabbix instance name (optional)
             """
+            # Backwards-compat alias for the original parameter value.
+            if group_by == "subnet":
+                group_by = "subnet24"
+            valid = {"subnet24", "subnet16", "provider", "hostgroup", "auto"}
             try:
-                if group_by not in ("subnet", "hostgroup"):
-                    return f"Invalid group_by: {group_by!r}. Use 'subnet' or 'hostgroup'."
+                if group_by not in valid:
+                    return (
+                        f"Invalid group_by: {group_by!r}. "
+                        f"Use one of {sorted(valid)}."
+                    )
                 client = resolver.resolve(instance)
                 problems = await client.call("problem.get", {
                     "output": ["eventid", "name", "severity", "clock"],
@@ -299,35 +353,53 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 })
                 host_meta = {h["hostid"]: h for h in hosts_meta}
 
-                records: list[dict] = []
-                for p in problems:
-                    for hid in event_hosts.get(p["eventid"], []):
-                        hm = host_meta.get(hid)
-                        if not hm:
-                            continue
-                        if group_by == "subnet":
-                            key = _subnet24(host_ip(hm))
+                # Pre-compute every level's key per host so auto-fallback is cheap.
+                host_keys: dict[str, dict[str, str]] = {}
+                for hid, hm in host_meta.items():
+                    ip = host_ip(hm)
+                    provider = detect_provider(ip) if ip else ""
+                    groups = [g.get("name", "") for g in hm.get("groups", []) if g.get("name")]
+                    hostgroup = groups[0] if groups else ""
+                    host_keys[hid] = {
+                        "subnet24": _group_key("subnet24", ip=ip),
+                        "subnet16": _group_key("subnet16", ip=ip),
+                        "provider": _group_key("provider", provider=provider),
+                        "hostgroup": _group_key("hostgroup", hostgroup=hostgroup),
+                    }
+
+                def _build_records(level: str) -> list[dict]:
+                    out: list[dict] = []
+                    for p in problems:
+                        for hid in event_hosts.get(p["eventid"], []):
+                            hm = host_meta.get(hid)
+                            if not hm:
+                                continue
+                            key = host_keys.get(hid, {}).get(level, "")
                             if not key:
                                 continue
-                        else:
-                            groups = [g.get("name", "") for g in hm.get("groups", [])]
-                            groups = [g for g in groups if g]
-                            if not groups:
-                                continue
-                            key = groups[0]
-                        records.append({
-                            "clock": int(p.get("clock", 0)),
-                            "hostid": hid,
-                            "host": hm.get("host", ""),
-                            "name": p.get("name", "?"),
-                            "severity": int(p.get("severity", 0)),
-                            "key": key,
-                        })
+                            out.append({
+                                "clock": int(p.get("clock", 0)),
+                                "hostid": hid,
+                                "host": hm.get("host", ""),
+                                "name": p.get("name", "?"),
+                                "severity": int(p.get("severity", 0)),
+                                "key": key,
+                            })
+                    return out
 
-                if not records:
-                    return "No clusterable records (no usable group keys)."
+                # Auto-fallback: try narrowest level first; broaden until we hit clusters.
+                levels_to_try = _AUTO_LEVELS if group_by == "auto" else (group_by,)
+                clusters: list[dict] = []
+                effective_level = group_by
+                for level in levels_to_try:
+                    records = _build_records(level)
+                    if not records:
+                        continue
+                    clusters = _cluster_problems(records, window_min * 60, min_hosts)
+                    if clusters:
+                        effective_level = level
+                        break
 
-                clusters = _cluster_problems(records, window_min * 60, min_hosts)
                 if not clusters:
                     return (
                         f"No outage clusters (window={window_min}m, "
@@ -335,9 +407,14 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     )
 
                 shown = clusters[:max_clusters]
+                level_note = (
+                    f"by {effective_level} (auto)"
+                    if group_by == "auto" and effective_level != "auto"
+                    else f"by {group_by}"
+                )
                 lines = [
                     f"**{len(clusters)} outage clusters** "
-                    f"(window {window_min}m, ≥{min_hosts} hosts, by {group_by})\n",
+                    f"(window {window_min}m, ≥{min_hosts} hosts, {level_note})\n",
                 ]
                 for idx, c in enumerate(shown, 1):
                     t0 = datetime.fromtimestamp(c["start"], timezone.utc).strftime("%Y-%m-%d %H:%M UTC")

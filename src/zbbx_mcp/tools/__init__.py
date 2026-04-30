@@ -26,7 +26,9 @@ from zbbx_mcp.tools import (
     infra_report,
     inventory_load,
     inventory_map,
+    ip_history,
     items,
+    loss_drift,
     macros,
     maintenance,
     maps,
@@ -115,7 +117,7 @@ def register_all(
         infra_report, costs, traffic, dashboard_report, full_report,
         trends_compare, trends_health,
         html_report, geo_traffic, geo_health, executive, ceo_report, service_brief, analysis,
-        web_scenarios, correlation,
+        web_scenarios, correlation, ip_history, loss_drift,
     ]
     for module in modules:
         module.register(mcp, resolver, skip=skip)
