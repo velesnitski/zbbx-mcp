@@ -21,6 +21,43 @@ from zbbx_mcp.resolver import InstanceResolver
 from zbbx_mcp.utils import resolve_group_ids
 
 
+def _compute_shutdown_safety(
+    candidate_avg_mbps: float | None,
+    peer_metrics: list[dict],
+    safety_margin: float = 1.5,
+) -> tuple[str, float]:
+    """Decide whether peers can absorb a candidate's traffic.
+
+    A peer's spare capacity is `peak - avg` — the headroom between its
+    typical-busy and its observed maximum. Cohort headroom is the sum
+    across peers (other shutdown candidates excluded by the caller).
+
+    Returns (label, headroom_mbps):
+        SOLO  — no peers in the cohort; cannot shut down regardless
+        SAFE  — headroom >= candidate_avg * safety_margin
+        RISKY — headroom is positive but below the safety margin
+        N/A   — candidate has no traffic figure to compare against
+
+    peer_metrics: [{"peak": float|None, "avg": float|None}, ...]
+    """
+    if not peer_metrics:
+        return "SOLO", 0.0
+    headroom = 0.0
+    for p in peer_metrics:
+        peak = p.get("peak")
+        avg = p.get("avg")
+        if peak is None or avg is None:
+            continue
+        spare = peak - avg
+        if spare > 0:
+            headroom += spare
+    if candidate_avg_mbps is None:
+        return "N/A", headroom
+    if headroom >= candidate_avg_mbps * safety_margin:
+        return "SAFE", headroom
+    return "RISKY", headroom
+
+
 def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()):
 
     if "get_health_assessment" not in skip:
@@ -397,7 +434,9 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()):
                     if category:
                         dash = dash_map.get(hid, "-")
                         candidates.append({
-                            "host": h["host"], "ip": ip, "category": category, "reason": reason,
+                            "hostid": hid, "host": h["host"], "ip": ip,
+                            "category": category, "reason": reason,
+                            "country": extract_country(h.get("host", "")),
                             "product": h.get("_prod", ""), "tier": h.get("_tier", ""),
                             "provider": detect_provider(ip) if ip else "",
                             "cpu_avg": cpu_avg, "traffic_avg": traffic_avg, "service": service,
@@ -406,6 +445,27 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()):
 
                 if not candidates:
                     return f"No shutdown candidates among {len(filtered)} servers."
+
+                # Peer-headroom check: can the cohort absorb each candidate's load?
+                # Cohort = same product+tier+country, excluding self AND other candidates.
+                candidate_ids = {c["hostid"] for c in candidates}
+                cohorts: dict[tuple[str, str, str], list[dict]] = {}
+                for h in filtered:
+                    if h["hostid"] in candidate_ids:
+                        continue  # peers must be live, not also-shutdown
+                    cc = extract_country(h.get("host", ""))
+                    key = (h.get("_prod", ""), h.get("_tier", ""), cc)
+                    traffic = host_metrics.get(h["hostid"], {}).get("traffic")
+                    cohorts.setdefault(key, []).append({
+                        "peak": traffic.peak if traffic else None,
+                        "avg": traffic.avg if traffic else None,
+                    })
+                for c in candidates:
+                    cohort = cohorts.get((c["product"], c["tier"], c["country"]), [])
+                    label, headroom = _compute_shutdown_safety(c["traffic_avg"], cohort)
+                    c["safety"] = label
+                    c["peer_headroom_mbps"] = headroom
+                    c["peer_count"] = len(cohort)
 
                 order = {"DEAD": 0, "ZOMBIE": 1, "BROKEN": 2, "IDLE": 3}
                 candidates.sort(key=lambda c: (order.get(c["category"], 9), c.get("traffic_avg") or 0))
@@ -430,16 +490,39 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()):
                     if not group:
                         continue
                     if cat == "DEAD":
-                        names = ", ".join(c["host"] for c in group)
-                        parts.append(f"\n**DEAD ({len(group)}):** {names}")
+                        # DEAD has zero traffic — safety is always SAFE unless SOLO
+                        entries = []
+                        for c in group:
+                            sf = c["safety"]
+                            badge = f" [{sf}]" if sf in {"SOLO", "RISKY"} else ""
+                            entries.append(f"{c['host']}{badge}")
+                        parts.append(f"\n**DEAD ({len(group)}):** {', '.join(entries)}")
                     else:
                         entries = []
                         for c in group:
                             t = f"{c['traffic_avg']:.1f}" if c["traffic_avg"] is not None else "?"
                             service = " service DOWN" if c["service"] == "DOWN" else ""
                             d = f" [{c['dash']}]" if c["dash"] != "-" else ""
-                            entries.append(f"{c['host']} ({t} Mbps{service}{d})")
+                            sf = c["safety"]
+                            if sf == "SAFE":
+                                safety = f" SAFE ({c['peer_headroom_mbps']:.0f}Mbps headroom)"
+                            elif sf == "RISKY":
+                                safety = f" RISKY ({c['peer_headroom_mbps']:.0f}Mbps headroom)"
+                            elif sf == "SOLO":
+                                safety = " SOLO (no peers)"
+                            else:
+                                safety = ""
+                            entries.append(f"{c['host']} ({t} Mbps{service}{d}){safety}")
                         parts.append(f"\n**{cat} ({len(group)}):** {', '.join(entries)}")
+
+                # Shutdown-safety summary line
+                solo = sum(1 for c in candidates if c["safety"] == "SOLO")
+                risky = sum(1 for c in candidates if c["safety"] == "RISKY")
+                if solo or risky:
+                    parts.append(
+                        f"\n*Peer-headroom: {solo} SOLO (no peers), "
+                        f"{risky} RISKY (insufficient cohort capacity).*"
+                    )
 
                 return "\n".join(parts)
             except (httpx.HTTPError, ValueError) as e:

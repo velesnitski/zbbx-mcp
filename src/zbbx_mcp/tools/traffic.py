@@ -12,6 +12,25 @@ from zbbx_mcp.data import KEY_CONNECTIONS, TRAFFIC_IN_KEYS, countries_for_region
 from zbbx_mcp.resolver import InstanceResolver
 
 
+def _format_skip_breakdown(skips: dict[str, int], min_baseline_mbps: float) -> str:
+    """Render the per-reason skip counts that detect_traffic_drops accumulates.
+
+    Returns "" when nothing was skipped — caller should append a leading
+    space before this string.
+    """
+    total = sum(skips.values())
+    if total == 0:
+        return ""
+    parts = []
+    if skips.get("no_history"):
+        parts.append(f"{skips['no_history']} no-history")
+    if skips.get("no_baseline_window"):
+        parts.append(f"{skips['no_baseline_window']} no-baseline-window")
+    if skips.get("below_floor"):
+        parts.append(f"{skips['below_floor']} below-{min_baseline_mbps:g}Mbps-floor")
+    return f"{total} skipped: " + ", ".join(parts) + "."
+
+
 def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> None:
 
     if "detect_traffic_anomalies" not in skip:
@@ -384,6 +403,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
             region: str = "",
             drop_pct: float = 50.0,
             baseline_days: int = 7,
+            min_baseline_mbps: float = 1.0,
             max_results: int = 50,
             instance: str = "",
         ) -> str:
@@ -396,6 +416,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 region: LATAM, APAC, EMEA, NA, CIS, ALL (optional)
                 drop_pct: Min drop % to flag (default: 50)
                 baseline_days: Days for baseline (default: 7)
+                min_baseline_mbps: Skip servers below this baseline avg (default: 1.0)
                 max_results: Max results (default: 50)
                 instance: Zabbix instance (optional)
             """
@@ -474,23 +495,28 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
 
                 # Analyze each host
                 drops = []
+                min_baseline_bps = min_baseline_mbps * 1e6
+                skips = {"no_history": 0, "no_baseline_window": 0, "below_floor": 0}
                 for hid, item in host_main_item.items():
                     iid = item["itemid"]
                     current = float(item.get("lastvalue", "0"))
                     t_data = item_trends.get(iid, [])
 
                     if not t_data:
+                        skips["no_history"] += 1
                         continue
 
                     # Split trends: baseline (older) vs recent (last 24h)
                     baseline_records = [t for t in t_data if int(t["clock"]) < day_ago]
                     if not baseline_records:
+                        skips["no_baseline_window"] += 1
                         continue
 
                     baseline_avg = sum(float(t["value_avg"]) for t in baseline_records) / len(baseline_records)
                     baseline_peak = max(float(t["value_max"]) for t in baseline_records)
 
-                    if baseline_avg < 1e6:  # Skip servers with < 1 Mbps baseline
+                    if baseline_avg < min_baseline_bps:
+                        skips["below_floor"] += 1
                         continue
 
                     # Calculate drop
@@ -523,16 +549,22 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 drops.sort(key=lambda d: -d["drop_pct"])
                 drops = drops[:max_results]
 
+                analyzed = len(host_main_item) - sum(skips.values())
+                skip_note = _format_skip_breakdown(skips, min_baseline_mbps)
+
                 if not drops:
-                    return (
+                    msg = (
                         f"No traffic drops >{drop_pct:.0f}% detected "
                         f"(compared to {baseline_days}-day baseline). "
-                        f"Analyzed {len(host_main_item)} servers."
+                        f"Analyzed {analyzed} of {len(host_main_item)} servers."
                     )
+                    if skip_note:
+                        msg += f" {skip_note}"
+                    return msg
 
                 parts = [
                     f"**{len(drops)} servers with traffic drops >{drop_pct:.0f}%** "
-                    f"(vs {baseline_days}-day baseline)\n",
+                    f"(vs {baseline_days}-day baseline, analyzed {analyzed} of {len(host_main_item)})\n",
                     "| Server | Provider | Current | Baseline Avg | Peak | Drop | Severity |",
                     "|--------|----------|---------|-------------|------|------|----------|",
                 ]
@@ -559,6 +591,9 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                         parts.append(
                             f"- **{prov}**: {len(plist)} servers, avg drop {avg_drop:.0f}%"
                         )
+
+                if skip_note:
+                    parts.append(f"\n*{skip_note}*")
 
                 return "\n".join(parts)
             except (httpx.HTTPError, ValueError) as e:
