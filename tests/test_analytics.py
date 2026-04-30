@@ -577,3 +577,237 @@ class TestProductHiding:
         assert total_from_header == total_from_composition, \
             f"Header says {total_from_header} but composition sums to {total_from_composition}"
 
+
+class TestIdleRelayDetection:
+    """Pure-helper tests for get_idle_relays bucket+filter logic."""
+
+    def _phys(self) -> frozenset[str]:
+        return frozenset({"net.if.in[eth0]", "net.if.in[eno1]"})
+
+    def test_split_buckets_physical_vs_tunnel(self):
+        from zbbx_mcp.tools.correlation import _split_iface_metrics
+
+        items = [
+            {"hostid": "h1", "key_": "net.if.in[eth0]", "lastvalue": "20000"},
+            {"hostid": "h1", "key_": "net.if.in[tun0]", "lastvalue": "0"},
+            {"hostid": "h1", "key_": "net.if.in[gre1]", "lastvalue": "0"},
+            {"hostid": "h1", "key_": "net.if.in[lo]", "lastvalue": "999"},  # ignored
+        ]
+        per_host = _split_iface_metrics(items, self._phys())
+        assert per_host["h1"]["physical_bps"] == 20000
+        assert per_host["h1"]["tunnel_bps"] == 0
+        assert per_host["h1"]["tunnel_count"] == 2
+        assert sorted(per_host["h1"]["tunnel_names"]) == ["gre1", "tun0"]
+
+    def test_split_skips_docker_bridges(self):
+        from zbbx_mcp.tools.correlation import _split_iface_metrics
+
+        items = [
+            {"hostid": "h1", "key_": "net.if.in[docker0]", "lastvalue": "1"},
+            {"hostid": "h1", "key_": "net.if.in[br-abc]", "lastvalue": "1"},
+        ]
+        per_host = _split_iface_metrics(items, self._phys())
+        assert per_host == {}
+
+    def test_split_handles_garbage_values(self):
+        from zbbx_mcp.tools.correlation import _split_iface_metrics
+
+        items = [
+            {"hostid": "h1", "key_": "net.if.in[eth0]", "lastvalue": ""},
+            {"hostid": "h1", "key_": "net.if.in[tun0]", "lastvalue": None},
+            {"hostid": "h1", "key_": "not-a-net-key", "lastvalue": "5"},
+            {"hostid": "h1", "key_": "net.if.in[", "lastvalue": "5"},  # malformed
+        ]
+        per_host = _split_iface_metrics(items, self._phys())
+        # eth0 zero is still a recorded physical, no tunnel flagged
+        assert per_host["h1"]["physical_bps"] == 0.0
+        assert per_host["h1"]["tunnel_bps"] == 0.0
+        assert per_host["h1"]["tunnel_count"] == 1
+        assert per_host["h1"]["tunnel_names"] == ["tun0"]
+
+    def test_idle_relay_flagged_when_tunnels_silent(self):
+        from zbbx_mcp.tools.correlation import _find_idle_relays
+
+        per_host = {
+            "h1": {
+                "physical_bps": 200_000,
+                "tunnel_bps": 0,
+                "tunnel_count": 3,
+                "tunnel_names": ["tun0", "tun1", "tun2"],
+            },
+        }
+        idle = _find_idle_relays(per_host, min_mgmt_kbps=100)
+        assert len(idle) == 1
+        hid, mgmt_kbps, tun_count, sample = idle[0]
+        assert hid == "h1"
+        assert mgmt_kbps == 200.0
+        assert tun_count == 3
+        assert sample == ["tun0", "tun1", "tun2"]
+
+    def test_idle_relay_skipped_when_tunnels_have_traffic(self):
+        from zbbx_mcp.tools.correlation import _find_idle_relays
+
+        per_host = {
+            "h1": {
+                "physical_bps": 200_000,
+                "tunnel_bps": 10,  # one tunnel forwarding
+                "tunnel_count": 2,
+                "tunnel_names": ["tun0", "tun1"],
+            },
+        }
+        assert _find_idle_relays(per_host, 100) == []
+
+    def test_idle_relay_skipped_below_mgmt_floor(self):
+        from zbbx_mcp.tools.correlation import _find_idle_relays
+
+        per_host = {
+            "h1": {
+                "physical_bps": 50_000,  # 50 kbps, below 100
+                "tunnel_bps": 0,
+                "tunnel_count": 2,
+                "tunnel_names": ["tun0", "tun1"],
+            },
+        }
+        assert _find_idle_relays(per_host, 100) == []
+
+    def test_idle_relay_skipped_when_no_tunnels(self):
+        from zbbx_mcp.tools.correlation import _find_idle_relays
+
+        per_host = {
+            "h1": {
+                "physical_bps": 200_000,
+                "tunnel_bps": 0,
+                "tunnel_count": 0,
+                "tunnel_names": [],
+            },
+        }
+        assert _find_idle_relays(per_host, 100) == []
+
+    def test_idle_relays_sorted_by_mgmt_traffic_desc(self):
+        from zbbx_mcp.tools.correlation import _find_idle_relays
+
+        per_host = {
+            "h1": {"physical_bps": 100_000, "tunnel_bps": 0, "tunnel_count": 1, "tunnel_names": ["tun0"]},
+            "h2": {"physical_bps": 500_000, "tunnel_bps": 0, "tunnel_count": 1, "tunnel_names": ["tun0"]},
+            "h3": {"physical_bps": 250_000, "tunnel_bps": 0, "tunnel_count": 1, "tunnel_names": ["tun0"]},
+        }
+        out = _find_idle_relays(per_host, 50)
+        assert [r[0] for r in out] == ["h2", "h3", "h1"]
+
+
+class TestOutageClustering:
+    """Pure-helper tests for get_outage_clusters time-window grouping."""
+
+    def _rec(self, clock: int, hostid: str, key: str, name: str = "Down", sev: int = 4) -> dict:
+        return {
+            "clock": clock,
+            "hostid": hostid,
+            "host": f"host-{hostid}",
+            "name": name,
+            "severity": sev,
+            "key": key,
+        }
+
+    def test_subnet_helper(self):
+        from zbbx_mcp.tools.correlation import _subnet24
+
+        assert _subnet24("10.0.5.42") == "10.0.5.0/24"
+        assert _subnet24("") == ""
+        assert _subnet24("not-an-ip") == ""
+        assert _subnet24("1.2.3") == ""
+        assert _subnet24("::1") == ""
+
+    def test_three_hosts_same_subnet_within_window_form_cluster(self):
+        from zbbx_mcp.tools.correlation import _cluster_problems
+
+        records = [
+            self._rec(1000, "h1", "10.0.0.0/24"),
+            self._rec(1100, "h2", "10.0.0.0/24"),
+            self._rec(1200, "h3", "10.0.0.0/24"),
+        ]
+        clusters = _cluster_problems(records, window_sec=600, min_hosts=3)
+        assert len(clusters) == 1
+        c = clusters[0]
+        assert c["host_count"] == 3
+        assert c["events"] == 3
+        assert c["start"] == 1000
+        assert c["end"] == 1200
+
+    def test_below_min_hosts_does_not_cluster(self):
+        from zbbx_mcp.tools.correlation import _cluster_problems
+
+        records = [
+            self._rec(1000, "h1", "10.0.0.0/24"),
+            self._rec(1100, "h2", "10.0.0.0/24"),
+        ]
+        assert _cluster_problems(records, 600, 3) == []
+
+    def test_outside_window_does_not_cluster(self):
+        from zbbx_mcp.tools.correlation import _cluster_problems
+
+        records = [
+            self._rec(1000, "h1", "10.0.0.0/24"),
+            self._rec(1500, "h2", "10.0.0.0/24"),
+            self._rec(2200, "h3", "10.0.0.0/24"),  # outside 600s of h1
+        ]
+        # Greedy run grows h1..h2 (500s), h3 starts new run with only 1 host
+        assert _cluster_problems(records, 600, 3) == []
+
+    def test_two_separate_subnets_yield_two_clusters(self):
+        from zbbx_mcp.tools.correlation import _cluster_problems
+
+        records = [
+            self._rec(1000, "h1", "10.0.0.0/24"),
+            self._rec(1100, "h2", "10.0.0.0/24"),
+            self._rec(1200, "h3", "10.0.0.0/24"),
+            self._rec(2000, "h4", "10.0.1.0/24"),
+            self._rec(2100, "h5", "10.0.1.0/24"),
+            self._rec(2200, "h6", "10.0.1.0/24"),
+        ]
+        clusters = _cluster_problems(records, 600, 3)
+        assert len(clusters) == 2
+        assert {c["key"] for c in clusters} == {"10.0.0.0/24", "10.0.1.0/24"}
+
+    def test_max_severity_propagates(self):
+        from zbbx_mcp.tools.correlation import _cluster_problems
+
+        records = [
+            self._rec(1000, "h1", "10.0.0.0/24", sev=2),
+            self._rec(1100, "h2", "10.0.0.0/24", sev=5),
+            self._rec(1200, "h3", "10.0.0.0/24", sev=3),
+        ]
+        clusters = _cluster_problems(records, 600, 3)
+        assert clusters[0]["max_severity"] == 5
+
+    def test_duplicate_hostids_count_once(self):
+        from zbbx_mcp.tools.correlation import _cluster_problems
+
+        records = [
+            self._rec(1000, "h1", "10.0.0.0/24", name="A"),
+            self._rec(1100, "h1", "10.0.0.0/24", name="B"),
+            self._rec(1200, "h2", "10.0.0.0/24"),
+        ]
+        # 3 events but only 2 distinct hosts — does not meet min_hosts=3
+        assert _cluster_problems(records, 600, 3) == []
+        # min_hosts=2 should pass
+        clusters = _cluster_problems(records, 600, 2)
+        assert clusters[0]["host_count"] == 2
+        assert clusters[0]["events"] == 3
+
+    def test_clusters_sorted_by_host_count_then_severity(self):
+        from zbbx_mcp.tools.correlation import _cluster_problems
+
+        records = [
+            # Big cluster, low severity
+            self._rec(1000, "h1", "A", sev=2),
+            self._rec(1050, "h2", "A", sev=2),
+            self._rec(1100, "h3", "A", sev=2),
+            self._rec(1150, "h4", "A", sev=2),
+            # Smaller cluster, high severity
+            self._rec(1000, "h5", "B", sev=5),
+            self._rec(1050, "h6", "B", sev=5),
+            self._rec(1100, "h7", "B", sev=5),
+        ]
+        clusters = _cluster_problems(records, 600, 3)
+        assert [c["key"] for c in clusters] == ["A", "B"]  # bigger first
+
