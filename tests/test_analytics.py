@@ -811,3 +811,121 @@ class TestOutageClustering:
         clusters = _cluster_problems(records, 600, 3)
         assert [c["key"] for c in clusters] == ["A", "B"]  # bigger first
 
+
+class TestTrafficDropsSkipBreakdown:
+    """Pure-helper tests for the no-baseline visibility footer."""
+
+    def test_empty_when_nothing_skipped(self):
+        from zbbx_mcp.tools.traffic import _format_skip_breakdown
+
+        assert _format_skip_breakdown({"no_history": 0, "no_baseline_window": 0, "below_floor": 0}, 1.0) == ""
+
+    def test_single_reason_renders(self):
+        from zbbx_mcp.tools.traffic import _format_skip_breakdown
+
+        out = _format_skip_breakdown({"no_history": 12, "no_baseline_window": 0, "below_floor": 0}, 1.0)
+        assert out == "12 skipped: 12 no-history."
+
+    def test_all_three_reasons_render_in_order(self):
+        from zbbx_mcp.tools.traffic import _format_skip_breakdown
+
+        out = _format_skip_breakdown(
+            {"no_history": 5, "no_baseline_window": 3, "below_floor": 30}, 1.0,
+        )
+        assert out == "38 skipped: 5 no-history, 3 no-baseline-window, 30 below-1Mbps-floor."
+
+    def test_floor_uses_min_baseline_arg(self):
+        from zbbx_mcp.tools.traffic import _format_skip_breakdown
+
+        out = _format_skip_breakdown(
+            {"no_history": 0, "no_baseline_window": 0, "below_floor": 5}, 0.5,
+        )
+        assert "below-0.5Mbps-floor" in out
+
+    def test_zero_categories_omitted(self):
+        from zbbx_mcp.tools.traffic import _format_skip_breakdown
+
+        out = _format_skip_breakdown(
+            {"no_history": 0, "no_baseline_window": 7, "below_floor": 0}, 1.0,
+        )
+        # Other reasons should not appear
+        assert "no-history" not in out
+        assert "below-" not in out
+        assert "7 no-baseline-window" in out
+
+
+class TestShutdownPeerHeadroom:
+    """Pure-helper tests for shutdown peer-cohort headroom logic."""
+
+    def test_solo_when_no_peers(self):
+        from zbbx_mcp.tools.trends_health import _compute_shutdown_safety
+
+        label, headroom = _compute_shutdown_safety(50.0, [])
+        assert label == "SOLO"
+        assert headroom == 0.0
+
+    def test_safe_when_cohort_headroom_covers_load_with_margin(self):
+        from zbbx_mcp.tools.trends_health import _compute_shutdown_safety
+
+        # 4 peers, each averaging 50 Mbps with peaks at 120 → 280 Mbps headroom
+        peers = [{"peak": 120.0, "avg": 50.0}] * 4
+        label, headroom = _compute_shutdown_safety(100.0, peers)
+        assert label == "SAFE"
+        assert headroom == 280.0  # 4 × (120 - 50)
+
+    def test_risky_when_headroom_below_safety_margin(self):
+        from zbbx_mcp.tools.trends_health import _compute_shutdown_safety
+
+        # Candidate avg 100 Mbps × 1.5 margin = 150 Mbps required.
+        # Peers offer 80 Mbps headroom — positive but insufficient.
+        peers = [{"peak": 60.0, "avg": 20.0}, {"peak": 60.0, "avg": 20.0}]
+        label, headroom = _compute_shutdown_safety(100.0, peers)
+        assert label == "RISKY"
+        assert headroom == 80.0
+
+    def test_safety_margin_is_configurable(self):
+        from zbbx_mcp.tools.trends_health import _compute_shutdown_safety
+
+        peers = [{"peak": 100.0, "avg": 50.0}]  # 50 Mbps headroom
+        # With margin 1.0, 50 Mbps headroom is exactly enough for 50 Mbps load
+        assert _compute_shutdown_safety(50.0, peers, safety_margin=1.0)[0] == "SAFE"
+        # With margin 1.5 (default), 50 Mbps load needs 75 Mbps headroom
+        assert _compute_shutdown_safety(50.0, peers, safety_margin=1.5)[0] == "RISKY"
+
+    def test_negative_spare_peers_do_not_subtract(self):
+        from zbbx_mcp.tools.trends_health import _compute_shutdown_safety
+
+        # A peer at peak < avg is impossible in real data but defensible:
+        # such a peer should contribute zero, never negative headroom.
+        peers = [{"peak": 100.0, "avg": 50.0}, {"peak": 10.0, "avg": 30.0}]
+        label, headroom = _compute_shutdown_safety(20.0, peers)
+        assert headroom == 50.0
+        assert label == "SAFE"
+
+    def test_peers_with_missing_metrics_are_dropped(self):
+        from zbbx_mcp.tools.trends_health import _compute_shutdown_safety
+
+        peers = [
+            {"peak": None, "avg": None},  # no trend data — skip
+            {"peak": 100.0, "avg": 30.0},  # 70 headroom
+        ]
+        label, headroom = _compute_shutdown_safety(40.0, peers)
+        assert headroom == 70.0
+        assert label == "SAFE"
+
+    def test_candidate_without_traffic_returns_na(self):
+        from zbbx_mcp.tools.trends_health import _compute_shutdown_safety
+
+        peers = [{"peak": 100.0, "avg": 30.0}]
+        label, headroom = _compute_shutdown_safety(None, peers)
+        assert label == "N/A"
+        assert headroom == 70.0  # still computed for the report
+
+    def test_zero_load_candidate_is_safe(self):
+        from zbbx_mcp.tools.trends_health import _compute_shutdown_safety
+
+        # DEAD candidates with traffic_avg=0 — any peer headroom is enough.
+        peers = [{"peak": 1.0, "avg": 0.5}]
+        label, _ = _compute_shutdown_safety(0.0, peers)
+        assert label == "SAFE"
+
