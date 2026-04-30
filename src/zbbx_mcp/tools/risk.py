@@ -270,6 +270,12 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     days_since = (
                         (now - max(self_rot)) / 86400 if self_rot else None
                     )
+                    # IP age alone is not a disruption predictor — skip hosts
+                    # that have no peer churn AND no drift signal. Otherwise
+                    # every never-rotated host scores W_AGE * log1p(90) ≈ 2.26
+                    # and the ranking degenerates to "everyone is at risk".
+                    if peer_count == 0 and drift_label in {"ok", "n/a"}:
+                        continue
                     score, components = _compute_risk_score(peer_count, drift_label, days_since)
                     if score <= 0:
                         continue

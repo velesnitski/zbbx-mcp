@@ -424,11 +424,12 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
         @mcp.tool()
         async def detect_disruption_wave(
             country: str = "",
-            window_hours: int = 6,
-            recent_hours: int = 1,
-            drop_pct: float = 30.0,
+            window_hours: int = 12,
+            recent_hours: int = 2,
+            drop_pct: float = 50.0,
             min_hosts: int = 5,
             min_subnets: int = 3,
+            min_baseline_mbps: float = 5.0,
             instance: str = "",
         ) -> str:
             """Find waves where many hosts across many /24s drop in the same hour.
@@ -439,13 +440,20 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
             window; a wave fires when ≥`min_hosts` distinct hosts spanning
             ≥`min_subnets` distinct /24s are involved.
 
+            Defaults are tuned to avoid diurnal false positives — too short a
+            window or too low a drop threshold reads the overnight ramp-down
+            as a disruption. The `min_baseline_mbps` floor (mirrors
+            `detect_traffic_drops`) keeps idle micro-traffic hosts from
+            dominating the count.
+
             Args:
                 country: 2-letter country filter (optional)
-                window_hours: Total comparison window (default: 6)
-                recent_hours: Recent slice (default: 1)
-                drop_pct: Min drop to count a host (default: 30)
+                window_hours: Total comparison window (default: 12)
+                recent_hours: Recent slice (default: 2)
+                drop_pct: Min drop to count a host (default: 50)
                 min_hosts: Min hosts per wave (default: 5)
                 min_subnets: Min distinct /24s per wave (default: 3)
+                min_baseline_mbps: Skip hosts with baseline below this (default: 5.0)
                 instance: Zabbix instance name (optional)
             """
             try:
@@ -491,8 +499,9 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                         host_recent[hid] = host_recent.get(hid, 0) + recent[iid]
 
                 drops: list[dict] = []
+                min_baseline_bps = min_baseline_mbps * 1e6
                 for hid, b in host_baseline.items():
-                    if b <= 0:
+                    if b <= 0 or b < min_baseline_bps:
                         continue
                     r = host_recent.get(hid, 0)
                     drop = (b - r) / b * 100.0
