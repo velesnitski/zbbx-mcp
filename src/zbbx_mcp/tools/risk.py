@@ -24,7 +24,6 @@ from zbbx_mcp.data import (
     KEY_PING_LOSS,
     KEY_PING_RTT,
     STATUS_ENABLED,
-    TRAFFIC_IN_KEYS,
     extract_country,
     host_ip,
 )
@@ -68,10 +67,7 @@ def _compute_risk_score(
     """
     peers = math.log1p(max(0, peer_rotations_7d))
     drift = _DRIFT_WEIGHT.get(drift_label, 0.0)
-    if days_since_rotation is None:
-        age_days_capped = 90
-    else:
-        age_days_capped = min(max(0.0, days_since_rotation), 90.0)
+    age_days_capped = 90 if days_since_rotation is None else min(max(0.0, days_since_rotation), 90.0)
     age = math.log1p(age_days_capped)
     total = _W_PEER * peers + _W_DRIFT * drift + _W_AGE * age
     return total, {
