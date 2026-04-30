@@ -202,6 +202,9 @@ EXPECTED_TOOLS = {
     "audit_host_ips",
     "classify_external_ips",
     "audit_external_ips",
+    # correlation.py
+    "get_idle_relays",
+    "get_outage_clusters",
 }
 
 
