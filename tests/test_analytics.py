@@ -929,3 +929,186 @@ class TestShutdownPeerHeadroom:
         label, _ = _compute_shutdown_safety(0.0, peers)
         assert label == "SAFE"
 
+
+class TestExternalIpHistoryParsing:
+    """Pure-helper tests for audit-log details parsing and recovery scoring."""
+
+    def test_list_shape_picks_ip_updates(self):
+        from zbbx_mcp.tools.ip_history import _parse_ip_changes
+
+        details = (
+            '[["update", "interfaces.42.ip", "1.2.3.4", "5.6.7.8"],'
+            ' ["update", "host.name", "old", "new"],'
+            ' ["update", "interfaces.42.port", "10050", "10050"]]'
+        )
+        out = _parse_ip_changes(details)
+        assert out == [("1.2.3.4", "5.6.7.8")]
+
+    def test_dict_shape_picks_ip_updates(self):
+        from zbbx_mcp.tools.ip_history import _parse_ip_changes
+
+        details = '{"interfaces.7.ip": ["update", "10.0.0.1", "10.0.0.2"]}'
+        assert _parse_ip_changes(details) == [("10.0.0.1", "10.0.0.2")]
+
+    def test_no_change_when_old_equals_new(self):
+        from zbbx_mcp.tools.ip_history import _parse_ip_changes
+
+        # Renames that touch the field but leave the value equal must be skipped.
+        details = '[["update", "interfaces.42.ip", "1.2.3.4", "1.2.3.4"]]'
+        assert _parse_ip_changes(details) == []
+
+    def test_non_ip_field_ignored(self):
+        from zbbx_mcp.tools.ip_history import _parse_ip_changes
+
+        details = '[["update", "host.host", "a", "b"]]'
+        assert _parse_ip_changes(details) == []
+
+    def test_garbage_input_returns_empty(self):
+        from zbbx_mcp.tools.ip_history import _parse_ip_changes
+
+        assert _parse_ip_changes("") == []
+        assert _parse_ip_changes("not-json") == []
+        assert _parse_ip_changes("[1, 2, 3]") == []  # not the expected shape
+
+    def test_recovery_scores(self):
+        from zbbx_mcp.tools.ip_history import _score_recovery
+
+        assert _score_recovery(100.0, 90.0) == "recovered"   # 0.9
+        assert _score_recovery(100.0, 70.0) == "recovered"   # 0.7 boundary
+        assert _score_recovery(100.0, 50.0) == "partial"     # 0.5
+        assert _score_recovery(100.0, 30.0) == "partial"     # 0.3 boundary
+        assert _score_recovery(100.0, 5.0) == "still-down"   # 0.05
+
+    def test_recovery_na_cases(self):
+        from zbbx_mcp.tools.ip_history import _score_recovery
+
+        assert _score_recovery(None, 50.0) == "n/a"
+        assert _score_recovery(50.0, None) == "n/a"
+        assert _score_recovery(0.0, 50.0) == "n/a"  # divide-by-zero baseline
+
+
+class TestLossDriftDetection:
+    """Pure-helper tests for sliding-window loss/RTT classification."""
+
+    def test_split_baseline_recent_partitions_by_clock(self):
+        from zbbx_mcp.tools.loss_drift import _split_baseline_recent
+
+        trends = [
+            {"clock": 100, "value_avg": "1.0"},
+            {"clock": 200, "value_avg": "2.0"},
+            {"clock": 300, "value_avg": "10.0"},  # recent
+            {"clock": 400, "value_avg": "12.0"},  # recent
+        ]
+        base, recent = _split_baseline_recent(trends, cutoff_clock=300)
+        assert base == 1.5  # (1+2)/2
+        assert recent == 11.0  # (10+12)/2
+
+    def test_split_handles_missing_sides(self):
+        from zbbx_mcp.tools.loss_drift import _split_baseline_recent
+
+        # Only baseline records
+        b, r = _split_baseline_recent([{"clock": 100, "value_avg": "5"}], 300)
+        assert b == 5.0 and r is None
+
+        # Only recent records
+        b, r = _split_baseline_recent([{"clock": 400, "value_avg": "5"}], 300)
+        assert b is None and r == 5.0
+
+        # Empty
+        assert _split_baseline_recent([], 300) == (None, None)
+
+    def test_split_skips_garbage_values(self):
+        from zbbx_mcp.tools.loss_drift import _split_baseline_recent
+
+        trends = [
+            {"clock": 100, "value_avg": "not-a-number"},
+            {"clock": 200, "value_avg": "2.0"},
+        ]
+        base, _ = _split_baseline_recent(trends, 300)
+        assert base == 2.0
+
+    def test_new_loss_takes_priority_over_loss_up(self):
+        from zbbx_mcp.tools.loss_drift import _compute_loss_drift
+
+        # baseline ~0% loss, recent jumps to 8% — both flags fire, prefer new-loss.
+        label, details = _compute_loss_drift(0.5, 8.0, None, None)
+        assert label == "new-loss"
+        assert details["loss_delta"] == 7.5
+
+    def test_loss_up_when_baseline_already_high(self):
+        from zbbx_mcp.tools.loss_drift import _compute_loss_drift
+
+        label, _ = _compute_loss_drift(3.0, 10.0, None, None)
+        assert label == "loss-up"  # baseline >= 1%, so not 'new-loss'
+
+    def test_rtt_up_alone(self):
+        from zbbx_mcp.tools.loss_drift import _compute_loss_drift
+
+        label, details = _compute_loss_drift(None, None, 50.0, 90.0)
+        assert label == "rtt-up"
+        assert details["rtt_delta_pct"] == 80.0
+
+    def test_loss_and_rtt_combo(self):
+        from zbbx_mcp.tools.loss_drift import _compute_loss_drift
+
+        # Loss baseline >= 1% so 'new-loss' does not preempt.
+        label, _ = _compute_loss_drift(2.0, 10.0, 50.0, 90.0)
+        assert label == "loss-and-rtt"
+
+    def test_below_thresholds_is_ok(self):
+        from zbbx_mcp.tools.loss_drift import _compute_loss_drift
+
+        label, _ = _compute_loss_drift(2.0, 4.0, 50.0, 60.0)  # +2% loss, +20% RTT
+        assert label == "ok"
+
+    def test_no_data_is_na(self):
+        from zbbx_mcp.tools.loss_drift import _compute_loss_drift
+
+        label, _ = _compute_loss_drift(None, None, None, None)
+        assert label == "n/a"
+
+    def test_thresholds_are_configurable(self):
+        from zbbx_mcp.tools.loss_drift import _compute_loss_drift
+
+        # Default loss_step=5 → not flagged at +3.
+        assert _compute_loss_drift(2.0, 5.0, None, None)[0] == "ok"
+        # Tighten to 2 → +3 flags.
+        assert _compute_loss_drift(2.0, 5.0, None, None, loss_step=2.0)[0] == "loss-up"
+
+
+class TestOutageClusterGroupingV2:
+    """Pure-helper tests for multi-level cluster grouping (#119)."""
+
+    def test_subnet24_and_subnet16(self):
+        from zbbx_mcp.tools.correlation import _group_key
+
+        assert _group_key("subnet24", ip="10.20.30.40") == "10.20.30.0/24"
+        assert _group_key("subnet16", ip="10.20.30.40") == "10.20.0.0/16"
+        assert _group_key("subnet24", ip="") == ""
+        assert _group_key("subnet16", ip="not-an-ip") == ""
+
+    def test_provider_level_skips_unknown(self):
+        from zbbx_mcp.tools.correlation import _group_key
+
+        assert _group_key("provider", provider="OVH") == "OVH"
+        # 'Other'/'Unknown' would lump unrelated hosts — must be empty key.
+        assert _group_key("provider", provider="Other") == ""
+        assert _group_key("provider", provider="Unknown") == ""
+        assert _group_key("provider", provider="") == ""
+
+    def test_hostgroup_level(self):
+        from zbbx_mcp.tools.correlation import _group_key
+
+        assert _group_key("hostgroup", hostgroup="EU/edge") == "EU/edge"
+        assert _group_key("hostgroup", hostgroup="") == ""
+
+    def test_unknown_level_is_empty(self):
+        from zbbx_mcp.tools.correlation import _group_key
+
+        assert _group_key("subnet8", ip="1.2.3.4") == ""
+
+    def test_auto_levels_constant_is_narrowest_first(self):
+        from zbbx_mcp.tools.correlation import _AUTO_LEVELS
+
+        assert _AUTO_LEVELS == ("subnet24", "subnet16", "provider")
+

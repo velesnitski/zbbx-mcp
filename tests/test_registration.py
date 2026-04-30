@@ -205,6 +205,10 @@ EXPECTED_TOOLS = {
     # correlation.py
     "get_idle_relays",
     "get_outage_clusters",
+    # ip_history.py
+    "get_external_ip_history",
+    # loss_drift.py
+    "detect_loss_drift",
 }
 
 

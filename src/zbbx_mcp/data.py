@@ -25,6 +25,7 @@ __all__ = [
     "KEY_service_PRIMARY", "KEY_service_SECONDARY", "KEY_service_TERTIARY",
     "KEY_CPU_IDLE", "KEY_CPU_LOAD", "KEY_MEM_AVAIL",
     "KEY_CONNECTIONS", "KEY_AGENT_VERSION",
+    "KEY_PING_LOSS", "KEY_PING_RTT",
     # Re-exports from fetch.py for backward compatibility
     "fetch_all_data", "fetch_trends_batch", "fetch_enabled_hosts",
     "fetch_traffic_map", "fetch_cpu_map", "fetch_service_status", "fetch_host_dashboards",
@@ -44,6 +45,9 @@ KEY_service_PRIMARY = os.environ.get("ZABBIX_SERVICE_CHECK_KEY", "")
 KEY_service_SECONDARY = os.environ.get("ZABBIX_SERVICE2_CHECK_KEY", "")
 KEY_service_TERTIARY = os.environ.get("ZABBIX_SERVICE3_CHECK_KEY", "")
 KEY_CONNECTIONS = os.environ.get("ZABBIX_CONNECTIONS_KEY", "")
+# Network-quality item keys — configurable per deployment.
+KEY_PING_LOSS = os.environ.get("ZABBIX_PING_LOSS_KEY", "")
+KEY_PING_RTT = os.environ.get("ZABBIX_PING_RTT_KEY", "")
 # Products to hide from all reports (comma-separated)
 # Read fresh from env on every call — no caching, avoids import-time race
 def _get_hide_products() -> frozenset[str]:
