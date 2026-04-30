@@ -1112,3 +1112,271 @@ class TestOutageClusterGroupingV2:
 
         assert _AUTO_LEVELS == ("subnet24", "subnet16", "provider")
 
+
+class TestServicePortSplit:
+    """Pure-helper tests for detect_service_port_split classification."""
+
+    def test_split_label_when_service_alone_collapses(self):
+        from zbbx_mcp.tools.disruption import _classify_service_split
+
+        # Service: 100→20 (-80%), Mgmt: 50→48 (-4%)
+        label, details = _classify_service_split(100.0, 20.0, 50.0, 48.0)
+        assert label == "split"
+        assert details["service_drop_pct"] == 80.0
+        assert details["mgmt_drop_pct"] == 4.0
+
+    def test_full_outage_label_when_both_collapse(self):
+        from zbbx_mcp.tools.disruption import _classify_service_split
+
+        label, _ = _classify_service_split(100.0, 20.0, 50.0, 5.0)  # both -80% / -90%
+        assert label == "full-outage"
+
+    def test_ok_when_neither_collapses(self):
+        from zbbx_mcp.tools.disruption import _classify_service_split
+
+        label, _ = _classify_service_split(100.0, 95.0, 50.0, 49.0)
+        assert label == "ok"
+
+    def test_na_when_baseline_missing(self):
+        from zbbx_mcp.tools.disruption import _classify_service_split
+
+        assert _classify_service_split(None, 20.0, 50.0, 48.0)[0] == "n/a"
+        assert _classify_service_split(0.0, 20.0, 50.0, 48.0)[0] == "n/a"
+
+    def test_thresholds_configurable(self):
+        from zbbx_mcp.tools.disruption import _classify_service_split
+
+        # 30% service drop: not flagged at default (50%), flagged when threshold lowered.
+        assert _classify_service_split(100.0, 70.0, 50.0, 49.0)[0] == "ok"
+        assert _classify_service_split(
+            100.0, 70.0, 50.0, 49.0, service_drop_pct=20.0,
+        )[0] == "split"
+
+
+class TestRegionalLossClassification:
+    """Pure-helper tests for detect_regional_traffic_loss."""
+
+    def test_collapsed_when_one_region_drops_others_flat(self):
+        from zbbx_mcp.tools.disruption import _classify_regional_loss
+
+        # EU collapses 80%, NA stays flat (-2%).
+        regions = {"EU": (1000.0, 200.0), "NA": (500.0, 490.0)}
+        flagged = _classify_regional_loss(regions)
+        assert len(flagged) == 1
+        assert flagged[0]["region"] == "EU"
+        assert flagged[0]["label"] == "collapsed"
+
+    def test_solo_drop_when_no_flat_peer(self):
+        from zbbx_mcp.tools.disruption import _classify_regional_loss
+
+        # Both regions drop heavily — no peer is flat, so solo-drop label.
+        regions = {"EU": (1000.0, 200.0), "NA": (500.0, 100.0)}
+        flagged = _classify_regional_loss(regions)
+        assert {r["region"] for r in flagged} == {"EU", "NA"}
+        assert all(r["label"] == "solo-drop" for r in flagged)
+
+    def test_below_threshold_not_flagged(self):
+        from zbbx_mcp.tools.disruption import _classify_regional_loss
+
+        regions = {"EU": (100.0, 80.0), "NA": (100.0, 95.0)}  # 20% / 5%
+        assert _classify_regional_loss(regions) == []  # 20% < default 30% threshold
+
+    def test_missing_data_skipped(self):
+        from zbbx_mcp.tools.disruption import _classify_regional_loss
+
+        regions = {"EU": (None, 200.0), "NA": (500.0, 50.0), "APAC": (300.0, 290.0)}
+        flagged = _classify_regional_loss(regions)
+        # APAC is flat (~3%), so NA gets 'collapsed'.
+        assert len(flagged) == 1
+        assert flagged[0]["region"] == "NA"
+
+
+class TestDisruptionWaveDetection:
+    """Pure-helper tests for the wave-clustering algorithm."""
+
+    def _drop(self, clock, hostid, subnet, drop_pct=50.0):
+        return {
+            "clock": clock,
+            "hostid": hostid,
+            "host": f"h-{hostid}",
+            "subnet": subnet,
+            "hostgroup": "test",
+            "drop_pct": drop_pct,
+        }
+
+    def test_wave_fires_when_thresholds_met(self):
+        from zbbx_mcp.tools.disruption import _compute_waves
+
+        drops = [
+            self._drop(1000, "h1", "10.0.1.0/24"),
+            self._drop(1100, "h2", "10.0.2.0/24"),
+            self._drop(1200, "h3", "10.0.3.0/24"),
+            self._drop(1300, "h4", "10.0.4.0/24"),
+            self._drop(1400, "h5", "10.0.5.0/24"),
+        ]
+        waves = _compute_waves(drops, window_sec=3600, min_hosts=5, min_subnets=3)
+        assert len(waves) == 1
+        assert waves[0]["host_count"] == 5
+        assert waves[0]["subnet_count"] == 5
+
+    def test_wave_does_not_fire_when_subnets_collapse(self):
+        from zbbx_mcp.tools.disruption import _compute_waves
+
+        # 5 hosts, all in same /24 — fails min_subnets=3
+        drops = [self._drop(1000 + i * 100, f"h{i}", "10.0.1.0/24") for i in range(5)]
+        assert _compute_waves(drops, min_hosts=5, min_subnets=3) == []
+
+    def test_window_boundary_excludes_late_arrivals(self):
+        from zbbx_mcp.tools.disruption import _compute_waves
+
+        drops = [
+            self._drop(1000, "h1", "10.0.1.0/24"),
+            self._drop(1100, "h2", "10.0.2.0/24"),
+            self._drop(1200, "h3", "10.0.3.0/24"),
+            self._drop(5000, "h4", "10.0.4.0/24"),  # outside 3600s window
+            self._drop(5100, "h5", "10.0.5.0/24"),
+        ]
+        # First three meet min_subnets=3 but only 3 hosts; lower bar.
+        waves = _compute_waves(drops, window_sec=3600, min_hosts=3, min_subnets=3)
+        assert len(waves) == 1
+        assert waves[0]["host_count"] == 3
+
+    def test_severity_label_by_avg_drop(self):
+        from zbbx_mcp.tools.disruption import _compute_waves
+
+        drops = [
+            self._drop(1000, "h1", "a", drop_pct=80),
+            self._drop(1100, "h2", "b", drop_pct=80),
+            self._drop(1200, "h3", "c", drop_pct=80),
+        ]
+        waves = _compute_waves(drops, min_hosts=3, min_subnets=3)
+        assert waves[0]["severity"] == "critical"
+
+        drops = [
+            self._drop(1000, "h1", "a", drop_pct=40),
+            self._drop(1100, "h2", "b", drop_pct=40),
+            self._drop(1200, "h3", "c", drop_pct=40),
+        ]
+        waves = _compute_waves(drops, min_hosts=3, min_subnets=3)
+        assert waves[0]["severity"] == "medium"
+
+
+class TestAtRiskScoring:
+    """Pure-helper tests for the composite at-risk score."""
+
+    def test_zero_inputs_score_zero(self):
+        from zbbx_mcp.tools.risk import _compute_risk_score
+
+        score, details = _compute_risk_score(0, "ok", 0.0)
+        assert score == 0.0
+        assert details["drift_label"] == "ok"
+
+    def test_more_peer_rotations_increase_score(self):
+        from zbbx_mcp.tools.risk import _compute_risk_score
+
+        low, _ = _compute_risk_score(1, "ok", 0.0)
+        high, _ = _compute_risk_score(20, "ok", 0.0)
+        assert high > low
+
+    def test_drift_label_dominates_when_other_signals_zero(self):
+        from zbbx_mcp.tools.risk import _compute_risk_score
+
+        rtt, _ = _compute_risk_score(0, "rtt-up", 0.0)
+        loss, _ = _compute_risk_score(0, "loss-up", 0.0)
+        combo, _ = _compute_risk_score(0, "loss-and-rtt", 0.0)
+        assert rtt < loss < combo
+
+    def test_age_capped_at_90_days(self):
+        from zbbx_mcp.tools.risk import _compute_risk_score
+
+        cap, _ = _compute_risk_score(0, "ok", 90.0)
+        bigger, _ = _compute_risk_score(0, "ok", 365.0)
+        assert cap == bigger  # capped, so equal
+
+    def test_none_age_treated_as_capped(self):
+        from zbbx_mcp.tools.risk import _compute_risk_score
+
+        # No prior rotation observed → treat as cap, not zero.
+        cap, _ = _compute_risk_score(0, "ok", 90.0)
+        none_score, _ = _compute_risk_score(0, "ok", None)
+        assert cap == none_score
+
+
+class TestBlastRadiusClassification:
+    """Pure-helper tests for cohort connection-count delta labels."""
+
+    def test_absorbing_when_post_gains_at_least_10pct(self):
+        from zbbx_mcp.tools.risk import _compute_blast_radius
+
+        label, delta = _compute_blast_radius(100.0, 120.0)
+        assert label == "absorbing"
+        assert delta == 20.0
+
+    def test_draining_when_post_loses_more_than_10pct(self):
+        from zbbx_mcp.tools.risk import _compute_blast_radius
+
+        label, delta = _compute_blast_radius(100.0, 80.0)
+        assert label == "draining"
+        assert delta == -20.0
+
+    def test_stable_within_10pct(self):
+        from zbbx_mcp.tools.risk import _compute_blast_radius
+
+        for post in (95.0, 100.0, 105.0):
+            label, _ = _compute_blast_radius(100.0, post)
+            assert label == "stable"
+
+    def test_na_when_pre_missing_or_zero(self):
+        from zbbx_mcp.tools.risk import _compute_blast_radius
+
+        assert _compute_blast_radius(None, 50.0) == ("n/a", None)
+        assert _compute_blast_radius(0.0, 50.0) == ("n/a", None)
+        assert _compute_blast_radius(50.0, None) == ("n/a", None)
+
+
+class TestRecoveryAggregate:
+    """Pure-helper tests for fleet-level recovery KPI aggregation."""
+
+    def test_aggregate_basic(self):
+        from zbbx_mcp.tools.ip_history import _aggregate_recovery_scores
+
+        rotations = [
+            {"score": "recovered"},
+            {"score": "recovered"},
+            {"score": "recovered"},
+            {"score": "partial"},
+            {"score": "still-down"},
+            {"score": "n/a"},
+        ]
+        agg = _aggregate_recovery_scores(rotations)
+        assert agg["total"] == 6
+        assert agg["recovered"] == 3
+        assert agg["partial"] == 1
+        assert agg["still_down"] == 1
+        assert agg["na"] == 1
+        # rate = 3 recovered / 5 determined-outcome = 60%
+        assert agg["rate_pct"] == 60.0
+
+    def test_aggregate_all_na_yields_none_rate(self):
+        from zbbx_mcp.tools.ip_history import _aggregate_recovery_scores
+
+        agg = _aggregate_recovery_scores([{"score": "n/a"}, {"score": "n/a"}])
+        assert agg["total"] == 2
+        assert agg["na"] == 2
+        assert agg["rate_pct"] is None
+
+    def test_aggregate_unknown_label_treated_as_na(self):
+        from zbbx_mcp.tools.ip_history import _aggregate_recovery_scores
+
+        agg = _aggregate_recovery_scores([{"score": "weird"}, {"score": "recovered"}])
+        assert agg["na"] == 1
+        assert agg["recovered"] == 1
+        assert agg["rate_pct"] == 100.0  # 1 of 1 determined
+
+    def test_aggregate_empty(self):
+        from zbbx_mcp.tools.ip_history import _aggregate_recovery_scores
+
+        agg = _aggregate_recovery_scores([])
+        assert agg["total"] == 0
+        assert agg["rate_pct"] is None
+

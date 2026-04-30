@@ -25,7 +25,8 @@ __all__ = [
     "KEY_service_PRIMARY", "KEY_service_SECONDARY", "KEY_service_TERTIARY",
     "KEY_CPU_IDLE", "KEY_CPU_LOAD", "KEY_MEM_AVAIL",
     "KEY_CONNECTIONS", "KEY_AGENT_VERSION",
-    "KEY_PING_LOSS", "KEY_PING_RTT",
+    "KEY_PING_LOSS", "KEY_PING_RTT", "KEY_SERVICE_BPS",
+    "_get_regional_traffic_keys",
     # Re-exports from fetch.py for backward compatibility
     "fetch_all_data", "fetch_trends_batch", "fetch_enabled_hosts",
     "fetch_traffic_map", "fetch_cpu_map", "fetch_service_status", "fetch_host_dashboards",
@@ -48,6 +49,26 @@ KEY_CONNECTIONS = os.environ.get("ZABBIX_CONNECTIONS_KEY", "")
 # Network-quality item keys — configurable per deployment.
 KEY_PING_LOSS = os.environ.get("ZABBIX_PING_LOSS_KEY", "")
 KEY_PING_RTT = os.environ.get("ZABBIX_PING_RTT_KEY", "")
+# Optional service-port BPS key for service-vs-mgmt traffic split detection.
+KEY_SERVICE_BPS = os.environ.get("ZABBIX_SERVICE_BPS_KEY", "")
+
+
+def _get_regional_traffic_keys() -> dict[str, str]:
+    """Read ZABBIX_REGIONAL_TRAFFIC_KEYS as a JSON {region: item_key} map.
+
+    Returns {} when the env var is missing or unparseable.
+    """
+    raw = os.environ.get("ZABBIX_REGIONAL_TRAFFIC_KEYS", "")
+    if not raw:
+        return {}
+    import json as _json
+    try:
+        data = _json.loads(raw)
+    except (ValueError, TypeError):
+        return {}
+    if not isinstance(data, dict):
+        return {}
+    return {str(k): str(v) for k, v in data.items() if k and v}
 # Products to hide from all reports (comma-separated)
 # Read fresh from env on every call — no caching, avoids import-time race
 def _get_hide_products() -> frozenset[str]:
