@@ -67,6 +67,34 @@ def _parse_ip_changes(details_raw: str) -> list[tuple[str, str]]:
     return out
 
 
+def _aggregate_recovery_scores(rotations: list[dict]) -> dict:
+    """Fleet-level KPI summary over a list of scored rotations.
+
+    Each rotation must carry a `score` field set to one of the labels
+    returned by `_score_recovery`. The aggregate exposes raw counts
+    plus the recovery rate (recovered / total_with_outcome) so that
+    rotations labelled `n/a` are excluded from the denominator. Returns
+    `rate_pct = None` when no rotations had a determinable outcome.
+    """
+    counts = {"recovered": 0, "partial": 0, "still-down": 0, "n/a": 0}
+    for r in rotations:
+        label = r.get("score", "n/a")
+        if label not in counts:
+            label = "n/a"
+        counts[label] += 1
+    total = sum(counts.values())
+    determined = total - counts["n/a"]
+    rate_pct = (counts["recovered"] / determined * 100.0) if determined else None
+    return {
+        "total": total,
+        "recovered": counts["recovered"],
+        "partial": counts["partial"],
+        "still_down": counts["still-down"],
+        "na": counts["n/a"],
+        "rate_pct": rate_pct,
+    }
+
+
 def _score_recovery(baseline_avg: float | None, post_avg: float | None) -> str:
     """Classify a rotation's traffic outcome.
 
@@ -234,10 +262,102 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     )
 
                 # Footer summary
-                from collections import Counter
-                outcomes = Counter(r["score"] for r in rows)
-                summary = ", ".join(f"{v} {k}" for k, v in outcomes.most_common())
-                lines.append(f"\n*Outcomes: {summary}*")
+                agg = _aggregate_recovery_scores(rows)
+                rate = f"{agg['rate_pct']:.0f}%" if agg["rate_pct"] is not None else "—"
+                lines.append(
+                    f"\n*Outcomes: {agg['recovered']} recovered, {agg['partial']} partial, "
+                    f"{agg['still_down']} still-down, {agg['na']} n/a "
+                    f"(rate: {rate}).*"
+                )
                 return "\n".join(lines)
+            except (httpx.HTTPError, ValueError) as e:
+                return f"Error: {e}"
+
+    if "get_recovery_score" not in skip:
+
+        @mcp.tool()
+        async def get_recovery_score(
+            country: str = "",
+            window_days: int = 7,
+            instance: str = "",
+        ) -> str:
+            """Fleet-wide recovery KPI aggregated over recent IP rotations.
+
+            Walks every enabled host's audit log for IP rotations in the
+            window, scores each rotation with the same 24h pre/post traffic
+            comparison as get_external_ip_history, and returns a single KPI
+            row: total rotations, count by outcome, and recovery rate.
+
+            Args:
+                country: 2-letter country filter (optional)
+                window_days: Audit-log window (default: 7)
+                instance: Zabbix instance name (optional)
+            """
+            try:
+                client = resolver.resolve(instance)
+                hosts = await client.call("host.get", {
+                    "output": ["hostid", "host"],
+                    "filter": {"status": STATUS_ENABLED},
+                })
+                if country:
+                    cc = country.upper()
+                    hosts = [h for h in hosts if extract_country(h.get("host", "")) == cc]
+                if not hosts:
+                    return "No matching hosts."
+
+                hostids = [h["hostid"] for h in hosts]
+                now = int(_time.time())
+                time_from = now - window_days * 86400
+
+                # Single audit-log query batched across all hosts.
+                records = await client.call("auditlog.get", {
+                    "output": ["clock", "details", "resourceid"],
+                    "filter": {"resourcetype": 2, "action": 1, "resourceid": hostids},
+                    "time_from": time_from,
+                    "sortfield": "clock",
+                    "sortorder": "ASC",
+                    "limit": 5000,
+                })
+
+                rotations: list[dict] = []
+                for r in records:
+                    hid = str(r.get("resourceid", ""))
+                    try:
+                        clock = int(r.get("clock", 0))
+                    except (ValueError, TypeError):
+                        continue
+                    for old_ip, new_ip in _parse_ip_changes(r.get("details", "")):
+                        baseline = await _fetch_traffic_avg(
+                            client, hid, clock - 86400, clock,
+                        )
+                        post = await _fetch_traffic_avg(
+                            client, hid, clock, clock + 86400,
+                        )
+                        rotations.append({
+                            "hostid": hid,
+                            "clock": clock,
+                            "old_ip": old_ip,
+                            "new_ip": new_ip,
+                            "score": _score_recovery(baseline, post),
+                        })
+
+                if not rotations:
+                    return (
+                        f"No IP rotations found in the last {window_days}d "
+                        f"({len(hostids)} hosts inspected)."
+                    )
+
+                agg = _aggregate_recovery_scores(rotations)
+                rate = f"{agg['rate_pct']:.1f}%" if agg["rate_pct"] is not None else "—"
+                return (
+                    f"**Recovery KPI** (last {window_days}d, {len(hostids)} hosts)\n\n"
+                    f"- **Total rotations:** {agg['total']}\n"
+                    f"- **Recovered:** {agg['recovered']}\n"
+                    f"- **Partial:** {agg['partial']}\n"
+                    f"- **Still-down:** {agg['still_down']}\n"
+                    f"- **N/A (insufficient trend):** {agg['na']}\n"
+                    f"- **Recovery rate:** {rate} "
+                    f"(recovered / determined-outcome)"
+                )
             except (httpx.HTTPError, ValueError) as e:
                 return f"Error: {e}"

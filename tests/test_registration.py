@@ -207,8 +207,16 @@ EXPECTED_TOOLS = {
     "get_outage_clusters",
     # ip_history.py
     "get_external_ip_history",
+    "get_recovery_score",
     # loss_drift.py
     "detect_loss_drift",
+    # disruption.py
+    "detect_service_port_split",
+    "detect_regional_traffic_loss",
+    "detect_disruption_wave",
+    # risk.py
+    "get_at_risk_hosts",
+    "get_disruption_blast_radius",
 }
 
 

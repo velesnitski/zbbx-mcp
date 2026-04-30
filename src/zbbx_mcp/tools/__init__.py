@@ -13,6 +13,7 @@ from zbbx_mcp.tools import (
     dashboard_report,
     dashboards,
     discovery,
+    disruption,
     domains,
     events,
     executive,
@@ -36,6 +37,7 @@ from zbbx_mcp.tools import (
     problems,
     proxies,
     report,
+    risk,
     rollback_tools,
     scripts,
     service_brief,
@@ -117,7 +119,7 @@ def register_all(
         infra_report, costs, traffic, dashboard_report, full_report,
         trends_compare, trends_health,
         html_report, geo_traffic, geo_health, executive, ceo_report, service_brief, analysis,
-        web_scenarios, correlation, ip_history, loss_drift,
+        web_scenarios, correlation, ip_history, loss_drift, disruption, risk,
     ]
     for module in modules:
         module.register(mcp, resolver, skip=skip)

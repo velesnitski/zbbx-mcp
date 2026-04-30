@@ -224,6 +224,12 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
             yet every non-physical, non-loopback interface reports zero bytes/sec
             — tunnels are configured but not forwarding.
 
+            **Caveat — NAT-mode relays:** hosts that route purely through the
+            primary NIC (no tunnel interfaces by design) will appear here as
+            false positives. They legitimately carry mgmt-NIC throughput with
+            zero on every other interface. Cross-check the architecture or
+            naming convention before treating a hit as a service failure.
+
             Args:
                 min_mgmt_kbps: Floor on aggregate physical-NIC throughput (default: 100)
                 max_results: Maximum results (default: 50)
@@ -319,14 +325,19 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                         f"Use one of {sorted(valid)}."
                     )
                 client = resolver.resolve(instance)
+                # NB Zabbix 6.4 rejects sortfield="clock" on problem.get. Use the
+                # accepted "eventid" sort and re-order by clock in Python after
+                # the fetch — eventid is monotone with creation time so this only
+                # matters for the LIMIT cutoff, where eventid sort is fine.
                 problems = await client.call("problem.get", {
                     "output": ["eventid", "name", "severity", "clock"],
                     "severities": list(range(min_severity, 6)),
-                    "sortfield": "clock",
+                    "sortfield": "eventid",
                     "sortorder": "DESC",
                     "limit": 2000,
                     "recent": True,
                 })
+                problems.sort(key=lambda p: -int(p.get("clock", 0)))
                 if not problems:
                     return f"No active problems (severity >= {min_severity})."
 
