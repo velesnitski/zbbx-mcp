@@ -60,16 +60,16 @@ You should see `zabbix` listed when Claude starts. Try asking: *"Show current pr
 
 ## What it does
 
-**121 tools** across 42 modules:
+**154 tools** across 49 modules:
 
 | Category | Tools |
 |----------|-------|
-| **Hosts** | `search_hosts`, `get_host`, `create_host`, `update_host`, `delete_host`, `get_server_clusters`, `search_hosts_by_location` |
-| **Problems** | `get_problems`, `get_problem_detail`, `acknowledge_problem` |
+| **Hosts** | `search_hosts`, `get_host`, `create_host`, `update_host`, `delete_host`, `get_server_clusters`, `search_hosts_by_location`, `search_hosts_by_ip` |
+| **Problems** | `get_problems`, `get_problem_detail`, `acknowledge_problem`, `bulk_acknowledge` |
 | **Host Groups** | `get_hostgroups`, `create_hostgroup`, `delete_hostgroup` |
-| **Triggers** | `get_triggers`, `create_trigger`, `update_trigger`, `delete_trigger` |
+| **Triggers** | `get_triggers`, `create_trigger`, `update_trigger`, `delete_trigger`, `get_trigger_timeline` |
 | **Templates** | `get_templates`, `link_template`, `unlink_template` |
-| **Items & Metrics** | `get_host_items`, `search_items`, `create_item`, `update_item`, `delete_item`, `get_item_history`, `get_graphs` |
+| **Items & Metrics** | `get_host_items`, `search_items`, `create_item`, `update_item`, `delete_item`, `get_item_history`, `get_stale_items`, `get_graphs` |
 | **Events & Trends** | `get_events`, `get_trends`, `get_event_frequency`, `get_correlated_events`, `get_error_rate`, `get_incident_report` |
 | **Dashboards** | `get_dashboards`, `get_dashboard_detail`, `find_host_dashboard` |
 | **Maintenance** | `get_maintenance`, `create_maintenance`, `delete_maintenance` |
@@ -88,15 +88,18 @@ You should see `zabbix` listed when Claude starts. Try asking: *"Show current pr
 | **Domains** | `get_domain_status`, `get_ssl_expiry`, `get_domain_list` |
 | **Media & Actions** | `get_media_types`, `get_actions` |
 | **Slack** | `send_slack_message`, `send_slack_report` |
-| **Costs** | `import_server_costs`, `set_bulk_cost`, `get_cost_summary` |
+| **Costs** | `import_server_costs`, `import_costs_by_ip`, `import_cluster_ip_fees`, `import_from_xlsx`, `set_bulk_cost`, `fill_cost_median`, `analyze_cost_import`, `reconcile_billing_audit`, `find_stale_billing_ips`, `detect_cost_anomalies`, `export_cost_audit`, `get_cost_summary`, `get_cost_gaps`, `get_cost_efficiency` |
 | **Traffic** | `detect_traffic_anomalies`, `detect_traffic_drops`, `get_traffic_report` |
 | **Trends & Analysis** | `get_trends_batch`, `get_server_dashboard`, `compare_servers`, `get_health_assessment`, `get_shutdown_candidates`, `get_capacity_planning` |
-| **Geo Monitoring** | `detect_regional_anomalies`, `get_geo_traffic_trends`, `get_service_uptime_report`, `get_service_health_matrix`, `get_traffic_drop_timeline`, `get_expansion_report`, `get_regional_density_map`, `get_latency_estimate` |
-| **Availability** | `get_host_availability`, `get_recent_changes` |
-| **Executive** | `get_executive_dashboard`, `get_month_over_month`, `get_fleet_risk_score`, `get_sla_dashboard`, `get_report_snapshot`, `get_peak_analysis`, `get_product_audit` |
-| **Reports** | `generate_server_report`, `generate_infra_report`, `export_dashboard`, `generate_full_report` (Excel), `generate_html_report` (HTML), `generate_ceo_report` (CEO HTML), `generate_product_map` |
-| **Analysis** | `analyze_server_roles`, `correlate_logs`, `audit_host_ips`, `classify_external_ips` |
-| **Health** | `check_connection` |
+| **Geo Monitoring** | `detect_regional_anomalies`, `get_geo_traffic_trends`, `get_service_uptime_report`, `get_service_health_matrix`, `get_traffic_drop_timeline`, `get_expansion_report`, `get_regional_density_map`, `get_latency_estimate`, `get_servers_by_ping` |
+| **Availability & Health** | `check_connection`, `get_active_problems`, `get_agent_unreachable`, `get_stale_servers`, `get_host_availability`, `get_recent_changes` |
+| **Executive** | `get_executive_dashboard`, `get_month_over_month`, `get_fleet_risk_score`, `get_sla_dashboard`, `get_report_snapshot`, `get_peak_analysis`, `get_product_audit`, `get_predictive_alerts` |
+| **Reports** | `generate_server_report`, `generate_infra_report`, `export_dashboard`, `generate_full_report` (Excel), `generate_html_report` (HTML), `generate_ceo_report` (CEO HTML), `generate_service_brief` (HTML), `generate_product_map` |
+| **Analysis** | `analyze_server_roles`, `correlate_logs`, `audit_host_ips`, `classify_external_ips`, `audit_external_ips` |
+| **Outage Correlation** | `get_idle_relays`, `get_outage_clusters`, `get_host_floods` |
+| **Disruption Detection** | `detect_service_port_split`, `detect_regional_traffic_loss`, `detect_disruption_wave`, `detect_loss_drift` |
+| **Risk & Impact** | `get_at_risk_hosts`, `get_disruption_blast_radius` |
+| **External IP History** | `get_external_ip_history`, `get_recovery_score` |
 
 ### Report filtering
 
@@ -135,7 +138,11 @@ get_traffic_report(country="us")
 | `ZABBIX_SERVICE_CHECK_KEY` | No | Zabbix item key for primary service health check (empty = skip service monitoring) |
 | `ZABBIX_SERVICE2_CHECK_KEY` | No | Zabbix item key for secondary service health check |
 | `ZABBIX_SERVICE3_CHECK_KEY` | No | Zabbix item key for tertiary service health check |
-| `ZABBIX_CONNECTIONS_KEY` | No | Zabbix item key for connection count metric |
+| `ZABBIX_CONNECTIONS_KEY` | No | Zabbix item key for connection count metric (used by `get_disruption_blast_radius`) |
+| `ZABBIX_PING_LOSS_KEY` | No | Zabbix item key for ICMP ping loss % (enables `detect_loss_drift`) |
+| `ZABBIX_PING_RTT_KEY` | No | Zabbix item key for ICMP round-trip time (enables `detect_loss_drift`) |
+| `ZABBIX_SERVICE_BPS_KEY` | No | Zabbix item key for service-port bytes/sec (enables `detect_service_port_split`) |
+| `ZABBIX_REGIONAL_TRAFFIC_KEYS` | No | JSON object mapping region label → item key (enables `detect_regional_traffic_loss`) |
 | `ZABBIX_TRAFFIC_UNIT` | No | Set to `bytes` if Zabbix `net.if.in` returns bytes/sec instead of bits/sec. Default: bits/sec |
 | `ZABBIX_HIDE_PRODUCTS` | No | Comma-separated product names to hide from all reports |
 | `ZABBIX_BILLING_RENAMES` | No | Billing-to-Zabbix name translations for cost import (format: `old1:new1,old2:new2`) |
