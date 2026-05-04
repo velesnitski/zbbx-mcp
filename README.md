@@ -119,6 +119,25 @@ detect_traffic_anomalies(country="nl")
 get_traffic_report(country="us")
 ```
 
+## Choosing a tier
+
+The full 154-tool catalog costs ~30k tokens at every session start (the
+LLM has to load every tool's schema). For most sessions you only use a
+subset. `ZABBIX_TIER` ships preset bundles that cut this:
+
+| Tier | Tools | Handshake (~tokens) | Use when |
+|------|------:|--------------------:|----------|
+| `core` | 34 | ~5k | Read-only Zabbix querying — search, get, problems, dashboards |
+| `ops` | 59 | ~11k | Incident response — `core` + correlation, disruption detection, risk scoring, IP history, extended health |
+| `finance` | 56 | ~10k | Cost / billing — `core` + cost imports, audits, provider analysis |
+| `reports` | 71 | ~13k | Executive reporting — `core` + report generators, executive analytics, geo, inventory |
+| `full` | 154 | ~29k | Default — everything (no restriction) |
+
+`ZABBIX_TIER=ops` saves ~18k tokens per session compared to the default.
+Switch tiers by changing the env var; the server picks it up on restart.
+`DISABLED_TOOLS` still applies on top — you can pin a tier and remove
+specific tools you don't want.
+
 ## Environment variables
 
 | Variable | Required | Description |
@@ -127,6 +146,7 @@ get_traffic_report(country="us")
 | `ZABBIX_TOKEN` | Yes | Zabbix API token |
 | `ZABBIX_READ_ONLY` | No | Set to `true` to disable write operations |
 | `DISABLED_TOOLS` | No | Comma-separated tool names to disable |
+| `ZABBIX_TIER` | No | Preset bundle: `core` / `ops` / `finance` / `reports` / `full` (default: `full`). See "Choosing a tier" below |
 | `ZABBIX_ALLOW_HTTP` | No | Set to `1` to allow non-HTTPS connections |
 | `ZABBIX_PRODUCT_MAP` | No | JSON file path or inline JSON mapping host groups to products |
 | `SLACK_WEBHOOK_URL` | No | Slack webhook URL for `send_slack_message` / `send_slack_report` |
