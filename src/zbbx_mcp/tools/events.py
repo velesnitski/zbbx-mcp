@@ -3,7 +3,7 @@ from collections import defaultdict
 
 import httpx
 
-from zbbx_mcp.formatters import _ts, format_severity
+from zbbx_mcp.formatters import _ts, format_severity, normalize_problem_name
 from zbbx_mcp.resolver import InstanceResolver
 from zbbx_mcp.utils import resolve_group_ids
 
@@ -299,14 +299,17 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 if not events:
                     return f"No problem events in the last {hours}h."
 
-                # Group events by trigger name (normalized)
+                # Group events by trigger name (normalised against the originating
+                # host so per-host triggers like `Foo on host-a` collapse with
+                # `Foo on host-b`).
                 by_trigger: dict[str, list[dict]] = defaultdict(list)
                 for e in events:
-                    name = e.get("name", "").strip()
-                    if not name:
+                    raw_name = e.get("name", "").strip()
+                    if not raw_name:
                         continue
                     hosts = e.get("hosts", [])
                     hostname = hosts[0]["host"] if hosts else "?"
+                    name = normalize_problem_name(raw_name, hostname) or raw_name
                     by_trigger[name].append({
                         "host": hostname,
                         "clock": int(e.get("clock", "0")),

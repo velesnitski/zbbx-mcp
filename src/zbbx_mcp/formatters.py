@@ -1,8 +1,14 @@
 """Output formatters for Zabbix data — severity labels, host/trigger formatting."""
 
+import re
 from datetime import datetime, timezone
 
-__all__ = ["format_severity", "format_host_list", "format_host_detail"]
+__all__ = [
+    "format_severity",
+    "format_host_list",
+    "format_host_detail",
+    "normalize_problem_name",
+]
 
 # Zabbix severity levels (shared across triggers, problems, events)
 SEVERITY_NAMES = {
@@ -35,6 +41,48 @@ def _ts(epoch: str) -> str:
 
 def format_severity(severity: str) -> str:
     return SEVERITY_NAMES.get(str(severity), f"Unknown ({severity})")
+
+
+_WS_RE = re.compile(r"\s+")
+
+
+def normalize_problem_name(name: str, hostname: str = "") -> str:
+    """Strip ``on <hostname>`` fragments from a Zabbix problem name.
+
+    Zabbix triggers commonly embed the hostname in the problem name so each
+    individual event is self-describing. That defeats per-name dedup when
+    the same trigger fires on N hosts: ``Foo on host-a error`` and
+    ``Foo on host-b error`` look like distinct problems even though they
+    are the same trigger family. Callers should pair the normalised name
+    (for grouping / dedup) with the original ``hosts`` column (so no
+    information is lost).
+
+    Sub-host form is tried before the bare parent so ``Foo on parent child
+    error`` collapses to ``Foo error``, not ``Foo child error``. Hostnames
+    in the project follow the convention ``parent`` / ``parent child``
+    where the child shares the parent prefix on the first space.
+
+    Returns the input unchanged when ``hostname`` is empty.
+    """
+    if not name:
+        return ""
+    cleaned = name.strip()
+    if not hostname:
+        return cleaned
+    parts = hostname.split(" ", 1)
+    parent = parts[0]
+    candidates = [hostname]
+    if parent and parent != hostname:
+        candidates.append(parent)
+    for candidate in candidates:
+        if not candidate:
+            continue
+        pattern = re.compile(
+            rf"\bon\s+{re.escape(candidate)}\b",
+            re.IGNORECASE,
+        )
+        cleaned = pattern.sub("", cleaned)
+    return _WS_RE.sub(" ", cleaned).strip()
 
 
 def cell(value: object) -> str:

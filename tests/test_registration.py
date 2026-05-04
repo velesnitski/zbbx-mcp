@@ -217,6 +217,8 @@ EXPECTED_TOOLS = {
     # risk.py
     "get_at_risk_hosts",
     "get_disruption_blast_radius",
+    # floods.py
+    "get_host_floods",
 }
 
 
