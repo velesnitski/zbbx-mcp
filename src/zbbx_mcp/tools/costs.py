@@ -841,20 +841,14 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
         ) -> str:
             """Add extra-IP billing fees to cluster primary {$COST_MONTH} macros.
 
-            Idempotent: if the existing macro was written by a prior
-            cluster_extras run, the previous extras contribution is stripped
-            before adding new ones. Re-running with the same input produces
-            the same final value.
-
-            Input format: list of {"cluster": str, "extra_ips": [str], "extra_cost_month": float}
+            Idempotent against prior cluster_extras runs. Input shape:
+            list of {"cluster", "extra_ips", "extra_cost_month"}. See ADR 009.
 
             Args:
                 file_path: Path to JSON file with cluster fee entries (optional)
-                fees_json: Inline JSON (optional; use this OR file_path)
+                fees_json: Inline JSON (use this OR file_path)
                 dry_run: Preview changes without applying (default: True)
-                overwrite_base: If >= 0, replace the existing base with this value
-                    (per cluster) instead of trusting what is already in the macro.
-                    Use to reset a stale base without first wiping {$COST_MONTH}.
+                overwrite_base: If ≥ 0, reset the cluster's base to this value
                 instance: Zabbix instance (optional)
             """
             try:
@@ -1078,22 +1072,9 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
         ) -> str:
             """Export hosts with {$COST_MONTH} source for accounting review.
 
-            mode:
-              - estimated: only hosts whose cost is NOT backed by an exact
-                billing match (bulk patterns, product/provider medians,
-                manual extrapolations, empty descriptions).
-              - all: every costed host, with classification column.
-
-            source_xlsx: optional path to the source-of-truth workbook.
-              When provided, every row is cross-referenced against the
-              Ip-price / Sheet11 tabs and an `in_source_of_truth` column
-              records whether the host's IP is present there. This is the
-              authoritative "100% sure" signal — independent of macro
-              descriptions.
-
-            Output is a single-tab XLSX with host, IP, provider, product,
-            tier, country, cost, source, and (when applicable)
-            in_source_of_truth.
+            mode='estimated' (default) returns only hosts not backed by an
+            exact billing match; mode='all' returns every costed host. See
+            ADR 005 for column layout.
             """
             try:
                 import openpyxl
@@ -1366,25 +1347,15 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
             output_csv: str = "/tmp/billing_xlsx.csv",
             eur_usd: float = 1.08,
         ) -> str:
-            """Parse billing XLSX (Ip-price + Sheet11 structures) to a flat CSV.
+            """Parse a billing XLSX into a flat CSV (ip, billing_name, price USD).
 
-            Expects two sheet shapes used by the current accounting file:
-
-            - A detailed sheet with a primary IP column and a price-per-server
-              column (columns L–O in the current layout). Addons in the next
-              column are summed into the per-server price.
-            - A simple sheet with columns: Name, NS, IPv4, Price (EUR) — prices
-              may use comma decimal separator.
-
-            Output CSV columns: ip, billing_name, price_monthly (USD).
-            Only the primary IP of each row gets the price; siblings in the
-            same row are written with price 0 so reconcile_billing_audit can
-            still bucket them without double-counting.
+            Handles the two sheet shapes used by the current accounting
+            workbook. See ADR 002, 004 for layout details.
 
             Args:
                 file_path: Path to the XLSX file
                 output_csv: Where to write the flat CSV (default /tmp/billing_xlsx.csv)
-                eur_usd: EUR→USD conversion rate for sheets priced in EUR (default 1.08)
+                eur_usd: EUR→USD conversion rate for EUR-priced sheets (default 1.08)
             """
             try:
                 import openpyxl
@@ -1425,8 +1396,14 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     str(c or "").strip().lower()
                     for c in next(ws.iter_rows(values_only=True), ())
                 ]
-                # Heuristic: detailed sheet has an "ip server" and "price server" header
-                has_ip_col = any("ip server" in h or "ip сервера" in h for h in headers)
+                # Heuristic: detailed sheet has an "ip server" and "price server" header.
+                # Localised workbooks can supply an additional header pattern via
+                # ZABBIX_BILLING_IP_HEADER (case-insensitive substring match).
+                extra_ip_header = os.environ.get("ZABBIX_BILLING_IP_HEADER", "").strip().lower()
+                has_ip_col = any(
+                    "ip server" in h or (extra_ip_header and extra_ip_header in h)
+                    for h in headers
+                )
                 has_price_col = any("price server" in h or h.startswith("price") for h in headers)
                 if not (has_ip_col and has_price_col):
                     continue
@@ -1829,14 +1806,8 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
         ) -> str:
             """Tiered probability analysis of unmatched cost entries.
 
-            Reads a JSON file of {ip: price} entries, finds which don't match
-            Zabbix hosts by IP, then scores each with signals:
-            - /24 subnet match (40pt)
-            - Billing name fuzzy match (35pt strong / 15pt partial)
-            - Known provider CIDR (15pt)
-
-            Tiers: HIGH (>=70), MEDIUM (>=40), LOW (>=15), UNKNOWN (<15).
-            Writes CSV + JSON for human review.
+            Outputs HIGH/MEDIUM/LOW/UNKNOWN tiers for each unmatched IP based
+            on subnet, name-fuzzy, and provider-CIDR signals. See ADR 004.
 
             Args:
                 file_path: Path to JSON cost file {ip: price} or {ip: {name, price, ...}}
