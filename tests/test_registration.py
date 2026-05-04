@@ -4,7 +4,7 @@ from mcp.server.fastmcp import FastMCP
 from zbbx_mcp.client import ZabbixClient
 from zbbx_mcp.config import ZabbixConfig
 from zbbx_mcp.resolver import InstanceResolver
-from zbbx_mcp.tools import WRITE_TOOLS, register_all
+from zbbx_mcp.tools import ALL_TOOLS, WRITE_TOOLS, register_all
 
 
 def _setup(read_only=False, disabled_tools=frozenset()):
@@ -223,6 +223,12 @@ EXPECTED_TOOLS = {
 
 
 class TestToolRegistration:
+    def test_expected_matches_canonical(self):
+        # tests/test_registration.py historically duplicated the canonical list
+        # for safety; now ALL_TOOLS in src is the source of truth and this
+        # asserts the local copy stays in sync.
+        assert EXPECTED_TOOLS == ALL_TOOLS
+
     def test_all_tools_registered(self):
         mcp = _setup()
         tools = set(mcp._tool_manager._tools.keys())
@@ -271,3 +277,101 @@ class TestToolRegistration:
         assert actual == expected_read, (
             f"Expected {expected_read} read-only tools, got {actual}"
         )
+
+
+class TestTierPresets:
+    """ZABBIX_TIER preset resolution tests."""
+
+    def test_full_tier_returns_empty_disabled(self):
+        from zbbx_mcp.tools import ALL_TOOLS
+        from zbbx_mcp.tools.tiers import resolve_tier_disabled
+
+        assert resolve_tier_disabled("full", ALL_TOOLS) == frozenset()
+        assert resolve_tier_disabled("", ALL_TOOLS) == frozenset()
+
+    def test_unknown_tier_falls_back_to_no_restriction(self):
+        from zbbx_mcp.tools import ALL_TOOLS
+        from zbbx_mcp.tools.tiers import resolve_tier_disabled
+
+        # Typo / unknown name — safer to fall back to full than disable everything.
+        assert resolve_tier_disabled("opss", ALL_TOOLS) == frozenset()
+
+    def test_core_tier_disables_non_core_tools(self):
+        from zbbx_mcp.tools import ALL_TOOLS
+        from zbbx_mcp.tools.tiers import CORE_TOOLS, resolve_tier_disabled
+
+        disabled = resolve_tier_disabled("core", ALL_TOOLS)
+        # Everything not in CORE is disabled; everything in CORE is not.
+        assert disabled == ALL_TOOLS - CORE_TOOLS
+        # Spot-check: a heavy report tool is disabled, a basic query is not.
+        assert "generate_ceo_report" in disabled
+        assert "search_hosts" not in disabled
+
+    def test_ops_tier_includes_correlation_and_disruption(self):
+        from zbbx_mcp.tools import ALL_TOOLS
+        from zbbx_mcp.tools.tiers import resolve_tier_disabled
+
+        disabled = resolve_tier_disabled("ops", ALL_TOOLS)
+        # Ops-specific tools must be present.
+        for tool in [
+            "get_idle_relays", "get_outage_clusters", "get_host_floods",
+            "detect_disruption_wave", "get_at_risk_hosts",
+            "get_external_ip_history", "search_hosts", "get_problems",
+        ]:
+            assert tool not in disabled, f"{tool} should be enabled in ops tier"
+        # Heavy/unrelated tools are not in ops.
+        assert "generate_ceo_report" in disabled
+        assert "import_costs_by_ip" in disabled
+
+    def test_finance_tier_includes_cost_tools(self):
+        from zbbx_mcp.tools import ALL_TOOLS
+        from zbbx_mcp.tools.tiers import resolve_tier_disabled
+
+        disabled = resolve_tier_disabled("finance", ALL_TOOLS)
+        for tool in [
+            "import_server_costs", "import_costs_by_ip",
+            "reconcile_billing_audit", "get_cost_summary", "search_hosts",
+        ]:
+            assert tool not in disabled, f"{tool} should be enabled in finance tier"
+        # Disruption-detection tools should be off.
+        assert "detect_disruption_wave" in disabled
+
+    def test_reports_tier_includes_executive_and_html(self):
+        from zbbx_mcp.tools import ALL_TOOLS
+        from zbbx_mcp.tools.tiers import resolve_tier_disabled
+
+        disabled = resolve_tier_disabled("reports", ALL_TOOLS)
+        for tool in [
+            "generate_ceo_report", "generate_full_report",
+            "get_executive_dashboard", "get_servers_by_ping",
+            "search_hosts",
+        ]:
+            assert tool not in disabled, f"{tool} should be enabled in reports tier"
+
+    def test_tier_preset_via_setup(self):
+        # End-to-end: ZABBIX_TIER=core via _setup leaves only ~core tools registered.
+        import os
+
+        from zbbx_mcp.tools import ALL_TOOLS
+        from zbbx_mcp.tools.tiers import CORE_TOOLS
+
+        old = os.environ.pop("ZABBIX_TIER", None)
+        try:
+            os.environ["ZABBIX_TIER"] = "core"
+            # Re-parse settings + register fresh server.
+            from zbbx_mcp.config import _parse_global_settings
+            _, disabled = _parse_global_settings()
+            mcp = _setup(disabled_tools=disabled)
+            registered = set(mcp._tool_manager._tools.keys())
+            # Registered set is the intersection of CORE_TOOLS and ALL_TOOLS
+            # (every CORE name should be in ALL_TOOLS by construction).
+            assert registered <= CORE_TOOLS
+            assert "search_hosts" in registered
+            assert "generate_ceo_report" not in registered
+            # Every CORE tool should actually exist in ALL_TOOLS (no typos).
+            assert CORE_TOOLS <= ALL_TOOLS
+        finally:
+            if old is None:
+                os.environ.pop("ZABBIX_TIER", None)
+            else:
+                os.environ["ZABBIX_TIER"] = old

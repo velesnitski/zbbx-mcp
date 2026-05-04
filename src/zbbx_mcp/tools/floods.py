@@ -100,14 +100,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
         ) -> str:
             """Find hosts with many simultaneous active problems (whole-host outages).
 
-            Single-host outages slip through both the per-name dedup in
-            `get_active_problems` (different triggers count separately) and
-            the spatial clustering in `get_outage_clusters` (which requires
-            multiple hosts). This tool surfaces them by counting how many
-            distinct triggers each host has in PROBLEM state right now.
-
-            Sub-hosts (parent/parent-child convention) are merged into the
-            parent so a parent + child outage counts as one event.
+            Sub-hosts merge into the parent. See ADR 015.
 
             Args:
                 min_problems: Minimum simultaneous problems to flag (default: 5)

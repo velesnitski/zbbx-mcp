@@ -215,9 +215,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
         ) -> str:
             """Find hosts where service-port traffic dropped but management is healthy.
 
-            Selective disruption: the service interface is being suppressed
-            (filter, throttle, blackhole) while the host itself is fully up.
-            Item key for service traffic comes from ZABBIX_SERVICE_BPS_KEY.
+            Item key from ZABBIX_SERVICE_BPS_KEY. See ADR 013.
 
             Args:
                 country: 2-letter country filter (optional)
@@ -344,9 +342,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
         ) -> str:
             """Find regions whose inbound traffic collapsed while peers stayed flat.
 
-            Region → item-key mapping comes from the ZABBIX_REGIONAL_TRAFFIC_KEYS
-            env var (JSON object). Each region's traffic is summed across all
-            hosts that expose the configured key.
+            Region → item-key map from ZABBIX_REGIONAL_TRAFFIC_KEYS. See ADR 013.
 
             Args:
                 window_days: Total window (default: 7)
@@ -434,17 +430,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
         ) -> str:
             """Find waves where many hosts across many /24s drop in the same hour.
 
-            For each enabled host, compares the last `recent_hours` of inbound
-            traffic against the prior `window_hours - recent_hours` baseline.
-            Hosts that dropped at least `drop_pct` are clustered by 1h time
-            window; a wave fires when ≥`min_hosts` distinct hosts spanning
-            ≥`min_subnets` distinct /24s are involved.
-
-            Defaults are tuned to avoid diurnal false positives — too short a
-            window or too low a drop threshold reads the overnight ramp-down
-            as a disruption. The `min_baseline_mbps` floor (mirrors
-            `detect_traffic_drops`) keeps idle micro-traffic hosts from
-            dominating the count.
+            Defaults are diurnal-safe. See ADR 013, 014.
 
             Args:
                 country: 2-letter country filter (optional)

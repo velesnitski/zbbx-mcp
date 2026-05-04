@@ -30,13 +30,20 @@ def _parse_global_settings() -> tuple[bool, frozenset]:
     read_only = os.environ.get("ZABBIX_READ_ONLY", "").lower() in ("1", "true", "yes")
 
     disabled_raw = os.environ.get("DISABLED_TOOLS", "")
-    disabled = frozenset(
+    disabled = {
         t.strip().lower().replace("-", "_")
         for t in disabled_raw.split(",")
         if t.strip()
-    )
+    }
 
-    return read_only, disabled
+    tier = os.environ.get("ZABBIX_TIER", "").strip().lower()
+    if tier and tier != "full":
+        # Lazy import — tools.* is heavy, only pay the cost when ZABBIX_TIER is set.
+        from zbbx_mcp.tools import ALL_TOOLS
+        from zbbx_mcp.tools.tiers import resolve_tier_disabled
+        disabled.update(resolve_tier_disabled(tier, ALL_TOOLS))
+
+    return read_only, frozenset(disabled)
 
 
 def load_global_policy() -> tuple[bool, frozenset]:

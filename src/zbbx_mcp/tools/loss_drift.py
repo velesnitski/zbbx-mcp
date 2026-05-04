@@ -121,9 +121,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
         ) -> str:
             """Find hosts whose ping-loss or RTT has drifted upward vs 14d baseline.
 
-            Compares the last 2 days against the prior `window_days - 2` baseline
-            using the env-configured ping items (`ZABBIX_PING_LOSS_KEY` and
-            `ZABBIX_PING_RTT_KEY`).
+            Item keys from ZABBIX_PING_LOSS_KEY / ZABBIX_PING_RTT_KEY. See ADR 012.
 
             Args:
                 country: 2-letter country filter (optional)

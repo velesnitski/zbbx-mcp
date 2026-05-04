@@ -148,11 +148,8 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
         ) -> str:
             """Rank hosts by likelihood of disruption in the next 24h.
 
-            Composite of three signals, each independently configurable but
-            weighted by impact: (a) peer IP rotations in the same /24 over
-            `window_days`, (b) ping-loss / RTT drift over `ping_window_days`,
-            (c) days since this host's last IP rotation. Higher score =
-            more at-risk.
+            Composite of peer-rotation churn, loss/RTT drift, and IP age.
+            See ADR 013, 014.
 
             Args:
                 country: 2-letter country filter (optional)
@@ -317,9 +314,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
         ) -> str:
             """Measure cohort connection-count delta after a host drop.
 
-            Given a host that recently dropped, the tool computes the
-            connection-count delta on its (product, tier, country) cohort
-            peers across `window_min` minutes pre and post the drop event.
+            Cohort = (product, tier, country) peers. See ADR 013.
 
             Args:
                 host: Hostname of the dropped server (required)
