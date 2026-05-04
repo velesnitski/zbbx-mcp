@@ -198,9 +198,6 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
         ) -> str:
             """Return OK↔PROBLEM transitions for a trigger over a window.
 
-            Distinguishes flapping (many short transitions) from a stable outage
-            (one PROBLEM without recovery) by showing every state change.
-
             Args:
                 trigger_id: Zabbix trigger ID
                 hours: Lookback window (default: 24; ignored if time_from is set)

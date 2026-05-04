@@ -166,6 +166,7 @@ specific tools you don't want.
 | `ZABBIX_TRAFFIC_UNIT` | No | Set to `bytes` if Zabbix `net.if.in` returns bytes/sec instead of bits/sec. Default: bits/sec |
 | `ZABBIX_HIDE_PRODUCTS` | No | Comma-separated product names to hide from all reports |
 | `ZABBIX_BILLING_RENAMES` | No | Billing-to-Zabbix name translations for cost import (format: `old1:new1,old2:new2`) |
+| `ZABBIX_BILLING_IP_HEADER` | No | Additional case-insensitive substring to match the "IP server" column header in localised XLSX workbooks (used by `import_from_xlsx`) |
 | `ZABBIX_LOG_FILE` | No | Error log path (default: `~/.zbbx-mcp/zbbx-mcp.log`) |
 | `ZABBIX_ANALYTICS_FILE` | No | Analytics log path (default: `~/.zbbx-mcp/analytics.log`) |
 
