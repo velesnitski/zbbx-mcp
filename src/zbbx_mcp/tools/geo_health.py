@@ -89,12 +89,19 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     return "No service check keys configured."
                 service_items = await client.call("item.get", {
                     "hostids": hostids,
-                    "output": ["itemid", "hostid", "key_"],
+                    "output": ["itemid", "hostid", "key_", "state", "lastclock"],
                     "filter": {"key_": service_keys, "status": "0"},
                 })
 
                 if not service_items:
                     return "No service check items found."
+
+                # Drop stale/unsupported check items — they pollute uptime math.
+                from zbbx_mcp.data import is_service_check_stale
+                _now = int(_time.time())
+                service_items = [it for it in service_items if not is_service_check_stale(it, _now)]
+                if not service_items:
+                    return "No fresh service check items (all are stale or unsupported)."
 
                 # Fetch trends for service items
                 item_ids = [i["itemid"] for i in service_items]
@@ -234,19 +241,29 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
 
                 service1_items, service2_items, service3_items, traffic_map = await asyncio.gather(
                     client.call("item.get", {
-                        "hostids": all_ids, "output": ["hostid", "lastvalue"],
+                        "hostids": all_ids, "output": ["hostid", "lastvalue", "state", "lastclock"],
                         "filter": {"key_": KEY_service_PRIMARY, "status": "0"},
                     }) if KEY_service_PRIMARY else _empty(),
                     client.call("item.get", {
-                        "hostids": all_ids, "output": ["hostid", "lastvalue"],
+                        "hostids": all_ids, "output": ["hostid", "lastvalue", "state", "lastclock"],
                         "filter": {"key_": KEY_service_SECONDARY, "status": "0"},
                     }) if KEY_service_SECONDARY else _empty(),
                     client.call("item.get", {
-                        "hostids": all_ids, "output": ["hostid", "lastvalue"],
+                        "hostids": all_ids, "output": ["hostid", "lastvalue", "state", "lastclock"],
                         "filter": {"key_": KEY_service_TERTIARY, "status": "0"},
                     }) if KEY_service_TERTIARY else _empty(),
                     fetch_traffic_map(client, all_ids),
                 )
+
+                # Drop stale/unsupported check items per ADR 018 — they pollute
+                # the up/down math. The traffic-validation pass below provides
+                # a second layer of resilience for hosts whose check items are
+                # gone but whose traffic shows they are in fact up.
+                from zbbx_mcp.data import is_service_check_stale
+                _now = int(_time.time())
+                service1_items = [it for it in service1_items if not is_service_check_stale(it, _now)]
+                service2_items = [it for it in service2_items if not is_service_check_stale(it, _now)]
+                service3_items = [it for it in service3_items if not is_service_check_stale(it, _now)]
 
                 service1_map = build_value_map(service1_items, lambda v: int(float(v)))
                 service2_map = build_value_map(service2_items, lambda v: int(float(v)))

@@ -122,7 +122,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()):
 
                 service1_task = client.call("item.get", {
                     "hostids": hostids,
-                    "output": ["hostid", "lastvalue"],
+                    "output": ["hostid", "lastvalue", "state", "lastclock"],
                     "filter": {"key_": KEY_service_PRIMARY, "status": "0"},
                 }) if KEY_service_PRIMARY else _empty()
 
@@ -134,8 +134,16 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()):
                     trend_rows = []
                 service1_items = service1_items if isinstance(service1_items, list) else []
 
+                # Skip stale/unsupported check items so broken monitoring
+                # doesn't read as service-down.
+                import time as _t
+
+                from zbbx_mcp.data import is_service_check_stale
+                now_ts = int(_t.time())
                 service1_map: dict[str, int] = {}
                 for item in service1_items:
+                    if is_service_check_stale(item, now_ts):
+                        continue
                     try:
                         service1_map[item["hostid"]] = int(float(item["lastvalue"]))
                     except (ValueError, TypeError, KeyError):
