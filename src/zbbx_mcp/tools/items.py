@@ -421,9 +421,8 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
         ) -> str:
             """Find items whose monitoring is broken — unsupported or polling stopped.
 
-            Flags two failure modes that keep triggers in PROBLEM after a service is fixed:
-              - state=1 (unsupported): agent reported an error
-              - lastclock older than stale_multiplier x polling interval
+            Flags state=1 items and items whose lastclock is older than
+            stale_multiplier × polling interval.
 
             Args:
                 host_id: Filter by host ID (optional)
