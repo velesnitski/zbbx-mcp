@@ -17,6 +17,7 @@ from zbbx_mcp.tools import (
     domains,
     events,
     executive,
+    floods,
     full_report,
     geo_health,
     geo_traffic,
@@ -119,7 +120,7 @@ def register_all(
         infra_report, costs, traffic, dashboard_report, full_report,
         trends_compare, trends_health,
         html_report, geo_traffic, geo_health, executive, ceo_report, service_brief, analysis,
-        web_scenarios, correlation, ip_history, loss_drift, disruption, risk,
+        web_scenarios, correlation, ip_history, loss_drift, disruption, risk, floods,
     ]
     for module in modules:
         module.register(mcp, resolver, skip=skip)

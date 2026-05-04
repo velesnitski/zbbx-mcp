@@ -3,6 +3,7 @@ import time as _time
 import httpx
 
 from zbbx_mcp.data import fetch_traffic_map
+from zbbx_mcp.formatters import normalize_problem_name
 from zbbx_mcp.resolver import InstanceResolver
 
 
@@ -153,9 +154,15 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                         lines.append(f"- **{sev}:** {sev_counts[sev]}")
                 lines.append("")
 
-                # Detect alert storms: same problem name on many hosts within same minute
+                # Detect alert storms: same problem name on many hosts within same minute.
+                # Normalise the trigger name against its hostname before counting so
+                # per-host triggers (`Foo on host-a` / `Foo on host-b`) collapse.
                 from collections import Counter
-                name_counts = Counter(p.get("name", "?") for p in problems)
+                norm_for_problem = {}
+                for p in problems:
+                    host = p["hosts"][0]["host"] if p.get("hosts") else ""
+                    norm_for_problem[id(p)] = normalize_problem_name(p.get("name", "?"), host)
+                name_counts = Counter(norm_for_problem[id(p)] for p in problems)
                 recent_clocks = [int(p.get("clock", "0")) for p in problems]
                 if recent_clocks:
                     clock_spread = max(recent_clocks) - min(recent_clocks)
@@ -165,12 +172,14 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                             lines.append("Likely monitoring-side issue (check script, DNS, proxy) rather than real service failure.")
                             lines.append("Verify by checking traffic on affected hosts — if traffic is normal, alert is noise.\n")
 
-                # Group correlated problems: same (name, severity) across 5+ hosts = 1 entry
+                # Group correlated problems: same (severity, normalised-name) across
+                # 5+ hosts collapses to one entry. Normalisation lets per-host
+                # triggers (`Foo on host-a` / `Foo on host-b`) cluster together.
                 grouped: dict[tuple, list] = {}
                 for p in problems:
                     sev_int = int(p.get("severity", 0))
-                    name = p.get("name", "?")
                     host = p["hosts"][0]["host"] if p.get("hosts") else "?"
+                    name = norm_for_problem[id(p)] or p.get("name", "?")
                     key = (sev_int, name)
                     grouped.setdefault(key, []).append(host)
 
