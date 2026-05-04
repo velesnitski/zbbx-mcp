@@ -153,6 +153,36 @@ async def fetch_host_dashboards(client: ZabbixClient) -> dict[str, str]:
     return result
 
 
+_DEFAULT_STALE_SEC = 1800
+
+
+def is_service_check_stale(item: dict, now: int, stale_sec: int = _DEFAULT_STALE_SEC) -> bool:
+    """Return True when a service-check item should not count toward up/down.
+
+    Two failure modes for a service-check item that report ``lastvalue=0``
+    without the service actually being down:
+
+    - ``state=="1"`` — Zabbix flagged the item unsupported (broken script,
+      missing dependency, agent-side error). The lastvalue is whatever the
+      agent last sent before the polling broke.
+    - ``lastclock`` older than ``stale_sec`` seconds — polling stopped
+      updating. Without this guard, the last successful "0" lingers
+      indefinitely and reads as DOWN.
+
+    Items in either state are surfaced separately by ``get_stale_items``
+    and should not be treated as service-down signals here.
+    """
+    if str(item.get("state", "")) == "1":
+        return True
+    try:
+        last = int(item.get("lastclock", 0) or 0)
+    except (ValueError, TypeError):
+        return True
+    if last <= 0:
+        return True
+    return (now - last) > stale_sec
+
+
 async def fetch_service_status(client: ZabbixClient, hostids: list[str]) -> dict[str, int]:
     """Fetch combined service status per host. Checks all configured service keys.
 
@@ -161,6 +191,10 @@ async def fetch_service_status(client: ZabbixClient, hostids: list[str]) -> dict
      -1 = PARTIAL (some OK, some DOWN)
       0 = all DOWN
       (missing) = no service checks configured for this host
+
+    Stale or unsupported items (per is_service_check_stale) are skipped,
+    so a host whose check items are all broken reports as "missing"
+    rather than "all DOWN".
     """
     if not hostids:
         return {}
@@ -170,14 +204,17 @@ async def fetch_service_status(client: ZabbixClient, hostids: list[str]) -> dict
 
     items = await client.call("item.get", {
         "hostids": hostids,
-        "output": ["hostid", "lastvalue", "key_"],
+        "output": ["hostid", "lastvalue", "key_", "state", "lastclock"],
         "filter": {"key_": keys, "status": STATUS_ENABLED},
     })
 
-    # Per host: count OK and total checks
+    # Per host: count OK and total checks; stale/unsupported items don't count.
+    now = int(_time.time())
     host_ok: dict[str, int] = {}
     host_total: dict[str, int] = {}
     for it in items:
+        if is_service_check_stale(it, now):
+            continue
         hid = it["hostid"]
         host_total[hid] = host_total.get(hid, 0) + 1
         try:
@@ -297,6 +334,17 @@ async def fetch_all_data(
         return client.call("item.get", {"hostids": all_ids, "output": ["hostid", "lastvalue"],
                                          "filter": {"key_": key, "status": STATUS_ENABLED}})
 
+    def _service_item_call(key):
+        # Service-check items also need state + lastclock so callers can drop
+        # stale/unsupported items before treating lastvalue=0 as service-down.
+        if not key:
+            return _noop()
+        return client.call("item.get", {
+            "hostids": all_ids,
+            "output": ["hostid", "lastvalue", "state", "lastclock"],
+            "filter": {"key_": key, "status": STATUS_ENABLED},
+        })
+
     results = await asyncio.gather(
         _item_call(KEY_CPU_IDLE),
         _item_call(KEY_CPU_LOAD),
@@ -308,9 +356,9 @@ async def fetch_all_data(
         client.call("item.get", {"hostids": all_ids, "output": ["hostid", "lastvalue"],
                                   "filter": {"key_": TRAFFIC_OUT_KEYS, "status": STATUS_ENABLED}}),
         _item_call(KEY_AGENT_VERSION),
-        _item_call(KEY_service_PRIMARY),
-        _item_call(KEY_service_SECONDARY),
-        _item_call(KEY_service_TERTIARY),
+        _service_item_call(KEY_service_PRIMARY),
+        _service_item_call(KEY_service_SECONDARY),
+        _service_item_call(KEY_service_TERTIARY),
         client.call("usermacro.get", {"hostids": all_ids, "output": ["hostid", "macro", "value"],
                                        "filter": {"macro": ["{$COST_MONTH}", "{$BW_LIMIT}"]}}),
         client.call("host.get", {"hostids": all_ids, "output": ["hostid"],
@@ -351,6 +399,12 @@ async def fetch_all_data(
         except (ValueError, TypeError, KeyError):
             pass
     version_map = build_value_map(version_items, lambda v: str(v))
+    # Drop stale/unsupported service-check items so a broken poller doesn't
+    # masquerade as a service-down signal in the report.
+    _now = int(_time.time())
+    service1_items = [it for it in service1_items if not is_service_check_stale(it, _now)]
+    service2_items = [it for it in service2_items if not is_service_check_stale(it, _now)]
+    service3_items = [it for it in service3_items if not is_service_check_stale(it, _now)]
     service1_map = build_value_map(service1_items, lambda v: int(float(v)))
     service2_map = build_value_map(service2_items, lambda v: int(float(v)))
     in_traffic_map = build_max_map(in_traffic_items)

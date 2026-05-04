@@ -30,6 +30,7 @@ __all__ = [
     # Re-exports from fetch.py for backward compatibility
     "fetch_all_data", "fetch_trends_batch", "fetch_enabled_hosts",
     "fetch_traffic_map", "fetch_cpu_map", "fetch_service_status", "fetch_host_dashboards",
+    "is_service_check_stale",
 ]
 
 _COUNTRY_RE = re.compile(
@@ -392,4 +393,5 @@ from zbbx_mcp.fetch import (  # noqa: E402, F401
     fetch_service_status,
     fetch_traffic_map,
     fetch_trends_batch,
+    is_service_check_stale,
 )
