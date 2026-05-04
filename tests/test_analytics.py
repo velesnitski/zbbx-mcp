@@ -1583,3 +1583,66 @@ class TestPhysicalNicRegexFallback:
         per_host = _split_iface_metrics(items, frozenset())
         assert sorted(per_host["h1"]["tunnel_names"]) == ["gre1", "mytun0"]
 
+
+class TestServiceCheckStaleGate:
+    """Pure-helper tests for is_service_check_stale (#130)."""
+
+    def test_state_one_is_stale(self):
+        from zbbx_mcp.fetch import is_service_check_stale
+
+        # state=1 means Zabbix flagged the item unsupported.
+        item = {"state": "1", "lastclock": str(1_700_000_000), "lastvalue": "0"}
+        assert is_service_check_stale(item, now=1_700_000_300) is True
+
+    def test_lastclock_inside_window_is_fresh(self):
+        from zbbx_mcp.fetch import is_service_check_stale
+
+        item = {"state": "0", "lastclock": str(1_700_000_000), "lastvalue": "1"}
+        # 5 minutes old — well within the default 30min window.
+        assert is_service_check_stale(item, now=1_700_000_300) is False
+
+    def test_lastclock_outside_window_is_stale(self):
+        from zbbx_mcp.fetch import is_service_check_stale
+
+        item = {"state": "0", "lastclock": str(1_700_000_000), "lastvalue": "1"}
+        # 31 minutes old — past the default 30min window.
+        assert is_service_check_stale(item, now=1_700_000_000 + 31 * 60) is True
+
+    def test_zero_lastclock_is_stale(self):
+        from zbbx_mcp.fetch import is_service_check_stale
+
+        # Item never polled → lastclock=0. Treat as stale.
+        assert is_service_check_stale(
+            {"state": "0", "lastclock": "0"}, now=1_700_000_300,
+        ) is True
+
+    def test_missing_lastclock_is_stale(self):
+        from zbbx_mcp.fetch import is_service_check_stale
+
+        assert is_service_check_stale(
+            {"state": "0"}, now=1_700_000_300,
+        ) is True
+
+    def test_garbage_lastclock_is_stale(self):
+        from zbbx_mcp.fetch import is_service_check_stale
+
+        assert is_service_check_stale(
+            {"state": "0", "lastclock": "not-a-number"}, now=1_700_000_300,
+        ) is True
+
+    def test_custom_stale_window(self):
+        from zbbx_mcp.fetch import is_service_check_stale
+
+        item = {"state": "0", "lastclock": str(1_700_000_000), "lastvalue": "1"}
+        # 5 minutes old; tighten the window to 60s and it becomes stale.
+        assert is_service_check_stale(item, now=1_700_000_300, stale_sec=60) is True
+        # Loosen to 1h and the same item is fresh.
+        assert is_service_check_stale(item, now=1_700_000_300, stale_sec=3600) is False
+
+    def test_state_one_overrides_fresh_lastclock(self):
+        from zbbx_mcp.fetch import is_service_check_stale
+
+        # Even a recent lastclock cannot rescue an unsupported item.
+        item = {"state": "1", "lastclock": str(1_700_000_290), "lastvalue": "0"}
+        assert is_service_check_stale(item, now=1_700_000_300) is True
+

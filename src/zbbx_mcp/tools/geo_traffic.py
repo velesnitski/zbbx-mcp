@@ -77,15 +77,21 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 all_ids = [h["hostid"] for c_hosts in countries.values() for h in c_hosts]
                 trend_rows, _ = await fetch_trends_batch(client, all_ids, ["cpu", "traffic"], f"{baseline_days}d")
 
-                # Also get service health status
+                # Also get service health status. Skip stale/unsupported items
+                # so a broken monitoring script doesn't read as service-down.
                 service1_map: dict[str, int] = {}
                 if KEY_service_PRIMARY:
                     service1_items = await client.call("item.get", {
                         "hostids": all_ids,
-                        "output": ["hostid", "lastvalue"],
+                        "output": ["hostid", "lastvalue", "state", "lastclock"],
                         "filter": {"key_": KEY_service_PRIMARY, "status": "0"},
                     })
-                    service1_map = build_value_map(service1_items, lambda v: int(float(v)))
+                    import time as _t
+
+                    from zbbx_mcp.data import is_service_check_stale
+                    now_ts = int(_t.time())
+                    fresh = [it for it in service1_items if not is_service_check_stale(it, now_ts)]
+                    service1_map = build_value_map(fresh, lambda v: int(float(v)))
 
                 # Build per-host metrics
                 host_metrics: dict[str, dict] = {}

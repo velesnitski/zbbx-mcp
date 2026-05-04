@@ -8,6 +8,7 @@ regardless of check state), and filters micro-markets from risk alerts.
 from __future__ import annotations
 
 import asyncio
+import time
 from datetime import datetime, timezone
 
 import httpx
@@ -123,7 +124,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
             service_items_task = (
                 client.call("item.get", {
                     "hostids": all_ids,
-                    "output": ["hostid", "key_", "lastvalue"],
+                    "output": ["hostid", "key_", "lastvalue", "state", "lastclock"],
                     "filter": {"key_": service_keys, "status": STATUS_ENABLED},
                 }) if service_keys else asyncio.sleep(0, result=[])
             )
@@ -142,9 +143,15 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
 
             cpu_map = build_value_map(cpu_items, lambda v: round(100 - float(v), 1))
 
-            # Per-host: which service checks are configured and which are OK
+            # Per-host: which service checks are configured and which are OK.
+            # Stale/unsupported items don't count — they're broken monitoring,
+            # not service failures (surfaced separately by get_stale_items).
+            from zbbx_mcp.data import is_service_check_stale
+            now_ts = int(time.time())
             host_checks: dict[str, dict[str, int]] = {}
             for it in service_items:
+                if is_service_check_stale(it, now_ts):
+                    continue
                 hid = it["hostid"]
                 key = it["key_"]
                 try:
