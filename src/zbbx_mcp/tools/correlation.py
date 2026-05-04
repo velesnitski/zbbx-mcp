@@ -226,17 +226,8 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
         ) -> str:
             """Find relay hosts where mgmt NIC has traffic but tunnel interfaces are at zero.
 
-            Detects a class of failure invisible to ping/agent checks: the host is
-            reachable and its primary NIC carries kilobits of management traffic,
-            yet every non-physical, non-loopback interface reports zero bytes/sec
-            — tunnels are configured but not forwarding.
-
-            **Caveat — NAT-mode relays:** hosts that route purely through the
-            primary NIC (no tunnel interfaces by design) may appear as false
-            positives. They legitimately carry mgmt-NIC throughput with zero
-            on every other interface. Observed false-positive rate so far is
-            low; cross-check the architecture or naming convention before
-            treating a hit as a service failure.
+            NAT-mode relays (no tunnels by design) may show as false positives;
+            cross-check the architecture before acting. See ADR 010, 015.
 
             Args:
                 min_mgmt_kbps: Floor on aggregate physical-NIC throughput (default: 100)
@@ -306,12 +297,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
             max_clusters: int = 10,
             instance: str = "",
         ) -> str:
-            """Find waves of outages on hosts sharing a network or group key.
-
-            Six independent agent-down + service-down alerts on six hosts in the
-            same rack within a 20-minute window are almost certainly one
-            network-partition event, not six failures. This tool collapses them
-            into a single row.
+            """Cluster outages on hosts sharing a network or group key.
 
             Args:
                 window_min: Time window in minutes for clustering (default: 30)

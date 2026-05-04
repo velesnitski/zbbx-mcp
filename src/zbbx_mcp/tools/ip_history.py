@@ -168,13 +168,8 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
         ) -> str:
             """Per-host timeline of interface-IP rotations with recovery scoring.
 
-            For each rotation found in the Zabbix audit log, traffic averages
-            are compared across a 24h pre-window and a 24h post-window:
-
-            - **recovered**: post/baseline ratio ≥ 0.7
-            - **partial**: ratio in [0.3, 0.7)
-            - **still-down**: ratio < 0.3
-            - **n/a**: insufficient trend data in either window
+            Each rotation is scored recovered / partial / still-down / n/a
+            on 24h pre/post traffic ratios. See ADR 012.
 
             Args:
                 host: Exact hostname (optional — if set, ignores country/max_hosts)
@@ -281,12 +276,9 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
             window_days: int = 7,
             instance: str = "",
         ) -> str:
-            """Fleet-wide recovery KPI aggregated over recent IP rotations.
+            """Fleet-wide recovery KPI over recent IP rotations.
 
-            Walks every enabled host's audit log for IP rotations in the
-            window, scores each rotation with the same 24h pre/post traffic
-            comparison as get_external_ip_history, and returns a single KPI
-            row: total rotations, count by outcome, and recovery rate.
+            Counts and rate over the same scoring as get_external_ip_history.
 
             Args:
                 country: 2-letter country filter (optional)
