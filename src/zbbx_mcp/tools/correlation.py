@@ -10,6 +10,7 @@ These tools surface a class of failures the per-host views miss:
 
 from __future__ import annotations
 
+import re
 from collections import defaultdict
 from datetime import datetime, timezone
 
@@ -22,6 +23,7 @@ from zbbx_mcp.data import (
     extract_country,
     host_ip,
 )
+from zbbx_mcp.formatters import normalize_problem_name
 from zbbx_mcp.resolver import InstanceResolver
 
 # Cluster grouping levels, ordered narrowest to broadest.
@@ -31,6 +33,11 @@ _SEV_LABELS = {0: "Info", 1: "Info", 2: "Warning", 3: "Average", 4: "High", 5: "
 
 # Interface names ignored for tunnel-counting purposes (kernel/system, not relays).
 _IGNORED_IFACES: frozenset[str] = frozenset({"lo", "docker0"})
+
+# Regex fallback for physical-NIC names not in the curated TRAFFIC_IN_KEYS list.
+# Catches unused secondary NICs (eno3, enp130s0f0, USB ethernet enxMAC, etc.)
+# that would otherwise be misbucketed as tunnels by the exclusion logic.
+_PHYSICAL_NIC_RE = re.compile(r"^(?:eno|enp|enx|eth|ens|bond|ppp|wlan)\d")
 
 
 def _iface_from_key(key: str) -> str:
@@ -72,7 +79,7 @@ def _split_iface_metrics(
             hid,
             {"physical_bps": 0.0, "tunnel_bps": 0.0, "tunnel_count": 0, "tunnel_names": []},
         )
-        if key in physical_keys:
+        if key in physical_keys or _PHYSICAL_NIC_RE.match(iface):
             slot["physical_bps"] += val
         else:
             slot["tunnel_bps"] += val
@@ -225,10 +232,11 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
             — tunnels are configured but not forwarding.
 
             **Caveat — NAT-mode relays:** hosts that route purely through the
-            primary NIC (no tunnel interfaces by design) will appear here as
-            false positives. They legitimately carry mgmt-NIC throughput with
-            zero on every other interface. Cross-check the architecture or
-            naming convention before treating a hit as a service failure.
+            primary NIC (no tunnel interfaces by design) may appear as false
+            positives. They legitimately carry mgmt-NIC throughput with zero
+            on every other interface. Observed false-positive rate so far is
+            low; cross-check the architecture or naming convention before
+            treating a hit as a service failure.
 
             Args:
                 min_mgmt_kbps: Floor on aggregate physical-NIC throughput (default: 100)
@@ -388,11 +396,13 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                             key = host_keys.get(hid, {}).get(level, "")
                             if not key:
                                 continue
+                            raw_name = p.get("name", "?")
+                            host_label = hm.get("host", "")
                             out.append({
                                 "clock": int(p.get("clock", 0)),
                                 "hostid": hid,
-                                "host": hm.get("host", ""),
-                                "name": p.get("name", "?"),
+                                "host": host_label,
+                                "name": normalize_problem_name(raw_name, host_label) or raw_name,
                                 "severity": int(p.get("severity", 0)),
                                 "key": key,
                             })

@@ -1380,3 +1380,206 @@ class TestRecoveryAggregate:
         assert agg["total"] == 0
         assert agg["rate_pct"] is None
 
+
+class TestProblemNameNormalization:
+    """Pure-helper tests for normalize_problem_name (#127)."""
+
+    def test_strips_on_hostname(self):
+        from zbbx_mcp.formatters import normalize_problem_name
+
+        assert normalize_problem_name(
+            "ServiceX: on host-a-1 error", "host-a-1",
+        ) == "ServiceX: error"
+
+    def test_subhost_form_preferred_over_parent(self):
+        from zbbx_mcp.formatters import normalize_problem_name
+
+        # Hostname is "parent child"; the trigger names the sub-host. We must
+        # strip the sub-host form, not "child" only.
+        result = normalize_problem_name(
+            "ServiceX: on parent child error", "parent child",
+        )
+        assert result == "ServiceX: error"
+
+    def test_collapses_internal_whitespace(self):
+        from zbbx_mcp.formatters import normalize_problem_name
+
+        # After stripping, multiple spaces around the cut point collapse to one.
+        result = normalize_problem_name("CPU on host-a is overloaded", "host-a")
+        assert result == "CPU is overloaded"
+
+    def test_no_match_when_hostname_absent(self):
+        from zbbx_mcp.formatters import normalize_problem_name
+
+        # "on" is in the trigger but not paired with the hostname.
+        result = normalize_problem_name(
+            "Listener on port 8080 is down", "host-a",
+        )
+        assert result == "Listener on port 8080 is down"
+
+    def test_returns_input_when_hostname_missing(self):
+        from zbbx_mcp.formatters import normalize_problem_name
+
+        assert normalize_problem_name("Anything", "") == "Anything"
+        assert normalize_problem_name("", "host-a") == ""
+
+    def test_two_hosts_normalize_to_same_name(self):
+        from zbbx_mcp.formatters import normalize_problem_name
+
+        # The whole point: triggers that differ only by embedded host should
+        # collapse to a single dedup key.
+        a = normalize_problem_name("ServiceY: on host-a error", "host-a")
+        b = normalize_problem_name("ServiceY: on host-b error", "host-b")
+        assert a == b == "ServiceY: error"
+
+    def test_case_insensitive_on_keyword(self):
+        from zbbx_mcp.formatters import normalize_problem_name
+
+        # Some triggers capitalise differently — match regardless of case.
+        assert normalize_problem_name(
+            "Boot ON host-a failed", "host-a",
+        ) == "Boot failed"
+
+
+class TestHostFloodGrouping:
+    """Pure-helper tests for _group_host_floods (#128)."""
+
+    def _rec(self, hostid, host, name="Trigger", severity=4, clock=1000):
+        return {
+            "hostid": hostid,
+            "host": host,
+            "name": name,
+            "severity": severity,
+            "clock": clock,
+        }
+
+    def test_threshold_filters_below_min(self):
+        from zbbx_mcp.tools.floods import _group_host_floods
+
+        records = [
+            self._rec("h1", "host-a", name="A"),
+            self._rec("h1", "host-a", name="B"),
+        ]
+        # 2 problems on one host, min_problems=5 → no flood.
+        assert _group_host_floods(records, {}, min_problems=5) == []
+
+    def test_flood_emitted_when_count_meets_threshold(self):
+        from zbbx_mcp.tools.floods import _group_host_floods
+
+        records = [
+            self._rec("h1", "host-a", name=f"T-{i}", severity=2 + (i % 3))
+            for i in range(5)
+        ]
+        result = _group_host_floods(records, {}, min_problems=5)
+        assert len(result) == 1
+        assert result[0]["host"] == "host-a"
+        assert result[0]["problem_count"] == 5
+        assert result[0]["max_severity"] == 4
+
+    def test_subhost_merged_into_parent(self):
+        from zbbx_mcp.tools.floods import _group_host_floods
+
+        # Three problems on parent, two on its child — counts as one flood of 5.
+        records = [
+            self._rec("p1", "parent", name="A"),
+            self._rec("p1", "parent", name="B"),
+            self._rec("p1", "parent", name="C"),
+            self._rec("c1", "parent child1", name="D"),
+            self._rec("c1", "parent child1", name="E"),
+        ]
+        parent_map = {"c1": "p1"}
+        result = _group_host_floods(records, parent_map, min_problems=5)
+        assert len(result) == 1
+        assert result[0]["hostid"] == "p1"
+        assert result[0]["host"] == "parent"
+        assert result[0]["problem_count"] == 5
+        assert result[0]["child_count"] == 1
+
+    def test_earliest_clock_picked(self):
+        from zbbx_mcp.tools.floods import _group_host_floods
+
+        records = [
+            self._rec("h1", "host-a", clock=2000),
+            self._rec("h1", "host-a", clock=1000),
+            self._rec("h1", "host-a", clock=1500),
+            self._rec("h1", "host-a", clock=2500),
+            self._rec("h1", "host-a", clock=3000),
+        ]
+        result = _group_host_floods(records, {}, min_problems=5)
+        assert result[0]["earliest_clock"] == 1000
+
+    def test_sample_triggers_dedup_and_cap(self):
+        from zbbx_mcp.tools.floods import _group_host_floods
+
+        records = [
+            self._rec("h1", "host-a", name="DupTrigger") for _ in range(7)
+        ] + [
+            self._rec("h1", "host-a", name="UniqueTrigger") for _ in range(3)
+        ]
+        result = _group_host_floods(records, {}, min_problems=5)
+        # Sample is set-deduplicated, capped at 5 entries.
+        assert len(result[0]["sample_triggers"]) == 2
+        assert set(result[0]["sample_triggers"]) == {"DupTrigger", "UniqueTrigger"}
+
+    def test_floods_sorted_by_count_then_severity(self):
+        from zbbx_mcp.tools.floods import _group_host_floods
+
+        records = (
+            [self._rec("h1", "small", severity=5) for _ in range(5)]
+            + [self._rec("h2", "big", severity=2) for _ in range(8)]
+        )
+        result = _group_host_floods(records, {}, min_problems=5)
+        # Bigger flood comes first regardless of severity.
+        assert result[0]["host"] == "big"
+        assert result[1]["host"] == "small"
+
+
+class TestPhysicalNicRegexFallback:
+    """Pure-helper tests for #129 — NIC name regex fallback in _split_iface_metrics."""
+
+    def test_unused_secondary_nic_classified_physical(self):
+        from zbbx_mcp.tools.correlation import _split_iface_metrics
+
+        # eno3 / enp130s0f0 are physical NICs not in the curated TRAFFIC_IN_KEYS
+        # list. Without the regex they would fall into the tunnel bucket.
+        items = [
+            {"hostid": "h1", "key_": "net.if.in[eno3]", "lastvalue": "0"},
+            {"hostid": "h1", "key_": "net.if.in[enp130s0f0]", "lastvalue": "0"},
+            {"hostid": "h1", "key_": "net.if.in[tun0]", "lastvalue": "0"},
+        ]
+        per_host = _split_iface_metrics(items, frozenset())
+        # Only tun0 should land in tunnel_names.
+        assert per_host["h1"]["tunnel_count"] == 1
+        assert per_host["h1"]["tunnel_names"] == ["tun0"]
+
+    def test_usb_ethernet_enx_prefix(self):
+        from zbbx_mcp.tools.correlation import _split_iface_metrics
+
+        items = [
+            {"hostid": "h1", "key_": "net.if.in[enx00aa11bb22cc]", "lastvalue": "0"},
+            {"hostid": "h1", "key_": "net.if.in[gre1]", "lastvalue": "0"},
+        ]
+        per_host = _split_iface_metrics(items, frozenset())
+        assert per_host["h1"]["tunnel_names"] == ["gre1"]
+
+    def test_explicit_physical_keys_still_win(self):
+        from zbbx_mcp.tools.correlation import _split_iface_metrics
+
+        # Matching the curated key takes precedence; the regex is only a fallback.
+        items = [
+            {"hostid": "h1", "key_": "net.if.in[eth0]", "lastvalue": "100"},
+        ]
+        per_host = _split_iface_metrics(items, frozenset({"net.if.in[eth0]"}))
+        assert per_host["h1"]["physical_bps"] == 100
+        assert per_host["h1"]["tunnel_count"] == 0
+
+    def test_unknown_prefix_still_treated_as_tunnel(self):
+        from zbbx_mcp.tools.correlation import _split_iface_metrics
+
+        items = [
+            {"hostid": "h1", "key_": "net.if.in[gre1]", "lastvalue": "0"},
+            {"hostid": "h1", "key_": "net.if.in[mytun0]", "lastvalue": "0"},
+        ]
+        per_host = _split_iface_metrics(items, frozenset())
+        assert sorted(per_host["h1"]["tunnel_names"]) == ["gre1", "mytun0"]
+
