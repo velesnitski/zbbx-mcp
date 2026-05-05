@@ -20,6 +20,7 @@ from zbbx_mcp.classify import detect_provider
 from zbbx_mcp.data import (
     STATUS_ENABLED,
     TRAFFIC_IN_KEYS,
+    build_parent_map,
     extract_country,
     host_ip,
 )
@@ -380,6 +381,12 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     "selectGroups": ["name"],
                 })
                 host_meta = {h["hostid"]: h for h in hosts_meta}
+                # Sub-host (parent + " " + suffix) folds into its parent so a
+                # single physical machine never inflates the unique-host
+                # count. See ADR 022. The parent_map is built from the same
+                # query — sub-hosts whose parent has no problem in this
+                # window keep their own canonical id and still count once.
+                parent_map = build_parent_map(list(host_meta.values()))
 
                 # Pre-compute every level's key per host so auto-fallback is cheap.
                 host_keys: dict[str, dict[str, str]] = {}
@@ -402,14 +409,21 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                             hm = host_meta.get(hid)
                             if not hm:
                                 continue
+                            canonical_hid = parent_map.get(hid, hid)
+                            # Group key follows the *child's* IP (sub-hosts in
+                            # the same physical machine usually share a /24
+                            # with the parent anyway). Display label uses the
+                            # parent's hostname when available so dedup looks
+                            # cohesive in the rendered output.
                             key = host_keys.get(hid, {}).get(level, "")
                             if not key:
                                 continue
                             raw_name = p.get("name", "?")
-                            host_label = hm.get("host", "")
+                            canonical_meta = host_meta.get(canonical_hid, hm)
+                            host_label = canonical_meta.get("host", hm.get("host", ""))
                             out.append({
                                 "clock": int(p.get("clock", 0)),
-                                "hostid": hid,
+                                "hostid": canonical_hid,
                                 "host": host_label,
                                 "name": normalize_problem_name(raw_name, host_label) or raw_name,
                                 "severity": int(p.get("severity", 0)),
