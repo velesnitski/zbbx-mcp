@@ -25,6 +25,7 @@ from zbbx_mcp.data import (
     STATUS_ENABLED,
     TRAFFIC_IN_KEYS,
     _get_regional_traffic_keys,
+    build_parent_map,
     extract_country,
     host_ip,
 )
@@ -538,8 +539,13 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
 
                 hostids = [h["hostid"] for h in hosts]
                 host_map = {h["hostid"]: h for h in hosts}
-                # Pre-classify each host into its (product, tier, country)
-                # cohort so the peer-relative filter can compare like-for-like.
+                # Sub-host (parent + " " + suffix) folds into its parent so
+                # one physical machine never double-counts in the cohesion
+                # guard or the unique-host threshold. See ADR 022.
+                parent_map = build_parent_map(hosts)
+                # Pre-classify each canonical host into its (product, tier,
+                # country) cohort so the peer-relative filter compares
+                # like-for-like.
                 cohort_keys: dict[str, str] = {}
                 for h in hosts:
                     prod, tier = _classify_host(h.get("groups", []) or [])
@@ -562,14 +568,18 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 baseline = await _trends_window_avg(client, all_iids, baseline_from, cutoff)
                 recent = await _trends_window_avg(client, all_iids, cutoff, now)
 
-                # Aggregate per host (sum across multiple physical NICs).
+                # Aggregate per canonical host. Multiple physical NICs sum;
+                # parent+sub-host traffic also folds to the parent so a
+                # single physical machine never appears twice in downstream
+                # counts.
                 host_baseline: dict[str, float] = {}
                 host_recent: dict[str, float] = {}
                 for iid, hid in iid_to_hid.items():
+                    canon = parent_map.get(hid, hid)
                     if iid in baseline:
-                        host_baseline[hid] = host_baseline.get(hid, 0) + baseline[iid]
+                        host_baseline[canon] = host_baseline.get(canon, 0) + baseline[iid]
                     if iid in recent:
-                        host_recent[hid] = host_recent.get(hid, 0) + recent[iid]
+                        host_recent[canon] = host_recent.get(canon, 0) + recent[iid]
 
                 # First pass: compute every host's drop above the baseline floor.
                 # The peer-relative filter needs the full distribution (not just
