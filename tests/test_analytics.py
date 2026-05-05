@@ -1646,3 +1646,147 @@ class TestServiceCheckStaleGate:
         item = {"state": "1", "lastclock": str(1_700_000_290), "lastvalue": "0"}
         assert is_service_check_stale(item, now=1_700_000_300) is True
 
+
+class TestProblemAgeBuckets:
+    """Pure-helper tests for the age-histogram bucketer (#132)."""
+
+    def _p(self, sev, age_sec, now=1_700_000_000):
+        return {"severity": sev, "clock": now - age_sec}
+
+    def test_empty_input_returns_empty_dict(self):
+        from zbbx_mcp.tools.health import _bucket_problems_by_age
+
+        assert _bucket_problems_by_age([], 1_700_000_000) == {}
+
+    def test_three_problems_one_per_bucket(self):
+        from zbbx_mcp.tools.health import _bucket_problems_by_age
+
+        problems = [
+            self._p(4, 3600),       # <1d
+            self._p(4, 2 * 86400),  # 1-3d
+            self._p(4, 5 * 86400),  # 3-7d
+        ]
+        out = _bucket_problems_by_age(problems, 1_700_000_000)
+        assert out[4] == {"<1d": 1, "1-3d": 1, "3-7d": 1, "7d+": 0}
+
+    def test_seven_day_overflow_lands_in_seven_d_plus(self):
+        from zbbx_mcp.tools.health import _bucket_problems_by_age
+
+        problems = [self._p(5, 14 * 86400)]
+        assert _bucket_problems_by_age(problems, 1_700_000_000)[5]["7d+"] == 1
+
+    def test_boundary_one_day_lands_in_one_three(self):
+        from zbbx_mcp.tools.health import _bucket_problems_by_age
+
+        # Exactly 86400s old = 1 day. Strict "<1d" pushes it into the 1-3d bucket.
+        problems = [self._p(3, 86400)]
+        out = _bucket_problems_by_age(problems, 1_700_000_000)
+        assert out[3]["<1d"] == 0
+        assert out[3]["1-3d"] == 1
+
+    def test_severities_partitioned_independently(self):
+        from zbbx_mcp.tools.health import _bucket_problems_by_age
+
+        problems = [
+            self._p(5, 3600),
+            self._p(5, 3600),
+            self._p(2, 3600),
+        ]
+        out = _bucket_problems_by_age(problems, 1_700_000_000)
+        assert out[5]["<1d"] == 2
+        assert out[2]["<1d"] == 1
+
+    def test_bad_clock_skipped(self):
+        from zbbx_mcp.tools.health import _bucket_problems_by_age
+
+        problems = [
+            {"severity": 4, "clock": 0},
+            {"severity": 4, "clock": "garbage"},
+            {"severity": 4, "clock": 1_700_000_000 - 3600},  # valid
+        ]
+        out = _bucket_problems_by_age(problems, 1_700_000_000)
+        assert out[4]["<1d"] == 1
+        assert sum(out[4].values()) == 1
+
+
+class TestStaleItemsCascade:
+    """Pure-helper tests for cascade collapse (#133)."""
+
+    def test_no_master_passes_through(self):
+        from zbbx_mcp.tools.items import _collapse_dependent_chain
+
+        stale = [{"itemid": "i1", "master_itemid": ""}]
+        out = _collapse_dependent_chain(stale)
+        assert len(out) == 1
+        assert out[0]["affected_count"] == 0
+
+    def test_child_with_stale_master_collapsed(self):
+        from zbbx_mcp.tools.items import _collapse_dependent_chain
+
+        stale = [
+            {"itemid": "i1", "master_itemid": ""},   # root
+            {"itemid": "i2", "master_itemid": "i1"}, # child of root
+        ]
+        out = _collapse_dependent_chain(stale)
+        assert len(out) == 1
+        assert out[0]["itemid"] == "i1"
+        assert out[0]["affected_count"] == 1
+
+    def test_child_with_non_stale_master_kept(self):
+        from zbbx_mcp.tools.items import _collapse_dependent_chain
+
+        # Child references master_itemid that is NOT in the stale list —
+        # treat the child as its own root (its master is healthy).
+        stale = [{"itemid": "i2", "master_itemid": "i_healthy"}]
+        out = _collapse_dependent_chain(stale)
+        assert len(out) == 1
+        assert out[0]["itemid"] == "i2"
+        assert out[0]["affected_count"] == 0
+
+    def test_two_hop_chain_collapses_to_root(self):
+        from zbbx_mcp.tools.items import _collapse_dependent_chain
+
+        stale = [
+            {"itemid": "root", "master_itemid": ""},
+            {"itemid": "mid", "master_itemid": "root"},
+            {"itemid": "leaf", "master_itemid": "mid"},
+        ]
+        out = _collapse_dependent_chain(stale)
+        assert len(out) == 1
+        assert out[0]["itemid"] == "root"
+        assert out[0]["affected_count"] == 2  # mid + leaf
+
+    def test_multiple_children_share_one_root(self):
+        from zbbx_mcp.tools.items import _collapse_dependent_chain
+
+        stale = [
+            {"itemid": "root", "master_itemid": ""},
+            {"itemid": "c1", "master_itemid": "root"},
+            {"itemid": "c2", "master_itemid": "root"},
+            {"itemid": "c3", "master_itemid": "root"},
+        ]
+        out = _collapse_dependent_chain(stale)
+        assert len(out) == 1
+        assert out[0]["affected_count"] == 3
+
+    def test_circular_reference_does_not_loop(self):
+        from zbbx_mcp.tools.items import _collapse_dependent_chain
+
+        # Pathological: A → B → A. The root_of walk must terminate.
+        stale = [
+            {"itemid": "a", "master_itemid": "b"},
+            {"itemid": "b", "master_itemid": "a"},
+        ]
+        out = _collapse_dependent_chain(stale)
+        # Both end up rooted at one of the cycle members; count should be
+        # bounded and the function must return.
+        assert sum(s.get("affected_count", 0) for s in out) >= 0
+
+    def test_input_not_mutated(self):
+        from zbbx_mcp.tools.items import _collapse_dependent_chain
+
+        stale = [{"itemid": "i1", "master_itemid": ""}]
+        original = dict(stale[0])
+        _ = _collapse_dependent_chain(stale)
+        assert stale[0] == original
+

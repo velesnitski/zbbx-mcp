@@ -30,6 +30,7 @@ EXPECTED_TOOLS = {
     # problems.py
     "get_problems",
     "get_problem_detail",
+    "get_problem_age_buckets",
     "acknowledge_problem",
     "bulk_acknowledge",
     # hostgroups.py

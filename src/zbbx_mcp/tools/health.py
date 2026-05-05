@@ -6,6 +6,44 @@ from zbbx_mcp.data import fetch_traffic_map
 from zbbx_mcp.formatters import normalize_problem_name
 from zbbx_mcp.resolver import InstanceResolver
 
+# Age-bucket boundaries in seconds. Ordered narrowest to broadest.
+_AGE_BUCKETS: tuple[tuple[str, int], ...] = (
+    ("<1d", 86400),
+    ("1-3d", 3 * 86400),
+    ("3-7d", 7 * 86400),
+)
+_AGE_BUCKET_KEYS: tuple[str, ...] = ("<1d", "1-3d", "3-7d", "7d+")
+
+
+def _bucket_problems_by_age(
+    problems: list[dict],
+    now: int,
+) -> dict[int, dict[str, int]]:
+    """Bucket problems by age within each severity.
+
+    Each input record needs ``severity`` (int 0-5) and ``clock`` (int epoch).
+    Returns ``{severity: {bucket_key: count}}`` with every bucket key
+    present (zero when empty) so consumers can render fixed columns.
+    """
+    by_sev: dict[int, dict[str, int]] = {}
+    for p in problems:
+        try:
+            sev = int(p.get("severity", 0))
+            clock = int(p.get("clock", 0))
+        except (ValueError, TypeError):
+            continue
+        if clock <= 0:
+            continue
+        age = now - clock
+        bucket = _AGE_BUCKET_KEYS[-1]
+        for key, threshold in _AGE_BUCKETS:
+            if age < threshold:
+                bucket = key
+                break
+        slot = by_sev.setdefault(sev, dict.fromkeys(_AGE_BUCKET_KEYS, 0))
+        slot[bucket] += 1
+    return by_sev
+
 
 def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> None:
 
@@ -273,6 +311,69 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     lines.append(f"| {host} | {ip} | {age} ago |")
                 if len(stale) > max_results:
                     lines.append(f"\n*{len(stale) - max_results} more omitted*")
+                return "\n".join(lines)
+            except (httpx.HTTPError, ValueError) as e:
+                return f"Error: {e}"
+
+    if "get_problem_age_buckets" not in skip:
+
+        @mcp.tool()
+        async def get_problem_age_buckets(
+            min_severity: int = 0,
+            instance: str = "",
+        ) -> str:
+            """Active-problem age histogram per severity (<1d, 1-3d, 3-7d, 7d+).
+
+            Args:
+                min_severity: Minimum severity 0-5 (default: 0 = all)
+                instance: Zabbix instance name (optional)
+            """
+            try:
+                client = resolver.resolve(instance)
+                problems = await client.call("problem.get", {
+                    "output": ["eventid", "severity", "clock"],
+                    "severities": list(range(min_severity, 6)),
+                    "sortfield": "eventid",
+                    "sortorder": "DESC",
+                    "limit": 5000,
+                    "recent": True,
+                })
+                if not problems:
+                    return f"No active problems (severity >= {min_severity})."
+
+                now = int(_time.time())
+                by_sev = _bucket_problems_by_age(problems, now)
+
+                _SEV = {0: "Info", 1: "Info", 2: "Warning", 3: "Average",
+                        4: "High", 5: "Disaster"}
+                lines = [
+                    f"**Problem age distribution** ({len(problems)} active, "
+                    f"severity ≥ {min_severity})\n",
+                    "| Severity | <1d | 1-3d | 3-7d | 7d+ | Total |",
+                    "|----------|----:|-----:|-----:|----:|------:|",
+                ]
+                grand = dict.fromkeys(_AGE_BUCKET_KEYS, 0)
+                for sev in sorted(by_sev, reverse=True):
+                    counts = by_sev[sev]
+                    row_total = sum(counts.values())
+                    sev_name = _SEV.get(sev, f"Sev{sev}")
+                    lines.append(
+                        f"| {sev_name} | {counts['<1d']} | {counts['1-3d']} | "
+                        f"{counts['3-7d']} | {counts['7d+']} | {row_total} |"
+                    )
+                    for k in _AGE_BUCKET_KEYS:
+                        grand[k] += counts[k]
+                grand_total = sum(grand.values())
+                lines.append(
+                    f"| **Total** | {grand['<1d']} | {grand['1-3d']} | "
+                    f"{grand['3-7d']} | {grand['7d+']} | {grand_total} |"
+                )
+                aged = grand["1-3d"] + grand["3-7d"]
+                if aged:
+                    lines.append(
+                        f"\n*{aged} problems aged 1-7d "
+                        f"({100 * aged // grand_total}% of total).*"
+                    )
                 return "\n".join(lines)
             except (httpx.HTTPError, ValueError) as e:
                 return f"Error: {e}"
