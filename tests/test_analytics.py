@@ -1790,3 +1790,183 @@ class TestStaleItemsCascade:
         _ = _collapse_dependent_chain(stale)
         assert stale[0] == original
 
+
+class TestWaveCohesionGuard:
+    """Pure-helper tests for the country-concentration check inside _compute_waves (#134)."""
+
+    def _drop(self, clock, hostid, subnet, country, drop_pct=60.0):
+        return {
+            "clock": clock,
+            "hostid": hostid,
+            "host": f"h-{hostid}",
+            "subnet": subnet,
+            "hostgroup": "test",
+            "country": country,
+            "drop_pct": drop_pct,
+        }
+
+    def test_globally_spread_drops_are_filtered_out(self):
+        from zbbx_mcp.tools.disruption import _compute_waves
+
+        # 5 hosts, 5 different countries — top-country share = 1/5 = 20%, well below 40%.
+        drops = [
+            self._drop(1000 + 100 * i, f"h{i}", f"10.0.{i}.0/24", c)
+            for i, c in enumerate(["DE", "AE", "MX", "GT", "ID"])
+        ]
+        waves = _compute_waves(drops, min_hosts=5, min_subnets=3)
+        assert waves == []
+
+    def test_concentrated_country_passes(self):
+        from zbbx_mcp.tools.disruption import _compute_waves
+
+        # 5 hosts, all in TR — concentration 100%.
+        drops = [
+            self._drop(1000 + 100 * i, f"h{i}", f"10.0.{i}.0/24", "TR")
+            for i in range(5)
+        ]
+        waves = _compute_waves(drops, min_hosts=5, min_subnets=3)
+        assert len(waves) == 1
+        assert waves[0]["top_country"] == "TR"
+        assert waves[0]["top_country_share"] == 1.0
+
+    def test_partial_concentration_at_default_threshold(self):
+        from zbbx_mcp.tools.disruption import _compute_waves
+
+        # 6 hosts: 4 TR (67%) + 2 elsewhere — should pass at default 0.4.
+        drops = [
+            self._drop(1000, "h1", "10.0.1.0/24", "TR"),
+            self._drop(1100, "h2", "10.0.2.0/24", "TR"),
+            self._drop(1200, "h3", "10.0.3.0/24", "TR"),
+            self._drop(1300, "h4", "10.0.4.0/24", "TR"),
+            self._drop(1400, "h5", "10.0.5.0/24", "ID"),
+            self._drop(1500, "h6", "10.0.6.0/24", "MX"),
+        ]
+        waves = _compute_waves(drops, min_hosts=5, min_subnets=3)
+        assert len(waves) == 1
+        assert waves[0]["top_country"] == "TR"
+        assert abs(waves[0]["top_country_share"] - 4 / 6) < 1e-9
+
+    def test_threshold_is_configurable(self):
+        from zbbx_mcp.tools.disruption import _compute_waves
+
+        # 3 TR / 2 ID = 60% top share at exactly min_hosts=5. Default 40%
+        # passes; tighten to 90% and any sub-bucket that cohesion-passes
+        # falls below min_hosts, so the whole cluster is rejected.
+        drops = (
+            [self._drop(1000 + 100 * i, f"a{i}", f"10.0.{i}.0/24", "TR") for i in range(3)]
+            + [self._drop(1300 + 100 * i, f"b{i}", f"10.1.{i}.0/24", "ID") for i in range(2)]
+        )
+        assert len(_compute_waves(drops, min_hosts=5, min_subnets=3)) == 1
+        assert _compute_waves(
+            drops, min_hosts=5, min_subnets=3, min_country_concentration=0.9,
+        ) == []
+
+    def test_records_without_country_bypass_cohesion(self):
+        from zbbx_mcp.tools.disruption import _compute_waves
+
+        # No `country` field — backwards compat. Cohesion check is skipped.
+        records = [
+            {"clock": 1000 + 100 * i, "hostid": f"h{i}", "host": f"h-{i}",
+             "subnet": f"10.0.{i}.0/24", "hostgroup": "test", "drop_pct": 60.0}
+            for i in range(5)
+        ]
+        waves = _compute_waves(records, min_hosts=5, min_subnets=3)
+        assert len(waves) == 1
+        assert waves[0]["top_country"] == ""
+        assert waves[0]["top_country_share"] == 1.0
+
+
+class TestPeerRelativeDropFilter:
+    """Pure-helper tests for _compute_peer_relative_drops (#135)."""
+
+    def test_below_absolute_threshold_dropped(self):
+        from zbbx_mcp.tools.disruption import _compute_peer_relative_drops
+
+        records = [
+            {"hostid": "h1", "drop_pct": 30.0, "cohort_key": "free:tier:tr"},
+        ]
+        out = _compute_peer_relative_drops(records, min_drop_pct=50.0)
+        assert out == []
+
+    def test_diurnal_cohort_dropped_uniformly_filtered_out(self):
+        from zbbx_mcp.tools.disruption import _compute_peer_relative_drops
+
+        # 5 hosts in same cohort all drop 60% — peer-relative ≈ 0 — filtered out.
+        records = [
+            {"hostid": f"h{i}", "drop_pct": 60.0, "cohort_key": "free:tier:tr"}
+            for i in range(5)
+        ]
+        out = _compute_peer_relative_drops(records, min_drop_pct=50.0)
+        assert out == []
+
+    def test_genuinely_impacted_host_kept(self):
+        from zbbx_mcp.tools.disruption import _compute_peer_relative_drops
+
+        # h1 drops 80% while peers drop 10% — peer-relative ~70 > 20.
+        records = [
+            {"hostid": "h1", "drop_pct": 80.0, "cohort_key": "free:tier:tr"},
+            {"hostid": "h2", "drop_pct": 10.0, "cohort_key": "free:tier:tr"},
+            {"hostid": "h3", "drop_pct": 12.0, "cohort_key": "free:tier:tr"},
+            {"hostid": "h4", "drop_pct": 8.0, "cohort_key": "free:tier:tr"},
+        ]
+        out = _compute_peer_relative_drops(records, min_drop_pct=50.0)
+        assert len(out) == 1
+        assert out[0]["hostid"] == "h1"
+        assert out[0]["peer_relative_drop"] == 80.0 - 10.0  # cohort_drop = (10+12+8)/3 = 10
+
+    def test_small_cohort_passes_absolute_only(self):
+        from zbbx_mcp.tools.disruption import _compute_peer_relative_drops
+
+        # 2 hosts in cohort (below default min_cohort_size=3) — peer gate skipped,
+        # absolute gate fires alone.
+        records = [
+            {"hostid": "h1", "drop_pct": 80.0, "cohort_key": "x"},
+            {"hostid": "h2", "drop_pct": 75.0, "cohort_key": "x"},
+        ]
+        out = _compute_peer_relative_drops(records, min_drop_pct=50.0)
+        assert len(out) == 2
+        assert all(r["cohort_drop"] is None for r in out)
+        assert all(r["peer_relative_drop"] is None for r in out)
+        assert all(r["cohort_size"] == 2 for r in out)
+
+    def test_solo_cohort_passes_absolute_only(self):
+        from zbbx_mcp.tools.disruption import _compute_peer_relative_drops
+
+        records = [{"hostid": "h1", "drop_pct": 80.0, "cohort_key": "x"}]
+        out = _compute_peer_relative_drops(records, min_drop_pct=50.0)
+        assert len(out) == 1
+        assert out[0]["cohort_drop"] is None
+        assert out[0]["cohort_size"] == 1
+
+    def test_min_relative_drop_threshold_configurable(self):
+        from zbbx_mcp.tools.disruption import _compute_peer_relative_drops
+
+        # h1 drops 60%, peers average 50% — peer-relative 10. Below default 20%, kept at 5%.
+        records = [
+            {"hostid": "h1", "drop_pct": 60.0, "cohort_key": "x"},
+            {"hostid": "h2", "drop_pct": 50.0, "cohort_key": "x"},
+            {"hostid": "h3", "drop_pct": 50.0, "cohort_key": "x"},
+            {"hostid": "h4", "drop_pct": 50.0, "cohort_key": "x"},
+        ]
+        assert _compute_peer_relative_drops(records, min_drop_pct=50.0) == []
+        kept = _compute_peer_relative_drops(
+            records, min_drop_pct=50.0, min_peer_relative_drop=5.0,
+        )
+        # h1 passes (relative=10), peers fail (relative=-3.33 each).
+        assert {r["hostid"] for r in kept} == {"h1"}
+
+    def test_separate_cohorts_evaluated_independently(self):
+        from zbbx_mcp.tools.disruption import _compute_peer_relative_drops
+
+        records = [
+            # cohort_a: all drop together — all rejected
+            *[{"hostid": f"a{i}", "drop_pct": 70.0, "cohort_key": "a"} for i in range(4)],
+            # cohort_b: one outlier — kept
+            {"hostid": "b1", "drop_pct": 90.0, "cohort_key": "b"},
+            {"hostid": "b2", "drop_pct": 5.0, "cohort_key": "b"},
+            {"hostid": "b3", "drop_pct": 5.0, "cohort_key": "b"},
+            {"hostid": "b4", "drop_pct": 5.0, "cohort_key": "b"},
+        ]
+        kept = _compute_peer_relative_drops(records, min_drop_pct=50.0)
+        assert {r["hostid"] for r in kept} == {"b1"}
+
