@@ -2008,3 +2008,92 @@ class TestFormatAge:
         assert _format_age(-5) == "0s"
         assert _format_age(-1_000_000) == "0s"
 
+
+class TestParentSubHostCanonicalization:
+    """#138: parent + sub-host must fold to one physical machine in counts."""
+
+    def test_build_parent_map_pairs_child_with_parent(self):
+        from zbbx_mcp.data import build_parent_map
+
+        hosts = [
+            {"hostid": "p", "host": "edge-us65"},
+            {"hostid": "c", "host": "edge-us65 us71"},
+            {"hostid": "x", "host": "edge-de01"},
+        ]
+        pm = build_parent_map(hosts)
+        assert pm == {"c": "p"}
+
+    def test_canonical_dedup_via_set(self):
+        from zbbx_mcp.data import build_parent_map
+
+        # The canonical-id pattern: parent_map.get(hid, hid). After this,
+        # a parent + child pair maps to one canonical id.
+        hosts = [
+            {"hostid": "p", "host": "edge-us65"},
+            {"hostid": "c", "host": "edge-us65 us71"},
+        ]
+        pm = build_parent_map(hosts)
+        canonical_ids = {pm.get(h["hostid"], h["hostid"]) for h in hosts}
+        assert canonical_ids == {"p"}
+
+    def test_cohesion_does_not_double_count_sub_host(self):
+        # End-to-end through _compute_waves: 6 records, but two of them
+        # represent parent + sub of one physical machine. After upstream
+        # canonicalisation (caller's responsibility) they share hostid
+        # "p_us". top-country share over distinct hostids is 2/5 = 40%.
+        # Without the fix, share over 6 records would be 3/6 = 50%.
+        from zbbx_mcp.tools.disruption import _compute_waves
+
+        # Note: each record carries the canonical hostid. The tool
+        # upstream of _compute_waves de-dupes traffic into the parent,
+        # so this list has one record per canonical machine.
+        drops = [
+            {"clock": 1000, "hostid": "p_us", "host": "edge-us65",
+             "subnet": "10.0.1.0/24", "hostgroup": "x", "country": "US",
+             "drop_pct": 60.0},
+            {"clock": 1100, "hostid": "p_us2", "host": "edge-us66",
+             "subnet": "10.0.2.0/24", "hostgroup": "x", "country": "US",
+             "drop_pct": 60.0},
+            {"clock": 1200, "hostid": "p_de", "host": "edge-de01",
+             "subnet": "10.0.3.0/24", "hostgroup": "x", "country": "DE",
+             "drop_pct": 60.0},
+            {"clock": 1300, "hostid": "p_id", "host": "edge-id01",
+             "subnet": "10.0.4.0/24", "hostgroup": "x", "country": "ID",
+             "drop_pct": 60.0},
+            {"clock": 1400, "hostid": "p_mx", "host": "edge-mx01",
+             "subnet": "10.0.5.0/24", "hostgroup": "x", "country": "MX",
+             "drop_pct": 60.0},
+        ]
+        # 5 unique machines, US share = 2/5 = 40% — meets default 0.4.
+        waves = _compute_waves(drops, min_hosts=5, min_subnets=3)
+        assert len(waves) == 1
+        assert waves[0]["host_count"] == 5
+        assert abs(waves[0]["top_country_share"] - 0.4) < 1e-9
+
+    def test_cluster_unique_host_counts_use_canonical_id(self):
+        # The cluster code path: after _build_records sets r["hostid"]
+        # to canonical, _cluster_problems' set comprehension dedupes
+        # parent+sub to one entry.
+        from zbbx_mcp.tools.correlation import _cluster_problems
+
+        records = [
+            # Parent and sub-host both have a problem in the same cluster.
+            # Both records carry the canonical (parent's) hostid.
+            {"clock": 1000, "hostid": "p", "host": "edge-us65",
+             "name": "X", "severity": 4, "key": "10.0.0.0/24"},
+            {"clock": 1050, "hostid": "p", "host": "edge-us65",
+             "name": "Y", "severity": 4, "key": "10.0.0.0/24"},
+            # Two distinct other hosts in the same /24.
+            {"clock": 1100, "hostid": "h2", "host": "edge-us66",
+             "name": "X", "severity": 4, "key": "10.0.0.0/24"},
+            {"clock": 1150, "hostid": "h3", "host": "edge-us67",
+             "name": "X", "severity": 4, "key": "10.0.0.0/24"},
+        ]
+        # 4 records but only 3 distinct canonical hosts. min_hosts=3 passes;
+        # min_hosts=4 fails (would have passed without canonicalisation).
+        c3 = _cluster_problems(records, window_sec=600, min_hosts=3)
+        assert len(c3) == 1
+        assert c3[0]["host_count"] == 3
+        c4 = _cluster_problems(records, window_sec=600, min_hosts=4)
+        assert c4 == []
+
