@@ -11,6 +11,44 @@ _DELAY_UNITS = {"s": 1, "m": 60, "h": 3600, "d": 86400}
 _DELAY_RE = re.compile(r"^\s*(\d+)\s*([smhd]?)\s*$", re.IGNORECASE)
 
 
+def _collapse_dependent_chain(stale: list[dict]) -> list[dict]:
+    """Fold downstream dependent stale items into their stale master.
+
+    Each input record needs a ``master_itemid`` (empty string when the
+    item has no master) and an ``itemid``. When a stale item's master is
+    also in the stale list, the child is suppressed from the visible
+    output and contributed to the master's ``affected_count``. Two-hop
+    chains collapse correctly (grandchild folds into root, not into the
+    intermediate).
+
+    Returns a new list — input is not mutated.
+    """
+    by_id = {s["itemid"]: dict(s, affected_count=0) for s in stale}
+    stale_ids = set(by_id.keys())
+
+    def root_of(itemid: str) -> str:
+        seen: set[str] = set()
+        cur = itemid
+        while True:
+            if cur in seen:
+                return cur  # circular ref — stop at first revisit
+            seen.add(cur)
+            master = by_id.get(cur, {}).get("master_itemid", "")
+            if not master or master not in stale_ids:
+                return cur
+            cur = master
+
+    visible_roots: dict[str, dict] = {}
+    for s in stale:
+        root_id = root_of(s["itemid"])
+        if root_id == s["itemid"]:
+            visible_roots.setdefault(root_id, by_id[root_id])
+        else:
+            visible_roots.setdefault(root_id, by_id[root_id])
+            visible_roots[root_id]["affected_count"] += 1
+    return list(visible_roots.values())
+
+
 def _parse_delay_seconds(delay: str, default: int = 300) -> int:
     """Parse a Zabbix item delay into seconds.
 
@@ -416,19 +454,18 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
             group: str = "",
             stale_multiplier: float = 3.0,
             include_triggers: bool = True,
+            collapse_dependencies: bool = False,
             max_results: int = 30,
             instance: str = "",
         ) -> str:
             """Find items whose monitoring is broken — unsupported or polling stopped.
-
-            Flags state=1 items and items whose lastclock is older than
-            stale_multiplier × polling interval.
 
             Args:
                 host_id: Filter by host ID (optional)
                 group: Filter by host group name (optional)
                 stale_multiplier: Flag items whose lastclock is older than N x delay (default: 3.0)
                 include_triggers: Also list triggers that depend on stale items (default: True)
+                collapse_dependencies: Show only root-cause items, fold downstream dependents into "+N affected" (default: False)
                 max_results: Max items to report (default: 30)
                 instance: Zabbix instance name (optional)
             """
@@ -436,9 +473,12 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 client = resolver.resolve(instance)
                 now = int(time.time())
 
+                output_fields = ["itemid", "hostid", "name", "key_", "state",
+                                 "lastclock", "delay", "error"]
+                if collapse_dependencies:
+                    output_fields.append("master_itemid")
                 params = {
-                    "output": ["itemid", "hostid", "name", "key_", "state",
-                               "lastclock", "delay", "error"],
+                    "output": output_fields,
                     "selectHosts": ["host"],
                     "filter": {"status": "0"},
                     "sortfield": "name",
@@ -488,6 +528,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                         "error": it.get("error", "") or "",
                         "triggers": it.get("triggers", []) if include_triggers else [],
                         "lastclock": lastclock,
+                        "master_itemid": it.get("master_itemid", "") or "",
                     })
 
                 if not stale:
@@ -496,18 +537,31 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                         f"threshold {stale_multiplier}x delay)."
                     )
 
+                raw_total = len(stale)
+                if collapse_dependencies:
+                    stale = _collapse_dependent_chain(stale)
                 total = len(stale)
                 stale.sort(key=lambda x: (x["reason"], x["host"]))
                 stale = stale[:max_results]
 
-                lines = [f"**{total} stale items** (checked {len(items)}; threshold {stale_multiplier}x delay)\n"]
-                lines.append("| Host | Item | Key | Reason | Last value |")
-                lines.append("|------|------|-----|--------|-----------|")
+                header = f"**{total} stale items**"
+                if collapse_dependencies and raw_total > total:
+                    header += f" ({raw_total - total} downstream collapsed)"
+                header += f" (checked {len(items)}; threshold {stale_multiplier}x delay)\n"
+                lines = [header]
+                affected_col = " | Affected" if collapse_dependencies else ""
+                divider_col = "|----------" if collapse_dependencies else ""
+                lines.append(f"| Host | Item | Key | Reason | Last value{affected_col} |")
+                lines.append(f"|------|------|-----|--------|-----------{divider_col}|")
                 for s in stale:
                     lv = _ts(str(s["lastclock"])) if s["lastclock"] else "never"
+                    affected_cell = ""
+                    if collapse_dependencies:
+                        n = s.get("affected_count", 0)
+                        affected_cell = f" | +{n}" if n else " | —"
                     lines.append(
                         f"| {cell(s['host'])} | {cell(s['name'])} | `{cell(s['key'])}` | "
-                        f"{cell(s['reason'])} | {lv} |"
+                        f"{cell(s['reason'])} | {lv}{affected_cell} |"
                     )
 
                 if include_triggers:
