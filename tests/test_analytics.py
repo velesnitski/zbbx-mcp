@@ -1970,3 +1970,41 @@ class TestPeerRelativeDropFilter:
         kept = _compute_peer_relative_drops(records, min_drop_pct=50.0)
         assert {r["hostid"] for r in kept} == {"b1"}
 
+
+class TestFormatAge:
+    """Pure-helper tests for the compact age renderer (#136)."""
+
+    def test_seconds_under_a_minute(self):
+        from zbbx_mcp.tools.correlation import _format_age
+
+        assert _format_age(0) == "0s"
+        assert _format_age(45) == "45s"
+        assert _format_age(59) == "59s"
+
+    def test_minutes(self):
+        from zbbx_mcp.tools.correlation import _format_age
+
+        assert _format_age(60) == "1m"
+        assert _format_age(150) == "2m"
+        assert _format_age(3599) == "59m"
+
+    def test_hours(self):
+        from zbbx_mcp.tools.correlation import _format_age
+
+        assert _format_age(3600) == "1h"
+        assert _format_age(7200) == "2h"
+        assert _format_age(86399) == "23h"
+
+    def test_days(self):
+        from zbbx_mcp.tools.correlation import _format_age
+
+        assert _format_age(86400) == "1d"
+        assert _format_age(7 * 86400) == "7d"
+        assert _format_age(180 * 86400) == "180d"
+
+    def test_negative_clamped_to_zero(self):
+        from zbbx_mcp.tools.correlation import _format_age
+
+        assert _format_age(-5) == "0s"
+        assert _format_age(-1_000_000) == "0s"
+
