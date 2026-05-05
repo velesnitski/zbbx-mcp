@@ -31,6 +31,23 @@ _AUTO_LEVELS: tuple[str, ...] = ("subnet24", "subnet16", "provider")
 
 _SEV_LABELS = {0: "Info", 1: "Info", 2: "Warning", 3: "Average", 4: "High", 5: "Disaster"}
 
+
+def _format_age(seconds: int) -> str:
+    """Render a duration in seconds as a compact human string.
+
+    Negative inputs render as ``"0s"`` so callers don't have to clamp.
+    The cutpoints are chosen so each unit's label is unambiguous at the
+    next boundary (1m vs 60s, 1h vs 60m, etc.).
+    """
+    s = max(0, int(seconds))
+    if s < 60:
+        return f"{s}s"
+    if s < 3600:
+        return f"{s // 60}m"
+    if s < 86400:
+        return f"{s // 3600}h"
+    return f"{s // 86400}d"
+
 # Interface names ignored for tunnel-counting purposes (kernel/system, not relays).
 _IGNORED_IFACES: frozenset[str] = frozenset({"lo", "docker0"})
 
@@ -295,6 +312,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
             group_by: str = "auto",
             min_severity: int = 3,
             max_clusters: int = 10,
+            max_age_hours: int = 0,
             instance: str = "",
         ) -> str:
             """Cluster outages on hosts sharing a network or group key.
@@ -306,6 +324,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                           "auto" (default: "auto" — narrowest level with hits wins)
                 min_severity: Minimum severity 0-5 (default: 3 = Average)
                 max_clusters: Max clusters to render (default: 10)
+                max_age_hours: Drop problems older than this; 0 = unlimited (default: 0)
                 instance: Zabbix instance name (optional)
             """
             # Backwards-compat alias for the original parameter value.
@@ -332,6 +351,10 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     "recent": True,
                 })
                 problems.sort(key=lambda p: -int(p.get("clock", 0)))
+                if max_age_hours > 0:
+                    import time as _time
+                    cutoff = int(_time.time()) - max_age_hours * 3600
+                    problems = [p for p in problems if int(p.get("clock", 0)) >= cutoff]
                 if not problems:
                     return f"No active problems (severity >= {min_severity})."
 
@@ -423,6 +446,8 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     f"**{len(clusters)} outage clusters** "
                     f"(window {window_min}m, ≥{min_hosts} hosts, {level_note})\n",
                 ]
+                import time as _time
+                _now = int(_time.time())
                 for idx, c in enumerate(shown, 1):
                     t0 = datetime.fromtimestamp(c["start"], timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
                     t1 = datetime.fromtimestamp(c["end"], timezone.utc).strftime("%H:%M")
@@ -430,10 +455,11 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     sample_hosts = ", ".join(c["hosts"][:5])
                     more = f" +{len(c['hosts']) - 5}" if len(c["hosts"]) > 5 else ""
                     sample_problems = "; ".join(c["problems"][:3])
+                    age = _format_age(_now - c["start"])
                     lines.append(
                         f"### Cluster {idx} — {c['key']}\n"
                         f"- **Hosts:** {c['host_count']} ({sample_hosts}{more})\n"
-                        f"- **When:** {t0} → {t1} ({c['events']} events)\n"
+                        f"- **When:** {t0} → {t1} (started {age} ago, {c['events']} events)\n"
                         f"- **Max severity:** {sev}\n"
                         f"- **Problems:** {sample_problems}\n"
                     )

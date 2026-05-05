@@ -159,8 +159,8 @@ specific tools you don't want.
 | `ZABBIX_SERVICE2_CHECK_KEY` | No | Zabbix item key for secondary service health check |
 | `ZABBIX_SERVICE3_CHECK_KEY` | No | Zabbix item key for tertiary service health check |
 | `ZABBIX_CONNECTIONS_KEY` | No | Zabbix item key for connection count metric (used by `get_disruption_blast_radius`) |
-| `ZABBIX_PING_LOSS_KEY` | No | Zabbix item key for ICMP ping loss % (enables `detect_loss_drift`) |
-| `ZABBIX_PING_RTT_KEY` | No | Zabbix item key for ICMP round-trip time (enables `detect_loss_drift`) |
+| `ZABBIX_PING_LOSS_KEY` | No | Zabbix item key for ICMP ping loss % (enables `detect_loss_drift`; the standard template ships `icmppingloss`) |
+| `ZABBIX_PING_RTT_KEY` | No | Zabbix item key for ICMP round-trip time (enables `detect_loss_drift`; the standard template ships `icmppingsec`) |
 | `ZABBIX_SERVICE_BPS_KEY` | No | Zabbix item key for service-port bytes/sec (enables `detect_service_port_split`) |
 | `ZABBIX_REGIONAL_TRAFFIC_KEYS` | No | JSON object mapping region label → item key (enables `detect_regional_traffic_loss`) |
 | `ZABBIX_TRAFFIC_UNIT` | No | Set to `bytes` if Zabbix `net.if.in` returns bytes/sec instead of bits/sec. Default: bits/sec |
