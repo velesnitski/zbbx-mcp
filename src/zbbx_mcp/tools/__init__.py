@@ -195,6 +195,7 @@ ALL_TOOLS: frozenset[str] = frozenset({
     "get_outage_clusters",
     "get_peak_analysis",
     "get_predictive_alerts",
+    "get_problem_age_buckets",
     "get_problem_detail",
     "get_problems",
     "get_product_audit",
