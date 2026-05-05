@@ -19,6 +19,7 @@ import time as _time
 
 import httpx
 
+from zbbx_mcp.classify import classify_host as _classify_host
 from zbbx_mcp.data import (
     KEY_SERVICE_BPS,
     STATUS_ENABLED,
@@ -130,13 +131,22 @@ def _compute_waves(
     window_sec: int = 3600,
     min_hosts: int = 5,
     min_subnets: int = 3,
+    min_country_concentration: float = 0.4,
 ) -> list[dict]:
     """Greedy time-window grouping of dropped hosts into wave events.
 
     Each input record carries `clock`, `hostid`, `host`, `subnet`,
-    `hostgroup`, and `drop_pct`. A wave fires when a maximal-run group
-    inside `window_sec` covers at least `min_hosts` distinct hostids
-    spanning at least `min_subnets` distinct /24s.
+    `hostgroup`, `drop_pct`, and (optional) `country`. A wave fires
+    when a maximal-run group inside `window_sec` covers at least
+    `min_hosts` distinct hostids spanning at least `min_subnets`
+    distinct /24s, AND the top-country share of those hosts is at
+    least `min_country_concentration`. Globally-spread bursts that
+    cross too many countries are dropped silently — they are almost
+    always diurnal artifacts rather than incidents.
+
+    Records without a `country` field bypass the cohesion check
+    (treated as if every host is in one country); set the field
+    upstream when diurnal protection is desired.
     """
     if not hourly_drops:
         return []
@@ -152,6 +162,17 @@ def _compute_waves(
         hosts = {r["hostid"] for r in bucket}
         subnets = {r["subnet"] for r in bucket if r.get("subnet")}
         if len(hosts) >= min_hosts and len(subnets) >= min_subnets:
+            countries = [r["country"] for r in bucket if r.get("country")]
+            top_country = ""
+            top_share = 1.0
+            if countries:
+                from collections import Counter
+                cc_counts = Counter(countries)
+                top_country, top_count = cc_counts.most_common(1)[0]
+                top_share = top_count / len(countries)
+                if top_share < min_country_concentration:
+                    i += 1
+                    continue
             avg_drop = sum(r["drop_pct"] for r in bucket) / len(bucket)
             severity = "critical" if avg_drop >= 75 else "high" if avg_drop >= 50 else "medium"
             waves.append({
@@ -164,12 +185,67 @@ def _compute_waves(
                 "hostgroups": sorted({r["hostgroup"] for r in bucket if r.get("hostgroup")}),
                 "avg_drop_pct": avg_drop,
                 "severity": severity,
+                "top_country": top_country,
+                "top_country_share": top_share,
             })
             i = j + 1
         else:
             i += 1
     waves.sort(key=lambda w: (-w["host_count"], -w["avg_drop_pct"]))
     return waves
+
+
+def _compute_peer_relative_drops(
+    host_data: list[dict],
+    *,
+    min_drop_pct: float,
+    min_peer_relative_drop: float = 20.0,
+    min_cohort_size: int = 3,
+) -> list[dict]:
+    """Filter dropped hosts by absolute drop AND peer-relative drop.
+
+    Each input record needs ``hostid``, ``drop_pct`` (float), and
+    ``cohort_key`` (string identifying the comparison cohort, typically
+    ``"product:tier:country"``).
+
+    Returns records that pass both gates, augmented with ``cohort_drop``,
+    ``peer_relative_drop``, and ``cohort_size``. For cohorts smaller
+    than ``min_cohort_size`` (including self) the peer-relative gate
+    is skipped — there are not enough peers to compare against, so the
+    absolute gate alone decides. Such records carry ``cohort_drop=None``
+    and ``peer_relative_drop=None`` so the consumer can see they are
+    unvalidated.
+    """
+    cohort_members: dict[str, list[dict]] = {}
+    for r in host_data:
+        cohort_members.setdefault(r["cohort_key"], []).append(r)
+
+    out: list[dict] = []
+    for r in host_data:
+        if r["drop_pct"] < min_drop_pct:
+            continue
+        cohort = cohort_members.get(r["cohort_key"], [])
+        peers = [c for c in cohort if c["hostid"] != r["hostid"]]
+        cohort_size = len(peers) + 1
+        if cohort_size < min_cohort_size:
+            out.append({
+                **r,
+                "cohort_drop": None,
+                "peer_relative_drop": None,
+                "cohort_size": cohort_size,
+            })
+            continue
+        cohort_drop = sum(c["drop_pct"] for c in peers) / len(peers)
+        peer_relative = r["drop_pct"] - cohort_drop
+        if peer_relative < min_peer_relative_drop:
+            continue
+        out.append({
+            **r,
+            "cohort_drop": cohort_drop,
+            "peer_relative_drop": peer_relative,
+            "cohort_size": cohort_size,
+        })
+    return out
 
 
 # --- async fetch helpers -----------------------------------------------
@@ -426,20 +502,24 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
             min_hosts: int = 5,
             min_subnets: int = 3,
             min_baseline_mbps: float = 5.0,
+            min_country_concentration: float = 0.4,
+            min_peer_relative_drop: float = 20.0,
             instance: str = "",
         ) -> str:
             """Find waves where many hosts across many /24s drop in the same hour.
 
-            Defaults are diurnal-safe. See ADR 013, 014.
+            Defaults are diurnal-safe. See ADR 013, 014, 020.
 
             Args:
                 country: 2-letter country filter (optional)
                 window_hours: Total comparison window (default: 12)
                 recent_hours: Recent slice (default: 2)
-                drop_pct: Min drop to count a host (default: 50)
+                drop_pct: Min absolute drop to count a host (default: 50)
                 min_hosts: Min hosts per wave (default: 5)
                 min_subnets: Min distinct /24s per wave (default: 3)
                 min_baseline_mbps: Skip hosts with baseline below this (default: 5.0)
+                min_country_concentration: Min top-country share inside a wave (default: 0.4)
+                min_peer_relative_drop: Min host drop above its (product, tier, country) cohort average (default: 20.0)
                 instance: Zabbix instance name (optional)
             """
             try:
@@ -458,6 +538,13 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
 
                 hostids = [h["hostid"] for h in hosts]
                 host_map = {h["hostid"]: h for h in hosts}
+                # Pre-classify each host into its (product, tier, country)
+                # cohort so the peer-relative filter can compare like-for-like.
+                cohort_keys: dict[str, str] = {}
+                for h in hosts:
+                    prod, tier = _classify_host(h.get("groups", []) or [])
+                    hcc = extract_country(h.get("host", ""))
+                    cohort_keys[h["hostid"]] = f"{prod}:{tier}:{hcc}"
 
                 items = await client.call("item.get", {
                     "hostids": hostids,
@@ -484,32 +571,44 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     if iid in recent:
                         host_recent[hid] = host_recent.get(hid, 0) + recent[iid]
 
-                drops: list[dict] = []
+                # First pass: compute every host's drop above the baseline floor.
+                # The peer-relative filter needs the full distribution (not just
+                # hosts that already cleared `drop_pct`) so it can compute the
+                # cohort average. We then apply the absolute + peer-relative
+                # gates together via _compute_peer_relative_drops.
+                all_dropped: list[dict] = []
                 min_baseline_bps = min_baseline_mbps * 1e6
                 for hid, b in host_baseline.items():
                     if b <= 0 or b < min_baseline_bps:
                         continue
                     r = host_recent.get(hid, 0)
                     drop = (b - r) / b * 100.0
-                    if drop < drop_pct:
-                        continue
                     h = host_map[hid]
                     ip = host_ip(h)
                     groups = [g.get("name", "") for g in h.get("groups", []) if g.get("name")]
-                    drops.append({
-                        "clock": cutoff,  # approximate the drop boundary
+                    all_dropped.append({
+                        "clock": cutoff,
                         "hostid": hid,
                         "host": h.get("host", ""),
                         "subnet": _subnet24(ip),
                         "hostgroup": groups[0] if groups else "",
+                        "country": extract_country(h.get("host", "")),
+                        "cohort_key": cohort_keys.get(hid, "::"),
                         "drop_pct": drop,
                     })
+
+                drops = _compute_peer_relative_drops(
+                    all_dropped,
+                    min_drop_pct=drop_pct,
+                    min_peer_relative_drop=min_peer_relative_drop,
+                )
 
                 waves = _compute_waves(
                     drops,
                     window_sec=3600,
                     min_hosts=min_hosts,
                     min_subnets=min_subnets,
+                    min_country_concentration=min_country_concentration,
                 )
                 if not waves:
                     return (
@@ -523,11 +622,18 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 for idx, w in enumerate(waves, 1):
                     sample_hosts = ", ".join(w["hosts"][:5])
                     more = f" +{len(w['hosts']) - 5}" if len(w["hosts"]) > 5 else ""
+                    centered = ""
+                    if w.get("top_country"):
+                        centered = (
+                            f"- **Centered on:** {w['top_country']} "
+                            f"({100 * w['top_country_share']:.0f}%)\n"
+                        )
                     lines.append(
                         f"### Wave {idx} — {w['severity']}\n"
                         f"- **Hosts:** {w['host_count']} ({sample_hosts}{more})\n"
                         f"- **Subnets:** {w['subnet_count']} ({', '.join(w['subnets'][:5])})\n"
                         f"- **Avg drop:** {w['avg_drop_pct']:.0f}%\n"
+                        f"{centered}"
                     )
                 return "\n".join(lines)
             except (httpx.HTTPError, ValueError) as e:
