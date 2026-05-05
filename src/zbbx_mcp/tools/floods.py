@@ -21,6 +21,7 @@ import httpx
 from zbbx_mcp.data import build_parent_map
 from zbbx_mcp.formatters import normalize_problem_name
 from zbbx_mcp.resolver import InstanceResolver
+from zbbx_mcp.tools.correlation import _format_age
 
 _SEVERITY_LABELS = {
     0: "Info", 1: "Info", 2: "Warning", 3: "Average", 4: "High", 5: "Disaster",
@@ -96,16 +97,18 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
             min_problems: int = 5,
             min_severity: int = 2,
             max_results: int = 20,
+            max_age_hours: int = 0,
             instance: str = "",
         ) -> str:
             """Find hosts with many simultaneous active problems (whole-host outages).
 
-            Sub-hosts merge into the parent. See ADR 015.
+            Sub-hosts merge into the parent. See ADR 015, 021.
 
             Args:
                 min_problems: Minimum simultaneous problems to flag (default: 5)
                 min_severity: Minimum severity (0=info ... 5=disaster, default: 2)
                 max_results: Maximum hosts to render (default: 20)
+                max_age_hours: Drop floods whose earliest problem is older than this; 0 = unlimited (default: 0)
                 instance: Zabbix instance name (optional)
             """
             try:
@@ -155,6 +158,14 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     return "No host-bound active problems."
 
                 floods = _group_host_floods(records, parent_map, min_problems)
+                # Optional recency filter — drop stale floods (e.g. a host with
+                # 9 unresolved problems from 6 months ago that nobody acked).
+                import time as _time
+                _now = int(_time.time())
+                if max_age_hours > 0:
+                    cutoff = _now - max_age_hours * 3600
+                    floods = [f for f in floods
+                              if f.get("earliest_clock") and f["earliest_clock"] >= cutoff]
                 if not floods:
                     return (
                         f"No host floods (need ≥{min_problems} simultaneous "
@@ -166,21 +177,24 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 lines = [
                     f"**{len(floods)} hosts with active flood** "
                     f"(≥{min_problems} simultaneous problems, severity ≥ {min_severity})\n",
-                    "| Host | # problems | Max severity | First seen | Sample triggers |",
-                    "|------|-----------:|--------------|------------|-----------------|",
+                    "| Host | # problems | Max severity | Started | Age | Sample triggers |",
+                    "|------|-----------:|--------------|---------|----:|-----------------|",
                 ]
                 for f in shown:
                     sev = _SEVERITY_LABELS.get(f["max_severity"], "?")
-                    when = (
-                        datetime.fromtimestamp(f["earliest_clock"], timezone.utc)
-                        .strftime("%Y-%m-%d %H:%M UTC")
-                        if f["earliest_clock"]
-                        else "—"
-                    )
+                    when = "—"
+                    age_str = "—"
+                    if f.get("earliest_clock"):
+                        when = (
+                            datetime.fromtimestamp(f["earliest_clock"], timezone.utc)
+                            .strftime("%Y-%m-%d %H:%M UTC")
+                        )
+                        age_str = _format_age(_now - f["earliest_clock"])
                     sample = "; ".join(t[:50] for t in f["sample_triggers"])
                     suffix = f" (+{f['child_count']} sub-hosts)" if f["child_count"] else ""
                     lines.append(
-                        f"| {f['host']}{suffix} | {f['problem_count']} | {sev} | {when} | {sample} |"
+                        f"| {f['host']}{suffix} | {f['problem_count']} | {sev} | "
+                        f"{when} | {age_str} | {sample} |"
                     )
                 if len(floods) > max_results:
                     lines.append(f"\n*{len(floods) - max_results} more omitted*")
