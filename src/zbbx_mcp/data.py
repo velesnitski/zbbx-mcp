@@ -16,7 +16,8 @@ from zbbx_mcp.classify import resolve_datacenter  # noqa: F401 — re-export
 
 __all__ = [
     "ServerRow", "FetchResult", "TrendRow",
-    "extract_country", "build_value_map", "build_max_map", "build_parent_map",
+    "extract_country", "normalize_country", "resolve_country",
+    "build_value_map", "build_max_map", "build_parent_map",
     "countries_for_region", "group_by_country", "host_ip", "is_hidden_product",
     "resolve_datacenter",
     "_parse_period", "_resolve",
@@ -158,6 +159,237 @@ METRIC_KEYS: dict[str, list[str]] = {
 _COUNTRY_ALIASES = {"UK": "GB"}  # normalize non-ISO codes
 
 
+# Country-name and ISO-3 → ISO-2 lookup for normalize_country().
+# Standard ISO 3166-1 reference data; built so callers can pass either
+# "RU", "RUS", or "Russia" and get back a canonical "RU".
+# Keys are uppercased so the lookup is case-insensitive.
+_COUNTRY_NAMES: dict[str, str] = {
+    # Africa
+    "DZA": "DZ", "ALGERIA": "DZ",
+    "AGO": "AO", "ANGOLA": "AO",
+    "BEN": "BJ", "BENIN": "BJ",
+    "BWA": "BW", "BOTSWANA": "BW",
+    "BFA": "BF", "BURKINA FASO": "BF",
+    "BDI": "BI", "BURUNDI": "BI",
+    "CMR": "CM", "CAMEROON": "CM",
+    "CPV": "CV", "CABO VERDE": "CV", "CAPE VERDE": "CV",
+    "CAF": "CF", "CENTRAL AFRICAN REPUBLIC": "CF",
+    "TCD": "TD", "CHAD": "TD",
+    "COM": "KM", "COMOROS": "KM",
+    "COG": "CG", "CONGO": "CG", "REPUBLIC OF THE CONGO": "CG",
+    "COD": "CD", "DEMOCRATIC REPUBLIC OF THE CONGO": "CD", "DR CONGO": "CD",
+    "CIV": "CI", "COTE D'IVOIRE": "CI", "IVORY COAST": "CI",
+    "DJI": "DJ", "DJIBOUTI": "DJ",
+    "EGY": "EG", "EGYPT": "EG",
+    "GNQ": "GQ", "EQUATORIAL GUINEA": "GQ",
+    "ERI": "ER", "ERITREA": "ER",
+    "SWZ": "SZ", "ESWATINI": "SZ", "SWAZILAND": "SZ",
+    "ETH": "ET", "ETHIOPIA": "ET",
+    "GAB": "GA", "GABON": "GA",
+    "GMB": "GM", "GAMBIA": "GM",
+    "GHA": "GH", "GHANA": "GH",
+    "GIN": "GN", "GUINEA": "GN",
+    "GNB": "GW", "GUINEA-BISSAU": "GW",
+    "KEN": "KE", "KENYA": "KE",
+    "LSO": "LS", "LESOTHO": "LS",
+    "LBR": "LR", "LIBERIA": "LR",
+    "LBY": "LY", "LIBYA": "LY",
+    "MDG": "MG", "MADAGASCAR": "MG",
+    "MWI": "MW", "MALAWI": "MW",
+    "MLI": "ML", "MALI": "ML",
+    "MRT": "MR", "MAURITANIA": "MR",
+    "MUS": "MU", "MAURITIUS": "MU",
+    "MAR": "MA", "MOROCCO": "MA",
+    "MOZ": "MZ", "MOZAMBIQUE": "MZ",
+    "NAM": "NA", "NAMIBIA": "NA",
+    "NER": "NE", "NIGER": "NE",
+    "NGA": "NG", "NIGERIA": "NG",
+    "RWA": "RW", "RWANDA": "RW",
+    "STP": "ST", "SAO TOME AND PRINCIPE": "ST",
+    "SEN": "SN", "SENEGAL": "SN",
+    "SYC": "SC", "SEYCHELLES": "SC",
+    "SLE": "SL", "SIERRA LEONE": "SL",
+    "SOM": "SO", "SOMALIA": "SO",
+    "ZAF": "ZA", "SOUTH AFRICA": "ZA",
+    "SSD": "SS", "SOUTH SUDAN": "SS",
+    "SDN": "SD", "SUDAN": "SD",
+    "TZA": "TZ", "TANZANIA": "TZ",
+    "TGO": "TG", "TOGO": "TG",
+    "TUN": "TN", "TUNISIA": "TN",
+    "UGA": "UG", "UGANDA": "UG",
+    "ZMB": "ZM", "ZAMBIA": "ZM",
+    "ZWE": "ZW", "ZIMBABWE": "ZW",
+    # Americas
+    "ATG": "AG", "ANTIGUA AND BARBUDA": "AG",
+    "ARG": "AR", "ARGENTINA": "AR",
+    "BHS": "BS", "BAHAMAS": "BS",
+    "BRB": "BB", "BARBADOS": "BB",
+    "BLZ": "BZ", "BELIZE": "BZ",
+    "BOL": "BO", "BOLIVIA": "BO",
+    "BRA": "BR", "BRAZIL": "BR",
+    "CAN": "CA", "CANADA": "CA",
+    "CHL": "CL", "CHILE": "CL",
+    "COL": "CO", "COLOMBIA": "CO",
+    "CRI": "CR", "COSTA RICA": "CR",
+    "CUB": "CU", "CUBA": "CU",
+    "DMA": "DM", "DOMINICA": "DM",
+    "DOM": "DO", "DOMINICAN REPUBLIC": "DO",
+    "ECU": "EC", "ECUADOR": "EC",
+    "SLV": "SV", "EL SALVADOR": "SV",
+    "GRD": "GD", "GRENADA": "GD",
+    "GTM": "GT", "GUATEMALA": "GT",
+    "GUY": "GY", "GUYANA": "GY",
+    "HTI": "HT", "HAITI": "HT",
+    "HND": "HN", "HONDURAS": "HN",
+    "JAM": "JM", "JAMAICA": "JM",
+    "MEX": "MX", "MEXICO": "MX",
+    "NIC": "NI", "NICARAGUA": "NI",
+    "PAN": "PA", "PANAMA": "PA",
+    "PRY": "PY", "PARAGUAY": "PY",
+    "PER": "PE", "PERU": "PE",
+    "PRI": "PR", "PUERTO RICO": "PR",
+    "KNA": "KN", "SAINT KITTS AND NEVIS": "KN",
+    "LCA": "LC", "SAINT LUCIA": "LC",
+    "VCT": "VC", "SAINT VINCENT AND THE GRENADINES": "VC",
+    "SUR": "SR", "SURINAME": "SR",
+    "TTO": "TT", "TRINIDAD AND TOBAGO": "TT",
+    "USA": "US", "UNITED STATES": "US", "UNITED STATES OF AMERICA": "US",
+    "URY": "UY", "URUGUAY": "UY",
+    "VEN": "VE", "VENEZUELA": "VE",
+    # Asia
+    "AFG": "AF", "AFGHANISTAN": "AF",
+    "ARM": "AM", "ARMENIA": "AM",
+    "AZE": "AZ", "AZERBAIJAN": "AZ",
+    "BHR": "BH", "BAHRAIN": "BH",
+    "BGD": "BD", "BANGLADESH": "BD",
+    "BTN": "BT", "BHUTAN": "BT",
+    "BRN": "BN", "BRUNEI": "BN", "BRUNEI DARUSSALAM": "BN",
+    "KHM": "KH", "CAMBODIA": "KH",
+    "CHN": "CN", "CHINA": "CN",
+    "GEO": "GE", "GEORGIA": "GE",
+    "HKG": "HK", "HONG KONG": "HK",
+    "IND": "IN", "INDIA": "IN",
+    "IDN": "ID", "INDONESIA": "ID",
+    "IRN": "IR", "IRAN": "IR",
+    "IRQ": "IQ", "IRAQ": "IQ",
+    "ISR": "IL", "ISRAEL": "IL",
+    "JPN": "JP", "JAPAN": "JP",
+    "JOR": "JO", "JORDAN": "JO",
+    "KAZ": "KZ", "KAZAKHSTAN": "KZ",
+    "KWT": "KW", "KUWAIT": "KW",
+    "KGZ": "KG", "KYRGYZSTAN": "KG",
+    "LAO": "LA", "LAOS": "LA",
+    "LBN": "LB", "LEBANON": "LB",
+    "MAC": "MO", "MACAO": "MO", "MACAU": "MO",
+    "MYS": "MY", "MALAYSIA": "MY",
+    "MDV": "MV", "MALDIVES": "MV",
+    "MNG": "MN", "MONGOLIA": "MN",
+    "MMR": "MM", "MYANMAR": "MM", "BURMA": "MM",
+    "NPL": "NP", "NEPAL": "NP",
+    "PRK": "KP", "NORTH KOREA": "KP",
+    "OMN": "OM", "OMAN": "OM",
+    "PAK": "PK", "PAKISTAN": "PK",
+    "PSE": "PS", "PALESTINE": "PS",
+    "PHL": "PH", "PHILIPPINES": "PH",
+    "QAT": "QA", "QATAR": "QA",
+    "SAU": "SA", "SAUDI ARABIA": "SA",
+    "SGP": "SG", "SINGAPORE": "SG",
+    "KOR": "KR", "SOUTH KOREA": "KR", "REPUBLIC OF KOREA": "KR",
+    "LKA": "LK", "SRI LANKA": "LK",
+    "SYR": "SY", "SYRIA": "SY",
+    "TWN": "TW", "TAIWAN": "TW",
+    "TJK": "TJ", "TAJIKISTAN": "TJ",
+    "THA": "TH", "THAILAND": "TH",
+    "TLS": "TL", "TIMOR-LESTE": "TL", "EAST TIMOR": "TL",
+    "TUR": "TR", "TURKEY": "TR", "TURKIYE": "TR",
+    "TKM": "TM", "TURKMENISTAN": "TM",
+    "ARE": "AE", "UNITED ARAB EMIRATES": "AE", "UAE": "AE",
+    "UZB": "UZ", "UZBEKISTAN": "UZ",
+    "VNM": "VN", "VIETNAM": "VN",
+    "YEM": "YE", "YEMEN": "YE",
+    # Europe
+    "ALB": "AL", "ALBANIA": "AL",
+    "AND": "AD", "ANDORRA": "AD",
+    "AUT": "AT", "AUSTRIA": "AT",
+    "BLR": "BY", "BELARUS": "BY",
+    "BEL": "BE", "BELGIUM": "BE",
+    "BIH": "BA", "BOSNIA AND HERZEGOVINA": "BA",
+    "BGR": "BG", "BULGARIA": "BG",
+    "HRV": "HR", "CROATIA": "HR",
+    "CYP": "CY", "CYPRUS": "CY",
+    "CZE": "CZ", "CZECHIA": "CZ", "CZECH REPUBLIC": "CZ",
+    "DNK": "DK", "DENMARK": "DK",
+    "EST": "EE", "ESTONIA": "EE",
+    "FIN": "FI", "FINLAND": "FI",
+    "FRA": "FR", "FRANCE": "FR",
+    "DEU": "DE", "GERMANY": "DE",
+    "GRC": "GR", "GREECE": "GR",
+    "HUN": "HU", "HUNGARY": "HU",
+    "ISL": "IS", "ICELAND": "IS",
+    "IRL": "IE", "IRELAND": "IE",
+    "ITA": "IT", "ITALY": "IT",
+    "XKX": "XK", "KOSOVO": "XK",
+    "LVA": "LV", "LATVIA": "LV",
+    "LIE": "LI", "LIECHTENSTEIN": "LI",
+    "LTU": "LT", "LITHUANIA": "LT",
+    "LUX": "LU", "LUXEMBOURG": "LU",
+    "MLT": "MT", "MALTA": "MT",
+    "MDA": "MD", "MOLDOVA": "MD",
+    "MCO": "MC", "MONACO": "MC",
+    "MNE": "ME", "MONTENEGRO": "ME",
+    "NLD": "NL", "NETHERLANDS": "NL", "HOLLAND": "NL",
+    "MKD": "MK", "NORTH MACEDONIA": "MK",
+    "NOR": "NO", "NORWAY": "NO",
+    "POL": "PL", "POLAND": "PL",
+    "PRT": "PT", "PORTUGAL": "PT",
+    "ROU": "RO", "ROMANIA": "RO",
+    "RUS": "RU", "RUSSIA": "RU", "RUSSIAN FEDERATION": "RU",
+    "SMR": "SM", "SAN MARINO": "SM",
+    "SRB": "RS", "SERBIA": "RS",
+    "SVK": "SK", "SLOVAKIA": "SK",
+    "SVN": "SI", "SLOVENIA": "SI",
+    "ESP": "ES", "SPAIN": "ES",
+    "SWE": "SE", "SWEDEN": "SE",
+    "CHE": "CH", "SWITZERLAND": "CH",
+    "UKR": "UA", "UKRAINE": "UA",
+    "GBR": "GB", "UNITED KINGDOM": "GB", "GREAT BRITAIN": "GB", "BRITAIN": "GB",
+    "VAT": "VA", "VATICAN": "VA", "VATICAN CITY": "VA", "HOLY SEE": "VA",
+    # Oceania
+    "AUS": "AU", "AUSTRALIA": "AU",
+    "FJI": "FJ", "FIJI": "FJ",
+    "KIR": "KI", "KIRIBATI": "KI",
+    "MHL": "MH", "MARSHALL ISLANDS": "MH",
+    "FSM": "FM", "MICRONESIA": "FM",
+    "NRU": "NR", "NAURU": "NR",
+    "NZL": "NZ", "NEW ZEALAND": "NZ",
+    "PLW": "PW", "PALAU": "PW",
+    "PNG": "PG", "PAPUA NEW GUINEA": "PG",
+    "WSM": "WS", "SAMOA": "WS",
+    "SLB": "SB", "SOLOMON ISLANDS": "SB",
+    "TON": "TO", "TONGA": "TO",
+    "TUV": "TV", "TUVALU": "TV",
+    "VUT": "VU", "VANUATU": "VU",
+}
+
+
+def normalize_country(value: str) -> str:
+    """Normalize a country input to its ISO 3166-1 alpha-2 code.
+
+    Accepts ISO-2, ISO-3, or English country name (case-insensitive).
+    Applies the same UK→GB alias as ``extract_country``. Returns ``""``
+    for empty or unrecognised input so callers can decide on fallback
+    or error message.
+    """
+    if not value:
+        return ""
+    key = value.strip().upper()
+    if not key:
+        return ""
+    if len(key) == 2 and key.isalpha():
+        return _COUNTRY_ALIASES.get(key, key)
+    return _COUNTRY_NAMES.get(key, "")
+
+
 def extract_country(hostname: str) -> str:
     """Extract 2-letter country code from hostname.
 
@@ -169,6 +401,36 @@ def extract_country(hostname: str) -> str:
         return ""
     cc = (m.group(1) or m.group(2) or "").upper()
     return _COUNTRY_ALIASES.get(cc, cc)
+
+
+def resolve_country(host: dict) -> str:
+    """Resolve a host's country from name first, then Zabbix inventory.
+
+    Order: ``extract_country(host['host'])`` → ``inventory.country_code``
+    → ``normalize_country(inventory.country_name)``. Returns ``""`` when
+    none of the three sources yield a valid 2-letter code.
+
+    The caller must include ``selectInventory`` in its host.get to populate
+    the inventory fields. Use this only inside country-filter branches —
+    ``extract_country`` remains the source of truth for "what does the
+    host name claim".
+    """
+    cc = extract_country(host.get("host", ""))
+    if cc:
+        return cc
+    inv = host.get("inventory") or {}
+    if isinstance(inv, dict):
+        code = (inv.get("country_code") or "").strip()
+        if code:
+            normalized = normalize_country(code)
+            if normalized:
+                return normalized
+        name = (inv.get("country_name") or "").strip()
+        if name:
+            normalized = normalize_country(name)
+            if normalized:
+                return normalized
+    return ""
 
 
 def build_parent_map(hosts: list[dict]) -> dict[str, str]:
