@@ -5,6 +5,113 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.7.0] - 2026-05-05
+
+### Added — Outage correlation (ADR 010, 015, 022)
+- `get_idle_relays`: relay hosts whose mgmt NIC has traffic but tunnel
+  interfaces report zero. Exclusion-based detection plus a physical-NIC
+  regex fallback so unused secondary adapters don't bucket as tunnels.
+- `get_outage_clusters`: greedy time-window grouping of active problems.
+  Supports `subnet24` / `subnet16` / `provider` / `hostgroup` / `auto`.
+- `get_host_floods`: single-host outage detector — N simultaneous
+  problems on one machine. Sub-host (parent + " " + suffix) merges.
+
+### Added — Disruption detection (ADR 012, 013, 014, 020)
+- `detect_loss_drift`: ping-loss / RTT drift vs 14d baseline.
+  Env-driven (`ZABBIX_PING_LOSS_KEY`, `ZABBIX_PING_RTT_KEY`).
+- `detect_service_port_split`: service-port traffic dropped while
+  management is healthy. Env-driven (`ZABBIX_SERVICE_BPS_KEY`).
+- `detect_regional_traffic_loss`: regional-bucket traffic collapse vs
+  flat peers. Env-driven JSON map (`ZABBIX_REGIONAL_TRAFFIC_KEYS`).
+- `detect_disruption_wave`: many hosts × many /24s in the same hour.
+  Diurnal-safe defaults, country-cohesion guard, and peer-relative
+  drop pre-filter (host vs same-cohort peers) to suppress diurnal
+  false positives.
+
+### Added — Risk and impact (ADR 013, 014)
+- `get_at_risk_hosts`: composite score over peer rotations + ping/RTT
+  drift + IP age. Skips hosts with no peer churn AND no drift signal.
+- `get_disruption_blast_radius`: cohort connection-count delta
+  pre/post a host drop. Reuses `KEY_CONNECTIONS`.
+
+### Added — External IP history (ADR 012, 013, 019)
+- `get_external_ip_history`: per-host IP rotation timeline with
+  recovery scoring against a 24h pre/post traffic comparison.
+- `get_recovery_score`: fleet-level recovery KPI aggregator.
+
+### Added — Trigger / problem analysis (ADR 011, 019)
+- `get_trigger_timeline`: OK ↔ PROBLEM transitions for a trigger.
+- `bulk_acknowledge`: acknowledge many events at once.
+- `get_problem_age_buckets`: per-severity histogram (<1d / 1-3d /
+  3-7d / 7d+) — fills the visibility gap on the actionable
+  1–7d band.
+- `get_stale_items` cascade-aware mode (`collapse_dependencies`) —
+  folds downstream stale dependents into stale master via
+  `master_itemid` walk.
+
+### Added — Token efficiency (ADR 016, 017)
+- `ZABBIX_TIER` env var bundles for focused sessions: `core` (~5k
+  tokens), `ops` (~11k), `finance` (~10k), `reports` (~13k), or
+  `full` (default, ~25k). Cuts 60–80% off the tools/list handshake
+  for typical sessions.
+- Schema `title` field strip + cost-tool docstring trim — knocked
+  ~5k tokens off the full-tier handshake.
+
+### Added — Country normalization (ADR 023)
+- `normalize_country()` and `resolve_country()` in `data.py`.
+  `search_hosts`, `search_hosts_by_location`, `get_server_clusters`
+  now accept ISO-2, ISO-3, or English country name. Result header
+  surfaces the resolved code so the caller sees that the input was
+  understood. Hosts without a country segment in their hostname fall
+  back to Zabbix host inventory.
+
+### Changed — Accuracy and noise reduction (ADR 014, 015, 018, 020, 021, 022)
+- `get_active_problems`, `get_correlated_events`, and
+  `get_outage_clusters` collapse host-embedded triggers (`Foo on
+  host-a` / `Foo on host-b`) under the same dedup key via a new
+  `normalize_problem_name` helper. Affected hostnames remain
+  visible in the affected-hosts column.
+- `detect_disruption_wave` defaults retuned for diurnal safety
+  (window 6h → 12h, recent 1h → 2h, drop 30% → 50%) plus a new
+  `min_baseline_mbps=5.0` floor.
+- Service-check tools (`fetch_service_status`, `generate_service_brief`,
+  `get_health_assessment`, `detect_regional_anomalies`,
+  `get_service_uptime_report`, `get_service_health_matrix`) now skip
+  unsupported / stale-lastclock items instead of reading their
+  lingering 0 as service-down.
+- `get_outage_clusters` and `get_host_floods` gain a `max_age_hours`
+  recency filter (default 0 = unlimited preserves existing
+  behaviour). Both surface the cluster / flood age in the output via
+  a shared `_format_age` helper.
+- `detect_disruption_wave` and `get_outage_clusters` use canonical
+  hostid (`build_parent_map`) so a parent + sub-host pair counts
+  once in cohesion / unique-host calculations.
+- `detect_traffic_drops` skip-breakdown footer surfaces what was
+  dropped (no-history / no-baseline-window / below-floor).
+- `get_shutdown_candidates` peer-headroom safety check
+  (SAFE / RISKY / SOLO).
+- `get_outage_clusters` `problem.get` switched to
+  `sortfield="eventid"` (Zabbix 6.4 rejects sortfield=clock).
+- `get_idle_relays` NAT-mode caveat softened — observed false-
+  positive rate is low.
+
+### Fixed
+- `get_item_history` accepts ISO date, ISO datetime, relative
+  ("24h", "7d"), and epoch int.
+- `get_problems` time-window filters: `time_from`, `time_till`,
+  `include_resolved`, `event_eventid` (problem timeline).
+- `search_hosts` markdown table preserved at scale.
+- `get_at_risk_hosts` skips hosts that score on age alone (no peer
+  churn, no drift) — was returning every host at the same floor
+  score.
+- `import_from_xlsx` localised header is now env-driven
+  (`ZABBIX_BILLING_IP_HEADER`); no non-ASCII literal in source.
+
+### Tooling
+- 155 tools across 49 modules.
+- 386 tests (pure-helper coverage on every new analytic).
+- ADRs 010 through 023 documenting design decisions.
+
 ## [1.6.0] - 2026-03-30
 
 ### Added
@@ -68,7 +175,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - `generate_ceo_report`: full executive HTML report with all analytics sections
   - Executive Summary with auto-generated alerts
   - Traffic by Country with trend badges and bar charts
-  - VPN Uptime by Country (SLA dashboard)
+  - Service Uptime by Country (SLA dashboard)
   - Capacity Planning (Mbps/server density)
   - Risk Assessment (provider concentration, redundancy)
   - Fleet Composition (product breakdown cards)
@@ -112,7 +219,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Async HTTP/2 client with connection pooling
 - Rollback system with pre-mutation snapshots
 - Excel and HTML report generation
-- Traffic anomaly detection and geo-block monitoring
+- Traffic anomaly detection and regional-loss monitoring
 - Cost management via host macros
 - Slack integration
 - Structured JSON logging with Sentry support
