@@ -51,12 +51,19 @@ async def fetch_enabled_hosts(
     *,
     groups: bool = True,
     interfaces: bool = True,
+    inventory: bool = False,
     extra_output: list[str] | None = None,
 ) -> list[dict]:
-    """Fetch all enabled hosts with optional groups/interfaces."""
-    # Use client-side cache for the common case (no extra_output)
+    """Fetch all enabled hosts with optional groups / interfaces / inventory.
+
+    ``inventory=True`` requests Zabbix host inventory (``country_code``,
+    ``country_name``, ``location``) and bypasses the client-side cache —
+    use only when the caller actually needs an inventory fallback.
+    """
+    # Cache fires only for the common no-extras path. Inventory or
+    # extra_output bypass so different callers can't cross-contaminate.
     cache_key = f"enabled_hosts:g={groups}:i={interfaces}"
-    if not extra_output:
+    if not extra_output and not inventory:
         cached = client._get_cached(cache_key, ttl=60.0)
         if cached is not None:
             return cached
@@ -73,9 +80,11 @@ async def fetch_enabled_hosts(
         params["selectGroups"] = ["name"]
     if interfaces:
         params["selectInterfaces"] = ["ip"]
+    if inventory:
+        params["selectInventory"] = ["country_code", "country_name", "location"]
     result = await client.call("host.get", params)
 
-    if not extra_output:
+    if not extra_output and not inventory:
         client._set_cache(cache_key, result)
     return result
 
