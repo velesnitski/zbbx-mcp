@@ -2097,3 +2097,103 @@ class TestParentSubHostCanonicalization:
         c4 = _cluster_problems(records, window_sec=600, min_hosts=4)
         assert c4 == []
 
+
+class TestNormalizeCountry:
+    """Pure-helper tests for normalize_country (#140)."""
+
+    def test_iso2_passthrough(self):
+        from zbbx_mcp.data import normalize_country
+
+        for v in ["RU", "ru", "Ru", " ru "]:
+            assert normalize_country(v) == "RU"
+
+    def test_uk_alias_to_gb(self):
+        from zbbx_mcp.data import normalize_country
+
+        # The existing extract_country alias ("UK"→"GB") is preserved.
+        assert normalize_country("UK") == "GB"
+        assert normalize_country("uk") == "GB"
+
+    def test_iso3_recognised(self):
+        from zbbx_mcp.data import normalize_country
+
+        assert normalize_country("RUS") == "RU"
+        assert normalize_country("usa") == "US"
+        assert normalize_country("DEU") == "DE"
+
+    def test_full_name_recognised(self):
+        from zbbx_mcp.data import normalize_country
+
+        assert normalize_country("Russia") == "RU"
+        assert normalize_country("UNITED STATES") == "US"
+        assert normalize_country("Saudi Arabia") == "SA"
+        assert normalize_country("Czechia") == "CZ"
+        assert normalize_country("Czech Republic") == "CZ"
+        assert normalize_country("United Kingdom") == "GB"
+        assert normalize_country("UAE") == "AE"
+
+    def test_empty_and_unknown_return_empty(self):
+        from zbbx_mcp.data import normalize_country
+
+        assert normalize_country("") == ""
+        assert normalize_country("   ") == ""
+        assert normalize_country(None) == ""  # type: ignore[arg-type]
+        assert normalize_country("Atlantis") == ""
+        assert normalize_country("ZZZ") == ""
+
+    def test_two_letter_unknown_still_returns_iso2_like(self):
+        from zbbx_mcp.data import normalize_country
+
+        # We don't enumerate the full ISO-2 set; any 2-letter alphabetic
+        # input is treated as a code (the downstream filter just won't
+        # match any host). UK-alias normalisation still applies.
+        assert normalize_country("ZZ") == "ZZ"
+
+
+class TestResolveCountry:
+    """Pure-helper tests for resolve_country chain (#141)."""
+
+    def test_extract_country_takes_precedence(self):
+        from zbbx_mcp.data import resolve_country
+
+        h = {
+            "host": "edge-de01",
+            "inventory": {"country_code": "FR", "country_name": "France"},
+        }
+        # Hostname says DE; inventory disagreement loses to the name.
+        assert resolve_country(h) == "DE"
+
+    def test_inventory_country_code_used_when_hostname_empty(self):
+        from zbbx_mcp.data import resolve_country
+
+        h = {"host": "control-plane-01", "inventory": {"country_code": "us"}}
+        assert resolve_country(h) == "US"
+
+    def test_inventory_country_name_used_when_code_empty(self):
+        from zbbx_mcp.data import resolve_country
+
+        h = {
+            "host": "control-plane-01",
+            "inventory": {"country_code": "", "country_name": "Russia"},
+        }
+        assert resolve_country(h) == "RU"
+
+    def test_returns_empty_when_all_sources_empty(self):
+        from zbbx_mcp.data import resolve_country
+
+        h = {"host": "control-plane-01", "inventory": {}}
+        assert resolve_country(h) == ""
+
+    def test_handles_missing_inventory_field(self):
+        from zbbx_mcp.data import resolve_country
+
+        # Older Zabbix host.get without selectInventory — no field at all.
+        h = {"host": "control-plane-01"}
+        assert resolve_country(h) == ""
+
+    def test_inventory_unknown_name_falls_through(self):
+        from zbbx_mcp.data import resolve_country
+
+        h = {"host": "weird", "inventory": {"country_name": "Atlantis"}}
+        assert resolve_country(h) == ""
+

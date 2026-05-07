@@ -11,6 +11,8 @@ from zbbx_mcp.data import (
     fetch_enabled_hosts,
     fetch_traffic_map,
     host_ip,
+    normalize_country,
+    resolve_country,
 )
 from zbbx_mcp.formatters import cell, format_host_detail, format_host_list
 from zbbx_mcp.resolver import InstanceResolver
@@ -37,7 +39,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
             Args:
                 query: Host name substring search
                 group: Host group name filter
-                country: 2-letter country code filter
+                country: ISO-2 / ISO-3 / English name (e.g. RU, RUS, Russia). Empty = all
                 product: Product name filter (substring match)
                 status: 'enabled' (default), 'disabled', or 'all'
                 max_results: Max results (default: 50)
@@ -52,6 +54,12 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     "selectGroups": ["name"],
                     "sortfield": "host",
                 }
+                # Normalise the country input up front so any branch sees ISO-2.
+                cc_filter = normalize_country(country) if country else ""
+                if country and not cc_filter:
+                    return f"Unknown country: {country!r}. Use ISO-2 (RU), ISO-3 (RUS), or full name (Russia)."
+                if cc_filter:
+                    params["selectInventory"] = ["country_code", "country_name"]
                 if status == "enabled":
                     params["filter"] = {"status": "0"}
                 elif status == "disabled":
@@ -73,8 +81,8 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
 
                 data = await client.call("host.get", params)
 
-                if country:
-                    data = [h for h in data if extract_country(h["host"]).lower() == country.lower()]
+                if cc_filter:
+                    data = [h for h in data if resolve_country(h) == cc_filter]
                 if product:
                     data = [h for h in data if product.lower() in (_classify_host(h.get("groups", []))[0] or "").lower()]
 
@@ -84,6 +92,8 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 total = len(data)
                 data = data[:max_results]
                 header = f"**Found: {total} hosts**"
+                if cc_filter:
+                    header += f" in {cc_filter}"
                 if total > max_results:
                     header += f" (showing first {max_results})"
 
@@ -291,12 +301,15 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
 
             Args:
                 group: Filter by host group name (optional)
-                country: Filter by 2-letter country code (optional)
+                country: ISO-2 / ISO-3 / English name (e.g. RU, RUS, Russia). Empty = all
                 max_results: Maximum clusters to show (default: 30)
                 instance: Zabbix instance name (optional)
             """
             try:
                 client = resolver.resolve(instance)
+                cc_filter = normalize_country(country) if country else ""
+                if country and not cc_filter:
+                    return f"Unknown country: {country!r}. Use ISO-2 (RU), ISO-3 (RUS), or full name (Russia)."
                 params = {
                     "output": ["hostid", "host", "name", "status"],
                     "selectGroups": ["name"],
@@ -304,6 +317,8 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     "filter": {"status": "0"},
                     "sortfield": "host",
                 }
+                if cc_filter:
+                    params["selectInventory"] = ["country_code", "country_name"]
                 if group:
                     gids = await resolve_group_ids(client, group)
                     if gids is not None:
@@ -313,8 +328,8 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
 
                 hosts = await client.call("host.get", params)
 
-                if country:
-                    hosts = [h for h in hosts if extract_country(h["host"]).lower() == country.lower()]
+                if cc_filter:
+                    hosts = [h for h in hosts if resolve_country(h) == cc_filter]
 
                 # Group by base hostname
                 clusters: dict[str, list[dict]] = defaultdict(list)
@@ -444,7 +459,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
             """Search hosts by country, group, product with optional traffic filter.
 
             Args:
-                country: 2-letter country code
+                country: ISO-2 / ISO-3 / English name (e.g. RU, RUS, Russia). Empty = all
                 group: Host group name filter
                 product: Product name filter (substring)
                 min_traffic_mbps: Min traffic threshold in Mbps
@@ -454,7 +469,15 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
             """
             try:
                 client = resolver.resolve(instance)
-                hosts = await fetch_enabled_hosts(client, extra_output=["name", "status"])
+                cc_filter = normalize_country(country) if country else ""
+                if country and not cc_filter:
+                    return f"Unknown country: {country!r}. Use ISO-2 (RU), ISO-3 (RUS), or full name (Russia)."
+                # Inventory fetch only paid when the country filter is active.
+                hosts = await fetch_enabled_hosts(
+                    client,
+                    extra_output=["name", "status"],
+                    inventory=bool(cc_filter),
+                )
 
                 if group:
                     gids = await resolve_group_ids(client, group)
@@ -463,8 +486,8 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     gid_set = set(gids)
                     hosts = [h for h in hosts if any(g.get("groupid") in gid_set for g in h.get("groups", []))]
 
-                if country:
-                    hosts = [h for h in hosts if extract_country(h["host"]).lower() == country.lower()]
+                if cc_filter:
+                    hosts = [h for h in hosts if resolve_country(h) == cc_filter]
                 if product:
                     hosts = [h for h in hosts if product.lower() in (_classify_host(h.get("groups", []))[0] or "").lower()]
 
