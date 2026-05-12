@@ -5,6 +5,69 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.8.0] - 2026-05-05
+
+### Added — Self-introspection
+- `get_telemetry_summary`: reads the analytics log written by the existing
+  `logged()` decorator and reports per-tool call counts, error rate,
+  average + max latency, and average response size. Args: `hours`
+  (lookback window, 0 = all-time), `top`, `log_path`. Pure helper
+  `_summarise_records` covered by unit tests; handles both epoch and
+  ISO 8601 timestamps. Lands in the `core` tier so introspection
+  works in every session. See ADR 024.
+
+### Changed — Code organisation (no behaviour change)
+- `data.py` split: country-specific reference data
+  (`REGION_MAP`, `CAPITAL_COORDS`, `_COUNTRY_NAMES` table,
+  `extract_country` / `normalize_country` / `resolve_country` /
+  `countries_for_region`) extracted to new module
+  `src/zbbx_mcp/country.py`. `data.py` re-exports the public symbols
+  for back-compat — every existing `from zbbx_mcp.data import ...`
+  callsite keeps working. `data.py` shrank from 659 to 334 lines.
+- `costs.py` split: the 2173-line / 14-tool monolith broken into
+  four cohesive modules. `costs_common.py` (shared helpers + tags),
+  `costs_import.py` (6 ingestion tools), `costs_audit.py` (5 audit
+  and reconciliation tools), `costs_summary.py` (3 read-only summary
+  tools). Tool count and names unchanged.
+- Output formatters `_format_value` and `_format_age` promoted to
+  public `format_value` and `format_age` in `formatters.py`.
+  Analytics helpers `_subnet24`, `_parse_ip_changes`,
+  `_compute_loss_drift`, `_split_baseline_recent` had their
+  underscore prefixes dropped (they are imported across tool
+  modules and were never module-private in practice).
+
+### Changed — Robustness
+- `server.py` gained a single shared `_iter_registered_tools` helper
+  with graceful fallback if FastMCP renames its private
+  `_tool_manager._tools` attributes. Both `_compact_descriptions`
+  and the tool-wrapping loop now degrade with a logged warning
+  instead of raising `AttributeError` at startup.
+
+### Added — CI gates
+- `mypy` typecheck job runs `mypy src/zbbx_mcp` on every push / PR.
+  `tools/` excluded for now (~180 accumulated type smells); core
+  modules (`data.py`, `fetch.py`, `formatters.py`, `classify.py`,
+  `config.py`, `client.py`, `server.py`, `logging.py`,
+  `rollback.py`, `resolver.py`, `utils.py`, `excel.py`,
+  `country.py`) are clean.
+- `pytest --cov=zbbx_mcp --cov-fail-under=15` runs in the test job;
+  prevents silent coverage regression below the current floor.
+
+### Added — Documentation
+- `docs/adr/README.md`: index of all 24 ADRs grouped by theme
+  (cost-import pipeline, infrastructure, outage correlation,
+  disruption detection, trends / traffic / problems, token
+  efficiency and hygiene, observability and architectural hygiene).
+- `CONTRIBUTING.md`: new "Sensitive content" section with the
+  public-repo hygiene rules and the reproducible pre-commit scan
+  command. The new CI gates (ruff, mypy, coverage) listed in the
+  code-style section.
+
+### Tooling
+- 156 tools across 54 modules.
+- 393 tests.
+- ADRs 010 through 024.
+
 ## [1.7.0] - 2026-05-05
 
 ### Added — Outage correlation (ADR 010, 015, 022)
