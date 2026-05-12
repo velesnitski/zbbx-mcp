@@ -5,6 +5,28 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.8.1] - 2026-05-05
+
+### Changed — Public-repo hygiene
+- **`REGION_MAP` and `CAPITAL_COORDS` expanded to full ISO 3166-1
+  coverage.** Both tables previously held curated subsets (65 and 49
+  countries respectively); the inclusion list was a soft hint at
+  market footprint. Now every ISO 3166-1 country is present in both
+  tables (200 entries each). `get_latency_estimate` works for any
+  source country, not just the previously-curated subset.
+  - REGION_MAP grouping unchanged in spirit (NA, LATAM, EMEA, APAC,
+    CIS); Central Asia / Caucasus countries appear in two regions
+    where the geography genuinely overlaps.
+  - CAPITAL_COORDS adds capital lat / lon for every country not
+    previously listed.
+- **Hostname-pattern placeholder cleanup.** A comment in
+  `costs_import.py` used a `prem-*` example matching a banned
+  hostname-pattern (the operator's actual fleet prefix); replaced
+  with generic `parent-a a-b`.
+
+No tool added or removed; tool count and behaviour unchanged. 393
+tests pass; ruff + mypy + sensitive scan all clean.
+
 ## [1.8.0] - 2026-05-05
 
 ### Added — Self-introspection
