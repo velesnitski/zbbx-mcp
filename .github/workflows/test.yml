@@ -23,6 +23,26 @@ jobs:
       - name: Lint
         run: ruff check src tests
 
+  typecheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[typecheck]"
+
+      - name: Run mypy
+        # Core modules only — tools/ is excluded via pyproject [tool.mypy].
+        # Incremental cleanup of tools/* type smells planned as follow-up.
+        run: mypy src/zbbx_mcp
+
   test:
     runs-on: ubuntu-latest
     strategy:
@@ -42,5 +62,9 @@ jobs:
           python -m pip install --upgrade pip
           pip install -e ".[test]"
 
-      - name: Run tests
-        run: pytest -v
+      - name: Run tests with coverage
+        # Threshold starts at 15% — baseline is ~18% with pure helpers
+        # well covered and async tool wrappers largely untested. Raise
+        # as wrapper coverage improves; gate prevents silent regression
+        # below the current floor.
+        run: pytest -v --cov=zbbx_mcp --cov-report=term --cov-fail-under=15

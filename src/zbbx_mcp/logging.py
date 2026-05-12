@@ -149,7 +149,9 @@ def setup_sentry() -> None:
         environment=os.environ.get("SENTRY_ENVIRONMENT", "production"),
         traces_sample_rate=0,
         send_default_pii=False,
-        before_send=_scrub_event,
+        # Sentry's typed signature differs by version (Event/dict, hint type);
+        # _scrub_event accepts/returns dict which is compatible at runtime.
+        before_send=_scrub_event,  # type: ignore[arg-type]
         integrations=[
             LoggingIntegration(level=logging.WARNING, event_level=logging.ERROR),
         ],
