@@ -30,7 +30,7 @@ from zbbx_mcp.data import (
     host_ip,
 )
 from zbbx_mcp.resolver import InstanceResolver
-from zbbx_mcp.tools.correlation import _subnet24
+from zbbx_mcp.tools.correlation import subnet24
 
 # --- shared pure helpers ------------------------------------------------
 
@@ -600,7 +600,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                         "clock": cutoff,
                         "hostid": hid,
                         "host": h.get("host", ""),
-                        "subnet": _subnet24(ip),
+                        "subnet": subnet24(ip),
                         "hostgroup": groups[0] if groups else "",
                         "country": extract_country(h.get("host", "")),
                         "cohort_key": cohort_keys.get(hid, "::"),

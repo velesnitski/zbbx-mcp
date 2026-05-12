@@ -19,9 +19,8 @@ from datetime import datetime, timezone
 import httpx
 
 from zbbx_mcp.data import build_parent_map
-from zbbx_mcp.formatters import normalize_problem_name
+from zbbx_mcp.formatters import format_age, normalize_problem_name
 from zbbx_mcp.resolver import InstanceResolver
-from zbbx_mcp.tools.correlation import _format_age
 
 _SEVERITY_LABELS = {
     0: "Info", 1: "Info", 2: "Warning", 3: "Average", 4: "High", 5: "Disaster",
@@ -189,7 +188,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                             datetime.fromtimestamp(f["earliest_clock"], timezone.utc)
                             .strftime("%Y-%m-%d %H:%M UTC")
                         )
-                        age_str = _format_age(_now - f["earliest_clock"])
+                        age_str = format_age(_now - f["earliest_clock"])
                     sample = "; ".join(t[:50] for t in f["sample_triggers"])
                     suffix = f" (+{f['child_count']} sub-hosts)" if f["child_count"] else ""
                     lines.append(

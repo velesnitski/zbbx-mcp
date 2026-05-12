@@ -21,7 +21,7 @@ _RECOVERED = 0.7
 _PARTIAL = 0.3
 
 
-def _parse_ip_changes(details_raw: str) -> list[tuple[str, str]]:
+def parse_ip_changes(details_raw: str) -> list[tuple[str, str]]:
     """Extract (old_ip, new_ip) tuples from a Zabbix auditlog `details` blob.
 
     The audit log details schema varies across Zabbix major versions; we
@@ -215,7 +215,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                         clock = int(r.get("clock", 0))
                         if clock <= 0:
                             continue
-                        for old_ip, new_ip in _parse_ip_changes(r.get("details", "")):
+                        for old_ip, new_ip in parse_ip_changes(r.get("details", "")):
                             baseline = await _fetch_traffic_avg(
                                 client, hid, clock - 86400, clock,
                             )
@@ -318,7 +318,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                         clock = int(r.get("clock", 0))
                     except (ValueError, TypeError):
                         continue
-                    for old_ip, new_ip in _parse_ip_changes(r.get("details", "")):
+                    for old_ip, new_ip in parse_ip_changes(r.get("details", "")):
                         baseline = await _fetch_traffic_avg(
                             client, hid, clock - 86400, clock,
                         )

@@ -24,7 +24,7 @@ from zbbx_mcp.data import (
     extract_country,
     host_ip,
 )
-from zbbx_mcp.formatters import normalize_problem_name
+from zbbx_mcp.formatters import format_age, normalize_problem_name
 from zbbx_mcp.resolver import InstanceResolver
 
 # Cluster grouping levels, ordered narrowest to broadest.
@@ -33,21 +33,7 @@ _AUTO_LEVELS: tuple[str, ...] = ("subnet24", "subnet16", "provider")
 _SEV_LABELS = {0: "Info", 1: "Info", 2: "Warning", 3: "Average", 4: "High", 5: "Disaster"}
 
 
-def _format_age(seconds: int) -> str:
-    """Render a duration in seconds as a compact human string.
-
-    Negative inputs render as ``"0s"`` so callers don't have to clamp.
-    The cutpoints are chosen so each unit's label is unambiguous at the
-    next boundary (1m vs 60s, 1h vs 60m, etc.).
-    """
-    s = max(0, int(seconds))
-    if s < 60:
-        return f"{s}s"
-    if s < 3600:
-        return f"{s // 60}m"
-    if s < 86400:
-        return f"{s // 3600}h"
-    return f"{s // 86400}d"
+# _format_age moved to zbbx_mcp.formatters.format_age (output formatter).
 
 # Interface names ignored for tunnel-counting purposes (kernel/system, not relays).
 _IGNORED_IFACES: frozenset[str] = frozenset({"lo", "docker0"})
@@ -179,7 +165,7 @@ def _cluster_problems(
     return clusters
 
 
-def _subnet24(ip: str) -> str:
+def subnet24(ip: str) -> str:
     """Return the /24 CIDR for an IPv4 address, or '' for non-IPv4."""
     if not ip or "." not in ip:
         return ""
@@ -217,7 +203,7 @@ def _group_key(
     'auto' is handled at the caller level by trying levels narrowest-first.
     """
     if level == "subnet24":
-        return _subnet24(ip)
+        return subnet24(ip)
     if level == "subnet16":
         return _subnet16(ip)
     if level == "provider":
@@ -469,7 +455,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     sample_hosts = ", ".join(c["hosts"][:5])
                     more = f" +{len(c['hosts']) - 5}" if len(c["hosts"]) > 5 else ""
                     sample_problems = "; ".join(c["problems"][:3])
-                    age = _format_age(_now - c["start"])
+                    age = format_age(_now - c["start"])
                     lines.append(
                         f"### Cluster {idx} — {c['key']}\n"
                         f"- **Hosts:** {c['host_count']} ({sample_hosts}{more})\n"

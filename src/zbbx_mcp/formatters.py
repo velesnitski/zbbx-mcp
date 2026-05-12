@@ -8,6 +8,8 @@ __all__ = [
     "format_host_list",
     "format_host_detail",
     "normalize_problem_name",
+    "format_age",
+    "format_value",
 ]
 
 # Zabbix severity levels (shared across triggers, problems, events)
@@ -41,6 +43,53 @@ def _ts(epoch: str) -> str:
 
 def format_severity(severity: str) -> str:
     return SEVERITY_NAMES.get(str(severity), f"Unknown ({severity})")
+
+
+def format_age(seconds: int) -> str:
+    """Render a duration in seconds as a compact human string.
+
+    Negative inputs render as ``"0s"`` so callers don't have to clamp.
+    The cutpoints are chosen so each unit's label is unambiguous at the
+    next boundary (1m vs 60s, 1h vs 60m, etc.).
+    """
+    s = max(0, int(seconds))
+    if s < 60:
+        return f"{s}s"
+    if s < 3600:
+        return f"{s // 60}m"
+    if s < 86400:
+        return f"{s // 3600}h"
+    return f"{s // 86400}d"
+
+
+def format_value(value: str, units: str) -> str:
+    """Format a numeric metric value with units (B/Bps, %, s, generic)."""
+    if not value:
+        return "N/A"
+    try:
+        num = float(value)
+        if units in ("B", "Bps", "bps"):
+            if num >= 1_073_741_824:
+                return f"{num / 1_073_741_824:.2f} G{units}"
+            if num >= 1_048_576:
+                return f"{num / 1_048_576:.2f} M{units}"
+            if num >= 1024:
+                return f"{num / 1024:.2f} K{units}"
+        elif units == "%":
+            return f"{num:.1f}%"
+        elif units == "s":
+            if num >= 86400:
+                return f"{num / 86400:.1f}d"
+            if num >= 3600:
+                return f"{num / 3600:.1f}h"
+            if num >= 60:
+                return f"{num / 60:.1f}m"
+            return f"{num:.1f}s"
+        if num == int(num):
+            return f"{int(num)} {units}".strip()
+        return f"{num:.2f} {units}".strip()
+    except (ValueError, TypeError):
+        return f"{value} {units}".strip()
 
 
 _WS_RE = re.compile(r"\s+")

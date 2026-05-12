@@ -3,7 +3,7 @@ import time
 
 import httpx
 
-from zbbx_mcp.formatters import _ts, cell
+from zbbx_mcp.formatters import _ts, cell, format_value
 from zbbx_mcp.resolver import InstanceResolver
 from zbbx_mcp.utils import parse_time, resolve_group_ids
 
@@ -95,34 +95,7 @@ VALUE_TYPES = {
 }
 
 
-def _format_value(value: str, units: str) -> str:
-    """Format a metric value with units."""
-    if not value:
-        return "N/A"
-    try:
-        num = float(value)
-        if units in ("B", "Bps", "bps"):
-            if num >= 1_073_741_824:
-                return f"{num / 1_073_741_824:.2f} G{units}"
-            if num >= 1_048_576:
-                return f"{num / 1_048_576:.2f} M{units}"
-            if num >= 1024:
-                return f"{num / 1024:.2f} K{units}"
-        elif units == "%":
-            return f"{num:.1f}%"
-        elif units == "s":
-            if num >= 86400:
-                return f"{num / 86400:.1f}d"
-            if num >= 3600:
-                return f"{num / 3600:.1f}h"
-            if num >= 60:
-                return f"{num / 60:.1f}m"
-            return f"{num:.1f}s"
-        if num == int(num):
-            return f"{int(num)} {units}".strip()
-        return f"{num:.2f} {units}".strip()
-    except (ValueError, TypeError):
-        return f"{value} {units}".strip()
+# _format_value moved to zbbx_mcp.formatters.format_value (output formatter).
 
 
 def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> None:
@@ -274,7 +247,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
 
                 lines = []
                 for item in data:
-                    value = _format_value(item.get("lastvalue", ""), item.get("units", ""))
+                    value = format_value(item.get("lastvalue", ""), item.get("units", ""))
                     clock = _ts(item.get("lastclock", "0"))
                     state = " [UNSUPPORTED]" if item.get("state") == "1" else ""
                     lines.append(
@@ -353,7 +326,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 lines = []
                 for item in items:
                     hostname = host_map.get(item["hostid"], "?")
-                    value = _format_value(item.get("lastvalue", ""), item.get("units", ""))
+                    value = format_value(item.get("lastvalue", ""), item.get("units", ""))
                     lines.append(
                         f"| {hostname} | {item.get('name', '?')} | `{item.get('key_', '?')}` | {value} |"
                     )
@@ -439,7 +412,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
 
                 for record in data:
                     ts = _ts(record.get("clock", "0"))
-                    val = _format_value(record.get("value", ""), units)
+                    val = format_value(record.get("value", ""), units)
                     parts.append(f"| {ts} | {val} |")
 
                 return "\n".join(parts)
