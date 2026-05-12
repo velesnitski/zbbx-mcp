@@ -190,8 +190,11 @@ PROVIDER_CIDRS: dict[str, list[str]] = {
     "iomart": ["109.169.0.0/16", "78.129.0.0/16"],
 }
 
-# Pre-compiled network objects sorted by prefix length (most specific first)
-_PROVIDER_NETS: list[tuple[str, ipaddress.IPv4Network]] = sorted(
+# Pre-compiled network objects sorted by prefix length (most specific first).
+# ipaddress.ip_network() returns IPv4Network | IPv6Network; in practice we
+# only feed IPv4 CIDRs but the annotation matches the call's actual return.
+_IpNet = ipaddress.IPv4Network | ipaddress.IPv6Network
+_PROVIDER_NETS: list[tuple[str, _IpNet]] = sorted(
     [
         (prov, ipaddress.ip_network(cidr, strict=False))
         for prov, cidrs in PROVIDER_CIDRS.items()
@@ -329,7 +332,7 @@ DATACENTER_CIDRS: dict[str, list[tuple[str, str]]] = {
 }
 
 # Pre-compile datacenter networks (most specific first)
-_DC_NETS: list[tuple[str, str, ipaddress.IPv4Network]] = sorted(
+_DC_NETS: list[tuple[str, str, _IpNet]] = sorted(
     [
         (prov, city, ipaddress.ip_network(cidr, strict=False))
         for prov, mappings in DATACENTER_CIDRS.items()

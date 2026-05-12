@@ -80,7 +80,7 @@ def _get_hide_products() -> frozenset[str]:
     return frozenset(p.strip() for p in raw.split(",") if p.strip())
 
 
-HIDE_PRODUCTS = frozenset()  # backward compat — use is_hidden_product() instead
+HIDE_PRODUCTS: frozenset[str] = frozenset()  # backward compat — use is_hidden_product() instead
 # Standard Zabbix agent keys
 KEY_CPU_IDLE = "system.cpu.util[,idle]"
 KEY_CPU_LOAD = "system.cpu.load[percpu,avg5]"
