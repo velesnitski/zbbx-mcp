@@ -34,8 +34,9 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-test = ["pytest>=9.0.3,<10", "pytest-asyncio>=1,<2", "pygments>=2.20.0"]
+test = ["pytest>=9.0.3,<10", "pytest-asyncio>=1,<2", "pytest-cov>=7,<8", "pygments>=2.20.0"]
 lint = ["ruff>=0.4"]
+typecheck = ["mypy>=1.10,<3"]
 
 [project.urls]
 Homepage = "https://github.com/velesnitski/zbbx-mcp"
@@ -49,6 +50,30 @@ zbbx-mcp = "zbbx_mcp.server:main"
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
+
+[tool.coverage.run]
+source = ["zbbx_mcp"]
+branch = false
+omit = ["*/tests/*"]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "raise NotImplementedError",
+    "if __name__ == .__main__.:",
+]
+
+[tool.mypy]
+python_version = "3.10"
+ignore_missing_imports = true
+warn_unused_configs = true
+# Core modules are mypy-clean (data.py, fetch.py, formatters.py, classify.py,
+# config.py, client.py, server.py, logging.py, rollback.py, resolver.py,
+# utils.py, excel.py). tools/* has accumulated ~180 type smells over time
+# (most are `skip: set[str] = frozenset()` and `dict | list` API returns);
+# fix iteratively in a follow-up rather than churn every tool in one pass.
+exclude = ["src/zbbx_mcp/tools/", "tests/"]
+no_strict_optional = false
 
 [tool.ruff]
 target-version = "py310"

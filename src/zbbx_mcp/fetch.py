@@ -82,7 +82,11 @@ async def fetch_enabled_hosts(
         params["selectInterfaces"] = ["ip"]
     if inventory:
         params["selectInventory"] = ["country_code", "country_name", "location"]
+    # client.call returns dict | list — for host.get the actual return is
+    # always a list. Narrow explicitly for downstream callers and the cache.
     result = await client.call("host.get", params)
+    if not isinstance(result, list):
+        result = []
 
     if not extra_output and not inventory:
         client._set_cache(cache_key, result)
@@ -289,7 +293,10 @@ async def fetch_all_data(
         dashboards = await client.call("dashboard.get", dash_params)
         hosts = cached_hosts
     else:
-        dashboards, hosts = await asyncio.gather(
+        # mypy 2.1 has a known internal-error bug on tuple-unpack of
+        # asyncio.gather() results — split the assignment so the type
+        # checker sees one Awaitable per name.
+        gathered = await asyncio.gather(
             client.call("dashboard.get", dash_params),
             client.call("host.get", {
                 "output": ["hostid", "host", "name", "status"],
@@ -298,6 +305,8 @@ async def fetch_all_data(
                 "filter": {"status": STATUS_ENABLED},
             }),
         )
+        dashboards = gathered[0]
+        hosts = gathered[1] if isinstance(gathered[1], list) else []
         client._set_cache("all_enabled_hosts", hosts)
 
     # Build graph → (dashboard, tab) mapping
@@ -424,6 +433,10 @@ async def fetch_all_data(
     missing_hosts = [hid for hid in all_ids if hid not in covered_hosts]
     if missing_hosts:
         try:
+            # Annotated explicitly because asyncio.gather + tuple-unpack +
+            # return_exceptions=True confuses some mypy versions.
+            fallback_in: Any
+            fallback_out: Any
             fallback_in, fallback_out = await asyncio.gather(
                 client.call("item.get", {
                     "hostids": missing_hosts,
