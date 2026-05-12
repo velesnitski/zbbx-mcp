@@ -12,8 +12,8 @@ from zbbx_mcp.classify import (
     detect_provider,
 )
 from zbbx_mcp.data import TRAFFIC_IN_KEYS, build_parent_map, extract_country
+from zbbx_mcp.formatters import format_value
 from zbbx_mcp.resolver import InstanceResolver
-from zbbx_mcp.tools.items import _format_value
 
 
 def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()):
@@ -168,7 +168,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()):
                     cpu = f"{m.get('cpu_used', 'N/A')}%" if "cpu_used" in m else "N/A"
                     load = str(m.get("load_avg1", "N/A"))
                     mem = f"{m.get('mem_avail_gb', 'N/A')} GB" if "mem_avail_gb" in m else "N/A"
-                    traffic = _format_value(str(m.get("traffic_bps", "")), "bps") if "traffic_bps" in m else "N/A"
+                    traffic = format_value(str(m.get("traffic_bps", "")), "bps") if "traffic_bps" in m else "N/A"
 
                     parts.append(
                         f"| {h.get('host', '?')} | {ctry} | {h['_product']} | {h['_tier']} | "

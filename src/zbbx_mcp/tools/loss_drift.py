@@ -22,7 +22,7 @@ from zbbx_mcp.resolver import InstanceResolver
 _RECENT_DAYS = 2
 
 
-def _split_baseline_recent(
+def split_baseline_recent(
     trends: list[dict],
     cutoff_clock: int,
 ) -> tuple[float | None, float | None]:
@@ -49,7 +49,7 @@ def _split_baseline_recent(
     return base, recent
 
 
-def _compute_loss_drift(
+def compute_loss_drift(
     loss_baseline: float | None,
     loss_recent: float | None,
     rtt_baseline: float | None,
@@ -197,9 +197,9 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 for hid in hostids:
                     loss_iid = loss_items.get(hid)
                     rtt_iid = rtt_items.get(hid)
-                    loss_b, loss_r = _split_baseline_recent(by_item.get(loss_iid, []), cutoff) if loss_iid else (None, None)
-                    rtt_b, rtt_r = _split_baseline_recent(by_item.get(rtt_iid, []), cutoff) if rtt_iid else (None, None)
-                    label, details = _compute_loss_drift(
+                    loss_b, loss_r = split_baseline_recent(by_item.get(loss_iid, []), cutoff) if loss_iid else (None, None)
+                    rtt_b, rtt_r = split_baseline_recent(by_item.get(rtt_iid, []), cutoff) if rtt_iid else (None, None)
+                    label, details = compute_loss_drift(
                         loss_b, loss_r, rtt_b, rtt_r,
                         loss_step=loss_step, rtt_step_pct=rtt_step_pct,
                     )
