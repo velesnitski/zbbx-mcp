@@ -375,7 +375,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                                     host_source[hid] = "ip/24"
 
                 # --- Pass 1c: compound hostnames (twin clusters) ---
-                # For hosts like "prem-cc1 cc3", sum billing entries for each
+                # For hosts like "parent-a a-b", sum billing entries for each
                 # component name rather than taking max of one.
                 for hid, comps in compound_components.items():
                     total = 0.0
