@@ -44,6 +44,7 @@ from zbbx_mcp.tools import (
     service_brief,
     services,
     slack,
+    telemetry,
     templates,
     traffic,
     trends_compare,
@@ -222,6 +223,7 @@ ALL_TOOLS: frozenset[str] = frozenset({
     "get_ssl_expiry",
     "get_stale_items",
     "get_stale_servers",
+    "get_telemetry_summary",
     "get_templates",
     "get_traffic_drop_timeline",
     "get_traffic_report",
@@ -283,6 +285,7 @@ def register_all(
         trends_compare, trends_health,
         html_report, geo_traffic, geo_health, executive, ceo_report, service_brief, analysis,
         web_scenarios, correlation, ip_history, loss_drift, disruption, risk, floods,
+        telemetry,
     ]
     for module in modules:
         module.register(mcp, resolver, skip=skip)

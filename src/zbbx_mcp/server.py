@@ -1,8 +1,11 @@
 import asyncio as _asyncio
 import atexit
 import functools
+import logging as _logging
 import os
 import re
+from collections.abc import Iterable
+from typing import Any
 
 from mcp.server.fastmcp import FastMCP
 
@@ -11,6 +14,34 @@ from zbbx_mcp.config import load_all_configs, load_global_policy
 from zbbx_mcp.logging import INSTANCE_ID, logged, setup_logging, setup_sentry
 from zbbx_mcp.resolver import InstanceResolver
 from zbbx_mcp.tools import register_all
+
+
+def _iter_registered_tools(mcp: FastMCP) -> Iterable[Any]:
+    """Yield each registered tool object, or nothing if FastMCP's internal
+    layout changed.
+
+    FastMCP exposes registered tools via ``mcp._tool_manager._tools`` — both
+    private attributes. They have been stable across the project's lifetime
+    so far, but a minor FastMCP bump could rename either one. This helper
+    centralises the access so callers (``_compact_descriptions`` and the
+    tool-wrapping loop) degrade gracefully instead of raising
+    ``AttributeError`` at server startup.
+    """
+    manager = getattr(mcp, "_tool_manager", None)
+    if manager is None:
+        _logging.getLogger("zbbx_mcp").warning(
+            "FastMCP._tool_manager missing — tool wrapping disabled. "
+            "Check FastMCP version compatibility.",
+        )
+        return
+    tools = getattr(manager, "_tools", None)
+    if not isinstance(tools, dict):
+        _logging.getLogger("zbbx_mcp").warning(
+            "FastMCP._tool_manager._tools missing or not a dict — "
+            "tool wrapping disabled. Check FastMCP version compatibility.",
+        )
+        return
+    yield from tools.values()
 
 # Regex to strip Args/Parameters section from docstrings
 _ARGS_RE = re.compile(r"\n\s*Args:\s*\n.*", re.DOTALL)
@@ -75,9 +106,7 @@ def _compact_descriptions(mcp: FastMCP) -> int:
     Returns number of chars saved across both passes.
     """
     saved = 0
-    if not hasattr(mcp, "_tool_manager") or not hasattr(mcp._tool_manager, "_tools"):
-        return 0
-    for tool in mcp._tool_manager._tools.values():
+    for tool in _iter_registered_tools(mcp):
         desc = tool.description or ""
         trimmed = _ARGS_RE.sub("", desc).strip()
         if len(trimmed) < len(desc):
@@ -204,19 +233,19 @@ def create_server() -> tuple[FastMCP, dict[str, ZabbixClient]]:
             _logger.info(f"Compacted tool descriptions: saved {saved} chars (~{saved // 4} tokens)")
 
     # Wrap all tool functions with analytics logging + response compression
-    if hasattr(mcp, "_tool_manager") and hasattr(mcp._tool_manager, "_tools"):
-        for tool in mcp._tool_manager._tools.values():
-            if hasattr(tool, "fn"):
-                original_fn = tool.fn
+    for tool in _iter_registered_tools(mcp):
+        if not hasattr(tool, "fn"):
+            continue
+        original_fn = tool.fn
 
-                @functools.wraps(original_fn)
-                async def _compressed_wrapper(*args, _fn=original_fn, **kwargs):
-                    result = await _fn(*args, **kwargs)
-                    if isinstance(result, str):
-                        return _compress_response(result)
-                    return result
+        @functools.wraps(original_fn)
+        async def _compressed_wrapper(*args, _fn=original_fn, **kwargs):
+            result = await _fn(*args, **kwargs)
+            if isinstance(result, str):
+                return _compress_response(result)
+            return result
 
-                tool.fn = logged(_compressed_wrapper)
+        tool.fn = logged(_compressed_wrapper)
 
     # Register cleanup for connection pools
     def _cleanup() -> None:

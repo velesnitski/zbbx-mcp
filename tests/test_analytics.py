@@ -2197,3 +2197,99 @@ class TestResolveCountry:
         h = {"host": "weird", "inventory": {"country_name": "Atlantis"}}
         assert resolve_country(h) == ""
 
+
+class TestTelemetrySummary:
+    """Pure-helper tests for _summarise_records (#7)."""
+
+    def _rec(self, tool="x", status="ok", duration_ms=10, response_size=100, ts=None):
+        r = {
+            "tool": tool,
+            "status": status,
+            "duration_ms": duration_ms,
+            "response_size": response_size,
+        }
+        if ts is not None:
+            r["ts"] = ts
+        return r
+
+    def test_per_tool_counts_and_avg(self):
+        from zbbx_mcp.tools.telemetry import _summarise_records
+
+        records = [
+            self._rec(tool="search_hosts", duration_ms=20),
+            self._rec(tool="search_hosts", duration_ms=40),
+            self._rec(tool="get_problems", duration_ms=200),
+        ]
+        out = _summarise_records(records)
+        by_tool = {r["tool"]: r for r in out}
+        assert by_tool["search_hosts"]["calls"] == 2
+        assert by_tool["search_hosts"]["avg_ms"] == 30.0
+        assert by_tool["get_problems"]["calls"] == 1
+        assert by_tool["get_problems"]["avg_ms"] == 200.0
+
+    def test_error_rate_pct(self):
+        from zbbx_mcp.tools.telemetry import _summarise_records
+
+        records = (
+            [self._rec(status="ok") for _ in range(7)]
+            + [self._rec(status="error") for _ in range(3)]
+        )
+        out = _summarise_records(records)
+        assert out[0]["errors"] == 3
+        assert out[0]["error_pct"] == 30.0
+
+    def test_sorted_by_calls_desc(self):
+        from zbbx_mcp.tools.telemetry import _summarise_records
+
+        records = (
+            [self._rec(tool="a") for _ in range(2)]
+            + [self._rec(tool="b") for _ in range(5)]
+            + [self._rec(tool="c") for _ in range(3)]
+        )
+        out = _summarise_records(records)
+        assert [r["tool"] for r in out] == ["b", "c", "a"]
+
+    def test_max_ms_tracked(self):
+        from zbbx_mcp.tools.telemetry import _summarise_records
+
+        records = [
+            self._rec(duration_ms=10),
+            self._rec(duration_ms=500),
+            self._rec(duration_ms=50),
+        ]
+        out = _summarise_records(records)
+        assert out[0]["max_ms"] == 500
+
+    def test_garbage_duration_treated_as_zero(self):
+        from zbbx_mcp.tools.telemetry import _summarise_records
+
+        records = [
+            {"tool": "x", "status": "ok", "duration_ms": "not-a-number"},
+            {"tool": "x", "status": "ok", "duration_ms": 100},
+        ]
+        out = _summarise_records(records)
+        assert out[0]["calls"] == 2
+        assert out[0]["avg_ms"] == 50.0  # (0 + 100) / 2
+
+    def test_since_ts_filter_drops_old_records(self):
+        from zbbx_mcp.tools.telemetry import _summarise_records
+
+        records = [
+            self._rec(tool="a", ts=1000),
+            self._rec(tool="a", ts=2000),
+            self._rec(tool="a", ts=3000),
+        ]
+        out = _summarise_records(records, since_ts=2000)
+        assert out[0]["calls"] == 2  # 2000 and 3000 kept; 1000 dropped
+
+    def test_iso_timestamp_filter(self):
+        from zbbx_mcp.tools.telemetry import _summarise_records
+
+        records = [
+            self._rec(tool="a", ts="2026-05-04T12:00:00Z"),
+            self._rec(tool="a", ts="2026-05-05T12:00:00Z"),
+        ]
+        # 2026-05-05 00:00 UTC = 1777939200
+        out = _summarise_records(records, since_ts=1777939200)
+        assert out[0]["calls"] == 1  # only the May 5 record
+

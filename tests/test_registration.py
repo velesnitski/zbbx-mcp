@@ -220,6 +220,8 @@ EXPECTED_TOOLS = {
     "get_disruption_blast_radius",
     # floods.py
     "get_host_floods",
+    # telemetry.py
+    "get_telemetry_summary",
 }
 
 

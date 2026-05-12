@@ -47,6 +47,8 @@ CORE_TOOLS: frozenset[str] = frozenset({
     # health basics
     "check_connection", "get_active_problems", "get_problem_age_buckets",
     "get_host_availability",
+    # introspection
+    "get_telemetry_summary",
     # server dashboard (most-called per session)
     "get_server_dashboard",
 })

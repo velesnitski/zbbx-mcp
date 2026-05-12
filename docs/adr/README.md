@@ -66,6 +66,12 @@ fixed headings (`## Problem`, `## Decision`, `## Test approach`,
 | [017](017-schema-title-strip-cost-docstring-trim-localized-header.md) | Schema-title strip + cost docstring trim + env XLSX header | Drop redundant JSON-schema `title` field; env-driven localised header |
 | [023](023-country-input-normalization.md) | Country-input normalisation | `normalize_country()` accepts ISO-2 / ISO-3 / English name; inventory fallback |
 
+### Observability and architectural hygiene (post-v1.7.0)
+
+| # | Title | One-line summary |
+|---|---|---|
+| [024](024-telemetry-summary-tool-and-defensive-fastmcp-hook.md) | Telemetry summary tool + defensive FastMCP hook | `get_telemetry_summary` surfaces per-tool usage from the existing analytics log; `_iter_registered_tools` centralises private-API access with graceful fallback |
+
 ## Writing a new ADR
 
 1. Pick the next number (`ls docs/adr/*.md | wc -l` + 1).
