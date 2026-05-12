@@ -28,9 +28,9 @@ from zbbx_mcp.data import (
     host_ip,
 )
 from zbbx_mcp.resolver import InstanceResolver
-from zbbx_mcp.tools.correlation import _subnet24
-from zbbx_mcp.tools.ip_history import _parse_ip_changes
-from zbbx_mcp.tools.loss_drift import _compute_loss_drift, _split_baseline_recent
+from zbbx_mcp.tools.correlation import subnet24
+from zbbx_mcp.tools.ip_history import parse_ip_changes
+from zbbx_mcp.tools.loss_drift import compute_loss_drift, split_baseline_recent
 
 # --- pure helpers -------------------------------------------------------
 
@@ -188,7 +188,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 # Per-host: sorted clocks of IP changes (most recent first).
                 rotations_per_host: dict[str, list[int]] = {}
                 for r in audit:
-                    if not _parse_ip_changes(r.get("details", "")):
+                    if not parse_ip_changes(r.get("details", "")):
                         continue
                     hid = str(r.get("resourceid", ""))
                     try:
@@ -202,7 +202,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 host_subnet: dict[str, str] = {}
                 for hid in hostids:
                     h = host_map[hid]
-                    subnet = _subnet24(host_ip(h))
+                    subnet = subnet24(host_ip(h))
                     host_subnet[hid] = subnet
                     if subnet:
                         subnet_rotations[subnet] = subnet_rotations.get(subnet, 0) + len(
@@ -241,14 +241,14 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                         loss_iid = loss_items.get(hid)
                         rtt_iid = rtt_items.get(hid)
                         loss_b, loss_r = (
-                            _split_baseline_recent(by_item.get(loss_iid, []), cutoff)
+                            split_baseline_recent(by_item.get(loss_iid, []), cutoff)
                             if loss_iid else (None, None)
                         )
                         rtt_b, rtt_r = (
-                            _split_baseline_recent(by_item.get(rtt_iid, []), cutoff)
+                            split_baseline_recent(by_item.get(rtt_iid, []), cutoff)
                             if rtt_iid else (None, None)
                         )
-                        label, _ = _compute_loss_drift(loss_b, loss_r, rtt_b, rtt_r)
+                        label, _ = compute_loss_drift(loss_b, loss_r, rtt_b, rtt_r)
                         drift_per_host[hid] = label
 
                 # 4) Compose per-host score.

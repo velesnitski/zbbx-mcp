@@ -139,7 +139,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 if not data:
                     return f"No trend data for item '{item.get('name', item_id)}'."
 
-                from zbbx_mcp.tools.items import _format_value
+                from zbbx_mcp.formatters import format_value
 
                 parts = [
                     f"# Trends: {item.get('name', '?')}",
@@ -153,9 +153,9 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
 
                 for r in data:
                     ts = _ts(r.get("clock", "0"))
-                    vmin = _format_value(r.get("value_min", ""), units)
-                    vavg = _format_value(r.get("value_avg", ""), units)
-                    vmax = _format_value(r.get("value_max", ""), units)
+                    vmin = format_value(r.get("value_min", ""), units)
+                    vavg = format_value(r.get("value_avg", ""), units)
+                    vmax = format_value(r.get("value_max", ""), units)
                     num = r.get("num", "?")
                     parts.append(f"| {ts} | {vmin} | {vavg} | {vmax} | {num} |")
 
