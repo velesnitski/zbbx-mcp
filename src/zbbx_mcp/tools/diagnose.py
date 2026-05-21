@@ -493,7 +493,6 @@ async def _fetch_host_records(
         "selectInterfaces": ["ip"],
         "selectGroups": ["name"],
         "filter": filt,
-        "limit": max_hosts + 1,
     }
     if hosts:
         filt["host"] = hosts
@@ -506,6 +505,17 @@ async def _fetch_host_records(
         if not gs:
             return []
         params["groupids"] = [g["groupid"] for g in gs]
+
+    if country:
+        # Country filter runs Python-side via resolve_country (hostname +
+        # inventory fallback). Don't pre-truncate via the API ``limit`` —
+        # otherwise we'd filter from an arbitrarily-windowed sample and
+        # miss most matching hosts. Pull inventory so resolve_country has
+        # both signals; cap at the end.
+        params["selectInventory"] = ["country_code", "country_name"]
+    else:
+        # No country filter: server-side limit avoids over-fetching.
+        params["limit"] = max_hosts + 1
 
     records = await client.call("host.get", params)
 
