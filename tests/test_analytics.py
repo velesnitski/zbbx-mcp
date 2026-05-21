@@ -2293,3 +2293,155 @@ class TestTelemetrySummary:
         out = _summarise_records(records, since_ts=1777939200)
         assert out[0]["calls"] == 1  # only the May 5 record
 
+
+class TestDiagnoseHostHelpers:
+    """Pure-helper tests for diagnose_host (#2 composite)."""
+
+    def test_classify_mode_server_via_traffic_keys(self):
+        from zbbx_mcp.tools.diagnose import _classify_host_mode
+
+        items = [{"key_": "net.if.in[eth0]"}, {"key_": "agent.ping"}]
+        assert _classify_host_mode({}, items) == "server"
+
+    def test_classify_mode_server_via_agent_ping_alone(self):
+        from zbbx_mcp.tools.diagnose import _classify_host_mode
+
+        items = [{"key_": "agent.ping"}]
+        assert _classify_host_mode({}, items) == "server"
+
+    def test_classify_mode_domain_when_no_agent_no_traffic(self):
+        from zbbx_mcp.tools.diagnose import _classify_host_mode
+
+        items = [{"key_": "webcheck.https.status"}]
+        assert _classify_host_mode({}, items) == "domain"
+
+    def test_classify_mode_domain_when_no_items(self):
+        from zbbx_mcp.tools.diagnose import _classify_host_mode
+
+        assert _classify_host_mode({}, []) == "domain"
+
+    def test_verdict_traffic_lost_when_traffic_collapses_with_healthy_agent(self):
+        from zbbx_mcp.tools.diagnose import _classify_verdict
+
+        v, action = _classify_verdict(
+            mode="server",
+            agent_ping_val=1,
+            agent_ping_age_min=0.5,
+            traffic_baseline_mbps=200.0,
+            traffic_recent_mbps=2.0,  # 1% of baseline
+            open_problems=0,
+            https_down=False,
+            https_age_h=None,
+        )
+        assert v == "traffic_lost"
+        assert "rotat" in action.lower() or "external" in action.lower()
+
+    def test_verdict_down_when_agent_and_traffic_both_gone(self):
+        from zbbx_mcp.tools.diagnose import _classify_verdict
+
+        v, _ = _classify_verdict(
+            mode="server",
+            agent_ping_val=0,
+            agent_ping_age_min=60.0,
+            traffic_baseline_mbps=200.0,
+            traffic_recent_mbps=0.5,
+            open_problems=0,
+            https_down=False,
+            https_age_h=None,
+        )
+        assert v == "down"
+
+    def test_verdict_degraded_agent_down_traffic_ok(self):
+        from zbbx_mcp.tools.diagnose import _classify_verdict
+
+        v, _ = _classify_verdict(
+            mode="server",
+            agent_ping_val=0,
+            agent_ping_age_min=10.0,
+            traffic_baseline_mbps=200.0,
+            traffic_recent_mbps=180.0,
+            open_problems=0,
+            https_down=False,
+            https_age_h=None,
+        )
+        assert v == "degraded"
+
+    def test_verdict_degraded_when_open_problems(self):
+        from zbbx_mcp.tools.diagnose import _classify_verdict
+
+        v, action = _classify_verdict(
+            mode="server",
+            agent_ping_val=1,
+            agent_ping_age_min=0.5,
+            traffic_baseline_mbps=200.0,
+            traffic_recent_mbps=180.0,
+            open_problems=3,
+            https_down=False,
+            https_age_h=None,
+        )
+        assert v == "degraded"
+        assert "3" in action
+
+    def test_verdict_healthy_when_everything_ok(self):
+        from zbbx_mcp.tools.diagnose import _classify_verdict
+
+        v, _ = _classify_verdict(
+            mode="server",
+            agent_ping_val=1,
+            agent_ping_age_min=0.5,
+            traffic_baseline_mbps=200.0,
+            traffic_recent_mbps=180.0,
+            open_problems=0,
+            https_down=False,
+            https_age_h=None,
+        )
+        assert v == "healthy"
+
+    def test_verdict_https_down_in_domain_mode(self):
+        from zbbx_mcp.tools.diagnose import _classify_verdict
+
+        v, action = _classify_verdict(
+            mode="domain",
+            agent_ping_val=None,
+            agent_ping_age_min=None,
+            traffic_baseline_mbps=None,
+            traffic_recent_mbps=None,
+            open_problems=2,
+            https_down=True,
+            https_age_h=17.5,
+        )
+        assert v == "https_down"
+        assert "17" in action
+
+    def test_verdict_domain_healthy_no_problems(self):
+        from zbbx_mcp.tools.diagnose import _classify_verdict
+
+        v, _ = _classify_verdict(
+            mode="domain",
+            agent_ping_val=None,
+            agent_ping_age_min=None,
+            traffic_baseline_mbps=None,
+            traffic_recent_mbps=None,
+            open_problems=0,
+            https_down=False,
+            https_age_h=None,
+        )
+        assert v == "healthy"
+
+    def test_verdict_traffic_below_5mbps_baseline_not_flagged_as_traffic_lost(self):
+        from zbbx_mcp.tools.diagnose import _classify_verdict
+
+        # A 0.5 Mbps -> 0.05 Mbps drop is technically 90%, but the baseline
+        # is too small to count as a real signal; should not flip to traffic_lost.
+        v, _ = _classify_verdict(
+            mode="server",
+            agent_ping_val=1,
+            agent_ping_age_min=0.5,
+            traffic_baseline_mbps=0.5,
+            traffic_recent_mbps=0.05,
+            open_problems=0,
+            https_down=False,
+            https_age_h=None,
+        )
+        assert v == "healthy"
+

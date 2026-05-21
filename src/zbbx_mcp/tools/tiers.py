@@ -48,6 +48,9 @@ CORE_TOOLS: frozenset[str] = frozenset({
     "get_host_availability",
     # introspection
     "get_telemetry_summary",
+    # composite diagnostic (chain over host.get + item.get + trend.get +
+    # problem.get + auditlog.get; the most common ops workflow)
+    "diagnose_host",
     # server dashboard (most-called per session)
     "get_server_dashboard",
 })

@@ -5,6 +5,37 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.8.2] - 2026-05-21
+
+### Added — Composite diagnostic
+- **`diagnose_host(host)`** — one MCP call composes host.get +
+  item.get + trend.get + problem.get + auditlog.get into a unified
+  per-host report with verdict + recommended action. Auto-detects
+  server-mode hosts (with agent / traffic items) vs domain-mode
+  hosts (HTTPS-check only). Replaces the multi-tool chain operators
+  ran by hand for every "is this host healthy?" question. Lands in
+  the `core` tier. See ADR 026.
+
+### Changed — Tier re-cut (evidence-based)
+- 16 days of `get_telemetry_summary` data drove a data-driven re-cut
+  of the tier composition (ADR 025). 12 tools in the original
+  `core` tier had zero calls in the window:
+  - 9 demoted to `full`-only: `get_templates`, `get_graphs`,
+    `get_maintenance`, `get_services`, `get_global_macros`,
+    `get_users`, `get_proxies`, `get_maps`, `get_map_detail`.
+  - 3 demoted to thematic tiers: `acknowledge_problem` and
+    `get_alerts` → `ops`; `get_sla` → `reports`.
+- Handshake reductions (compact mode on):
+  - `core`     5k → 4k tokens (-20%)
+  - `ops`      11k → 9k       (-18%)
+  - `finance`  10k → 7k       (-30%)
+  - `reports`  13k → 10k      (-23%)
+  - `full`     unchanged at 25k
+
+### Tooling
+- 157 tools across 55 modules.
+- 405 tests (12 new for `diagnose_host` pure helpers).
+
 ## [1.8.1] - 2026-05-05
 
 ### Changed — Public-repo hygiene

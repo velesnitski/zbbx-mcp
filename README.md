@@ -3,7 +3,7 @@
 [![Tests](https://github.com/velesnitski/zbbx-mcp/actions/workflows/test.yml/badge.svg)](https://github.com/velesnitski/zbbx-mcp/actions/workflows/test.yml)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-yellow.svg)](LICENSE)
-[![Tools: 156](https://img.shields.io/badge/tools-156-brightgreen.svg)](#what-it-does)
+[![Tools: 157](https://img.shields.io/badge/tools-157-brightgreen.svg)](#what-it-does)
 [![Latest release](https://img.shields.io/github/v/release/velesnitski/zbbx-mcp.svg)](https://github.com/velesnitski/zbbx-mcp/releases)
 
 Zabbix MCP server for [Claude Code](https://claude.com/claude-code), [GitHub Copilot](https://github.com/features/copilot), [Codex CLI](https://github.com/openai/codex), [n8n](https://n8n.io), and any MCP-compatible client. Talk to your Zabbix monitoring in natural language.
@@ -66,7 +66,7 @@ You should see `zabbix` listed when Claude starts. Try asking: *"Show current pr
 
 ## What it does
 
-**156 tools** across 54 modules:
+**157 tools** across 55 modules:
 
 | Category | Tools |
 |----------|-------|
@@ -107,6 +107,7 @@ You should see `zabbix` listed when Claude starts. Try asking: *"Show current pr
 | **Risk & Impact** | `get_at_risk_hosts`, `get_disruption_blast_radius` |
 | **External IP History** | `get_external_ip_history`, `get_recovery_score` |
 | **Self-introspection** | `get_telemetry_summary` |
+| **Composite diagnostics** | `diagnose_host` |
 
 ### Report filtering
 
