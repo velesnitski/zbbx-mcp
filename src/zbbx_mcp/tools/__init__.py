@@ -14,6 +14,7 @@ from zbbx_mcp.tools import (
     costs_summary,
     dashboard_report,
     dashboards,
+    diagnose,
     discovery,
     disruption,
     domains,
@@ -163,6 +164,7 @@ ALL_TOOLS: frozenset[str] = frozenset({
     "get_dashboard_detail",
     "get_dashboards",
     "get_discovery_rules",
+    "diagnose_host",
     "get_disruption_blast_radius",
     "get_domain_list",
     "get_domain_status",
@@ -288,7 +290,7 @@ def register_all(
         trends_compare, trends_health,
         html_report, geo_traffic, geo_health, executive, ceo_report, service_brief, analysis,
         web_scenarios, correlation, ip_history, loss_drift, disruption, risk, floods,
-        telemetry,
+        telemetry, diagnose,
     ]
     for module in modules:
         module.register(mcp, resolver, skip=skip)

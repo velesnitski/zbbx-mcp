@@ -222,6 +222,8 @@ EXPECTED_TOOLS = {
     "get_host_floods",
     # telemetry.py
     "get_telemetry_summary",
+    # diagnose.py
+    "diagnose_host",
 }
 
 

@@ -72,6 +72,7 @@ fixed headings (`## Problem`, `## Decision`, `## Test approach`,
 |---|---|---|
 | [024](024-telemetry-summary-tool-and-defensive-fastmcp-hook.md) | Telemetry summary tool + defensive FastMCP hook | `get_telemetry_summary` surfaces per-tool usage from the existing analytics log; `_iter_registered_tools` centralises private-API access with graceful fallback |
 | [025](025-evidence-based-tier-recut.md) | Evidence-based tier re-cut from 16d telemetry | 12 zero-usage tools demoted from `core`; tier handshakes shrink 18–30% |
+| [026](026-diagnose-host-composite-tool.md) | `diagnose_host` composite tool | One MCP call composes the per-host diagnostic chain operators ran manually for every incident |
 
 ## Writing a new ADR
 
