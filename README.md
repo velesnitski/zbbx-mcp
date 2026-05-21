@@ -134,11 +134,11 @@ subset. `ZABBIX_TIER` ships preset bundles that cut this:
 
 | Tier | Tools | Handshake (~tokens) | Use when |
 |------|------:|--------------------:|----------|
-| `core` | 34 | ~5k | Read-only Zabbix querying — search, get, problems, dashboards |
-| `ops` | 59 | ~11k | Incident response — `core` + correlation, disruption detection, risk scoring, IP history, extended health |
-| `finance` | 56 | ~10k | Cost / billing — `core` + cost imports, audits, provider analysis |
-| `reports` | 71 | ~13k | Executive reporting — `core` + report generators, executive analytics, geo, inventory |
-| `full` | 154 | ~29k | Default — everything (no restriction) |
+| `core` | 25 | ~4k | Read-only Zabbix querying — search, get, problems, dashboards |
+| `ops` | 52 | ~9k | Incident response — `core` + correlation, disruption detection, risk scoring, IP history, extended health |
+| `finance` | 47 | ~7k | Cost / billing — `core` + cost imports, audits, provider analysis |
+| `reports` | 63 | ~10k | Executive reporting — `core` + report generators, executive analytics, geo, inventory |
+| `full` | 156 | ~25k | Default — everything (no restriction) |
 
 `ZABBIX_TIER=ops` saves ~18k tokens per session compared to the default.
 Switch tiers by changing the env var; the server picks it up on restart.
