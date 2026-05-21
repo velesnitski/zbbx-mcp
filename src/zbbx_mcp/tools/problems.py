@@ -9,6 +9,34 @@ from zbbx_mcp.utils import parse_time, resolve_group_ids
 _EVENT_VALUE_LABEL = {"0": "OK", "1": "PROBLEM"}
 
 
+def _build_ack_action(
+    *,
+    close: bool = False,
+    message: str = "",
+    severity: int = -1,
+    unack: bool = False,
+) -> int:
+    """Compute the Zabbix event.acknowledge action bitmask.
+
+    Bits per the Zabbix API (since 6.0):
+      1  = close the problem
+      2  = acknowledge
+      4  = add message
+      8  = change severity
+      16 = unacknowledge (mutually exclusive with 2)
+
+    Pure helper — testable without a Zabbix server.
+    """
+    action = 16 if unack else 2
+    if close:
+        action |= 1
+    if message:
+        action |= 4
+    if 0 <= severity <= 5:
+        action |= 8
+    return action
+
+
 def _format_event_list(events: list) -> str:
     """Format event.get results with OK/PROBLEM state labels."""
     if not events:
@@ -314,35 +342,41 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
             event_id: str,
             message: str = "",
             close: bool = False,
+            severity: int = -1,
+            unack: bool = False,
             instance: str = "",
         ) -> str:
-            """Acknowledge a Zabbix problem and optionally close it.
+            """Acknowledge a Zabbix problem (also close, re-prioritise, or unack).
 
             Args:
                 event_id: Zabbix event ID to acknowledge
                 message: Optional acknowledgement message
                 close: Also close the problem (default: False)
-                instance: Zabbix instance name (optional, for multi-instance setups)
+                severity: Change severity to this value (0-5); -1 = no change
+                unack: Unacknowledge instead of acknowledge (mutually exclusive)
+                instance: Zabbix instance name (optional)
             """
             try:
                 client = resolver.resolve(instance)
-
-                # action bitmask: 2=acknowledge, 1=close, 4=add message
-                action = 2  # acknowledge
-                if close:
-                    action |= 1
-                if message:
-                    action |= 4
-
-                await client.call("event.acknowledge", {
+                action = _build_ack_action(
+                    close=close, message=message,
+                    severity=severity, unack=unack,
+                )
+                payload: dict = {
                     "eventids": [event_id],
                     "action": action,
                     "message": message,
-                })
+                }
+                if 0 <= severity <= 5:
+                    payload["severity"] = severity
+                await client.call("event.acknowledge", payload)
 
-                parts = [f"Problem {event_id} acknowledged."]
+                verb = "unacknowledged" if unack else "acknowledged"
+                parts = [f"Problem {event_id} {verb}."]
                 if close:
-                    parts.append("Problem marked for closing.")
+                    parts.append("Marked for closing.")
+                if 0 <= severity <= 5:
+                    parts.append(f"Severity set to {severity}.")
                 if message:
                     parts.append(f"Message: {message}")
                 return " ".join(parts)
@@ -356,6 +390,8 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
             event_ids: str,
             message: str = "",
             close: bool = False,
+            severity: int = -1,
+            unack: bool = False,
             instance: str = "",
         ) -> str:
             """Acknowledge many events in one API call (mass-incident response).
@@ -364,7 +400,9 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 event_ids: Comma- or space-separated Zabbix event IDs
                 message: Optional acknowledgement message applied to all
                 close: Also mark each problem for closing (default: False)
-                instance: Zabbix instance name (optional, for multi-instance setups)
+                severity: Change severity (0-5) for all listed events; -1 = no change
+                unack: Unacknowledge instead of acknowledge (mutually exclusive)
+                instance: Zabbix instance name (optional)
             """
             try:
                 ids = [e.strip() for e in event_ids.replace(",", " ").split() if e.strip()]
@@ -372,22 +410,25 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     return "No event IDs provided."
 
                 client = resolver.resolve(instance)
-
-                action = 2
-                if close:
-                    action |= 1
-                if message:
-                    action |= 4
-
-                await client.call("event.acknowledge", {
+                action = _build_ack_action(
+                    close=close, message=message,
+                    severity=severity, unack=unack,
+                )
+                payload: dict = {
                     "eventids": ids,
                     "action": action,
                     "message": message,
-                })
+                }
+                if 0 <= severity <= 5:
+                    payload["severity"] = severity
+                await client.call("event.acknowledge", payload)
 
-                parts = [f"Acknowledged {len(ids)} event(s)."]
+                verb = "Unacknowledged" if unack else "Acknowledged"
+                parts = [f"{verb} {len(ids)} event(s)."]
                 if close:
                     parts.append("Marked for closing.")
+                if 0 <= severity <= 5:
+                    parts.append(f"Severity set to {severity}.")
                 if message:
                     parts.append(f"Message: {message}")
                 return " ".join(parts)

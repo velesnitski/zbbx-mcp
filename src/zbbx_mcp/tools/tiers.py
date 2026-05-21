@@ -44,7 +44,8 @@ CORE_TOOLS: frozenset[str] = frozenset({
     # macros (read-only)
     "get_host_macros",
     # health basics
-    "check_connection", "get_active_problems", "get_problem_age_buckets",
+    "check_connection", "get_zabbix_version",
+    "get_active_problems", "get_problem_age_buckets",
     "get_host_availability",
     # introspection
     "get_telemetry_summary",

@@ -224,6 +224,8 @@ EXPECTED_TOOLS = {
     "get_telemetry_summary",
     # diagnose.py
     "diagnose_host",
+    # health.py (v1.8.3 add)
+    "get_zabbix_version",
 }
 
 

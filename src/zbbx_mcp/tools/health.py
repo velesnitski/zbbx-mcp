@@ -15,6 +15,41 @@ _AGE_BUCKETS: tuple[tuple[str, int], ...] = (
 _AGE_BUCKET_KEYS: tuple[str, ...] = ("<1d", "1-3d", "3-7d", "7d+")
 
 
+def _parse_zabbix_version(v: str) -> tuple[int, int, int]:
+    """Parse a Zabbix version string like "6.4.2" into (major, minor, patch).
+
+    Returns ``(0, 0, 0)`` on malformed input. Pure helper.
+    """
+    parts = (v or "").split(".")
+    out = [0, 0, 0]
+    for i in range(min(3, len(parts))):
+        try:
+            out[i] = int(parts[i])
+        except ValueError:
+            break
+    return out[0], out[1], out[2]
+
+
+def _feature_matrix(major: int, minor: int) -> list[tuple[str, bool]]:
+    """Return availability of notable Zabbix-API features at (major, minor).
+
+    Used by ``get_zabbix_version`` to surface which extras the connected
+    server supports without forcing the operator to memorise version
+    gates. Pure helper.
+    """
+    v = (major, minor)
+    return [
+        ("API token API (token.get / token.create)", v >= (5, 4)),
+        ("Unacknowledge action (action bit 16)", v >= (6, 0)),
+        ("Severity-change action (action bit 8)", v >= (6, 0)),
+        ("Suppress / unsuppress actions (bits 32/64)", v >= (5, 2)),
+        ("Cause / symptom rank actions (bits 128/256)", v >= (6, 4)),
+        ("Connector API (data streaming)", v >= (7, 0)),
+        ("Proxy groups (proxygroup.get)", v >= (7, 0)),
+        ("HA cluster API (core.ha.get)", v >= (7, 0)),
+    ]
+
+
 def _bucket_problems_by_age(
     problems: list[dict],
     now: int,
@@ -62,6 +97,36 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 return f"Connected. Zabbix version: {version}"
             except (httpx.HTTPError, ValueError) as e:
                 return f"Connection failed: {e}"
+
+    if "get_zabbix_version" not in skip:
+
+        @mcp.tool()
+        async def get_zabbix_version(instance: str = "") -> str:
+            """Return the Zabbix API version + a feature-availability matrix.
+
+            Surfaces which optional API features are available on the
+            connected server (token API, ack-action bits, connector API,
+            proxy groups, HA cluster, etc.) so callers can pick tools
+            that match the server's capabilities.
+
+            Args:
+                instance: Zabbix instance name (optional)
+            """
+            try:
+                client = resolver.resolve(instance)
+                version = await client.call("apiinfo.version", {})
+                major, minor, patch = _parse_zabbix_version(version)
+                lines = [
+                    f"Zabbix API version: **{version}**",
+                    f"Parsed: major={major}, minor={minor}, patch={patch}",
+                    "",
+                    "### Feature availability",
+                ]
+                for name, avail in _feature_matrix(major, minor):
+                    lines.append(f"- {'✓' if avail else '✗'} {name}")
+                return "\n".join(lines)
+            except (httpx.HTTPError, ValueError) as e:
+                return f"Error: {e}"
 
     if "get_agent_unreachable" not in skip:
 

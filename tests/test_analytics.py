@@ -2445,3 +2445,95 @@ class TestDiagnoseHostHelpers:
         )
         assert v == "healthy"
 
+
+class TestAckActionBuilder:
+    """Pure-helper tests for _build_ack_action (v1.8.3 acknowledge_problem extension)."""
+
+    def test_default_is_acknowledge_only(self):
+        from zbbx_mcp.tools.problems import _build_ack_action
+        assert _build_ack_action() == 2
+
+    def test_close_only(self):
+        from zbbx_mcp.tools.problems import _build_ack_action
+        # ack (2) + close (1) = 3
+        assert _build_ack_action(close=True) == 3
+
+    def test_message_sets_bit_4(self):
+        from zbbx_mcp.tools.problems import _build_ack_action
+        # ack (2) + message (4) = 6
+        assert _build_ack_action(message="hello") == 6
+
+    def test_severity_sets_bit_8(self):
+        from zbbx_mcp.tools.problems import _build_ack_action
+        # ack (2) + severity (8) = 10
+        assert _build_ack_action(severity=4) == 10
+
+    def test_severity_out_of_range_is_ignored(self):
+        from zbbx_mcp.tools.problems import _build_ack_action
+        assert _build_ack_action(severity=-1) == 2
+        assert _build_ack_action(severity=6) == 2
+        assert _build_ack_action(severity=99) == 2
+
+    def test_all_optional_flags_compose(self):
+        from zbbx_mcp.tools.problems import _build_ack_action
+        # ack(2) + close(1) + msg(4) + sev(8) = 15
+        assert _build_ack_action(
+            close=True, message="x", severity=3,
+        ) == 15
+
+    def test_unack_replaces_ack_bit(self):
+        from zbbx_mcp.tools.problems import _build_ack_action
+        # unack (16) replaces ack (2) — mutually exclusive
+        assert _build_ack_action(unack=True) == 16
+
+    def test_unack_can_combine_with_close_and_message(self):
+        from zbbx_mcp.tools.problems import _build_ack_action
+        # unack(16) + close(1) + msg(4) = 21
+        assert _build_ack_action(unack=True, close=True, message="x") == 21
+
+
+class TestZabbixVersionHelpers:
+    """Pure-helper tests for version parsing + feature matrix."""
+
+    def test_parse_standard_version(self):
+        from zbbx_mcp.tools.health import _parse_zabbix_version
+        assert _parse_zabbix_version("6.4.2") == (6, 4, 2)
+
+    def test_parse_two_part_version(self):
+        from zbbx_mcp.tools.health import _parse_zabbix_version
+        assert _parse_zabbix_version("7.0") == (7, 0, 0)
+
+    def test_parse_empty_returns_zeros(self):
+        from zbbx_mcp.tools.health import _parse_zabbix_version
+        assert _parse_zabbix_version("") == (0, 0, 0)
+
+    def test_parse_garbage_returns_zeros(self):
+        from zbbx_mcp.tools.health import _parse_zabbix_version
+        assert _parse_zabbix_version("not-a-version") == (0, 0, 0)
+
+    def test_parse_partial_garbage(self):
+        from zbbx_mcp.tools.health import _parse_zabbix_version
+        # "6.x.2" — major parses, minor is garbage → stop there
+        assert _parse_zabbix_version("6.x.2") == (6, 0, 0)
+
+    def test_feature_matrix_zabbix_64(self):
+        from zbbx_mcp.tools.health import _feature_matrix
+        feats = dict(_feature_matrix(6, 4))
+        assert feats["Unacknowledge action (action bit 16)"] is True
+        assert feats["Cause / symptom rank actions (bits 128/256)"] is True
+        assert feats["Connector API (data streaming)"] is False
+        assert feats["HA cluster API (core.ha.get)"] is False
+
+    def test_feature_matrix_zabbix_60_no_rank_actions(self):
+        from zbbx_mcp.tools.health import _feature_matrix
+        feats = dict(_feature_matrix(6, 0))
+        assert feats["Cause / symptom rank actions (bits 128/256)"] is False
+        assert feats["Unacknowledge action (action bit 16)"] is True
+
+    def test_feature_matrix_zabbix_70_unlocks_everything(self):
+        from zbbx_mcp.tools.health import _feature_matrix
+        feats = dict(_feature_matrix(7, 0))
+        assert feats["Connector API (data streaming)"] is True
+        assert feats["Proxy groups (proxygroup.get)"] is True
+        assert feats["HA cluster API (core.ha.get)"] is True
+
