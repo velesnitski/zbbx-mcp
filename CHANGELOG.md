@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.8.6] - 2026-05-21
+
+### Fixed
+- **`bulk_diagnose(country=...)` returned a small random sample.** The
+  Python-side country filter ran *after* the Zabbix API's
+  `limit: max_hosts + 1` truncation, so the country filter narrowed
+  an already-truncated sample rather than the full fleet. Fix: when
+  `country` is set, skip the API `limit` and request `selectInventory`
+  so `resolve_country()` sees both hostname and inventory signals;
+  then truncate to `max_hosts` at the end. The `hosts=` / `group=`
+  paths are unaffected (their filters apply server-side already).
+
 ## [1.8.5] - 2026-05-21
 
 ### Added — Tag-based filtering across detection tools
