@@ -4,6 +4,7 @@ import httpx
 
 from zbbx_mcp.formatters import _ts, format_problem_list, format_severity
 from zbbx_mcp.resolver import InstanceResolver
+from zbbx_mcp.tag_filter import parse_tag_filter
 from zbbx_mcp.utils import parse_time, resolve_group_ids
 
 _EVENT_VALUE_LABEL = {"0": "OK", "1": "PROBLEM"}
@@ -161,6 +162,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
             severity_min: int = 0,
             host: str = "",
             group: str = "",
+            tags: str = "",
             recent: bool = True,
             acknowledged: str = "",
             max_results: int = 50,
@@ -176,6 +178,8 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 severity_min: Minimum severity (0=Not classified, 1=Info, 2=Warning, 3=Average, 4=High, 5=Disaster)
                 host: Filter by host name (exact match)
                 group: Filter by host group name
+                tags: Tag filter as "key:value,key2:value2" (e.g. "role:edge,env:prod").
+                    Bare key like "role" means "tag exists". AND-combined.
                 recent: Only recent problems (default: True; ignored when include_resolved)
                 acknowledged: Filter by acknowledgement: 'yes', 'no', or '' for all (default: all)
                 max_results: Maximum number of results (default: 50)
@@ -229,6 +233,11 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     params["acknowledged"] = True
                 elif acknowledged == "no":
                     params["acknowledged"] = False
+
+                tag_filter = parse_tag_filter(tags) if tags else []
+                if tag_filter:
+                    params["tags"] = tag_filter
+                    params["evaltype"] = 0
 
                 # Resolve host and group filters in parallel when both are specified
                 if host and group:

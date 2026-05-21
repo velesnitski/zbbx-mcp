@@ -5,6 +5,7 @@ import httpx
 from zbbx_mcp.data import fetch_traffic_map
 from zbbx_mcp.formatters import normalize_problem_name
 from zbbx_mcp.resolver import InstanceResolver
+from zbbx_mcp.tag_filter import parse_tag_filter
 
 # Age-bucket boundaries in seconds. Ordered narrowest to broadest.
 _AGE_BUCKETS: tuple[tuple[str, int], ...] = (
@@ -204,6 +205,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
         async def get_active_problems(
             min_severity: int = 2,
             max_results: int = 30,
+            tags: str = "",
             instance: str = "",
         ) -> str:
             """Active problems summary — grouped by severity with counts.
@@ -211,18 +213,25 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
             Args:
                 min_severity: Minimum severity: 0=info, 2=warning, 3=average, 4=high, 5=disaster
                 max_results: Maximum individual problems to show (default: 30)
+                tags: Tag filter as "key:value,key2:value2" (e.g. "role:edge,env:prod").
+                    Bare key like "role" means "tag exists". AND-combined.
                 instance: Zabbix instance name (optional)
             """
             try:
                 client = resolver.resolve(instance)
-                problems = await client.call("problem.get", {
+                _params: dict = {
                     "output": ["eventid", "name", "severity", "clock", "objectid"],
                     "severities": list(range(min_severity, 6)),
                     "sortfield": "eventid",
                     "sortorder": "DESC",
                     "limit": 500,
                     "recent": True,
-                })
+                }
+                tag_filter = parse_tag_filter(tags) if tags else []
+                if tag_filter:
+                    _params["tags"] = tag_filter
+                    _params["evaltype"] = 0
+                problems = await client.call("problem.get", _params)
 
                 # problem.get doesn't reliably return hosts in Zabbix 6.4 — use event.get
                 if problems:

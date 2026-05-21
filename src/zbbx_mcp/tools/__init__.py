@@ -156,6 +156,7 @@ ALL_TOOLS: frozenset[str] = frozenset({
     "get_agent_unreachable",
     "get_alert_summary",
     "get_alerts",
+    "get_anomaly_triggers",
     "get_at_risk_hosts",
     "get_audit_log",
     "get_capacity_planning",

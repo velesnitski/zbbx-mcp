@@ -228,6 +228,8 @@ EXPECTED_TOOLS = {
     "diagnose_subnet",
     # health.py (v1.8.3 add)
     "get_zabbix_version",
+    # triggers.py (v1.8.5 add)
+    "get_anomaly_triggers",
 }
 
 

@@ -5,6 +5,39 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.8.5] - 2026-05-21
+
+### Added — Tag-based filtering across detection tools
+- New shared module `zbbx_mcp.tag_filter` exposing
+  `parse_tag_filter(spec) -> list[dict]`. Operators pass tags as
+  `"key:value,key2:value2"` (AND-combined); bare key means
+  "exists" check. Parser tolerates whitespace, empty pairs,
+  trailing commas.
+- `search_hosts`, `get_problems`, `get_active_problems`, and
+  `get_triggers` all gain a new optional `tags: str = ""` arg that
+  pipes the parsed filter into the Zabbix `host.get` / `problem.get` /
+  `trigger.get` payload. Tools without tag plumbing yet can be
+  extended the same way (one-line import + payload merge).
+
+### Added — Dependency surfacing in `get_triggers`
+- New optional `with_dependencies: bool = False` arg surfaces each
+  trigger's `selectDependencies` list. Lets operators spot
+  dependent triggers that are masked by a parent firing. Zero
+  behaviour change when deps are not configured.
+
+### Added — Native anomaly-trigger surfacing (Zabbix 6.4)
+- **`get_anomaly_triggers(only_active=True)`** — lists triggers
+  whose expression references Zabbix 6.4's built-in time-series
+  functions (`anomalystl`, `baselinewma`, `baselinedev`,
+  `trendstl`, `forecast`). Complements the MCP's client-side
+  detectors (`detect_loss_drift`, `detect_disruption_wave`) by
+  exposing what server-side anomaly alerting is already configured.
+  Lands in the `ops` tier. See ADR 029.
+
+### Tooling
+- 161 tools across 55 modules.
+- 447 tests (+8 new for `parse_tag_filter`).
+
 ## [1.8.4] - 2026-05-21
 
 ### Added — Bulk diagnostic composition

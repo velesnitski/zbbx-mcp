@@ -68,6 +68,8 @@ OPS_EXTRA: frozenset[str] = frozenset({
     "get_at_risk_hosts", "get_disruption_blast_radius",
     # bulk diagnostic — fan-out diagnose_host across a target set / subnet
     "bulk_diagnose", "diagnose_subnet",
+    # native Zabbix anomaly-function trigger surfacing (6.4+)
+    "get_anomaly_triggers",
     # external IP history
     "get_external_ip_history", "get_recovery_score",
     # extended health

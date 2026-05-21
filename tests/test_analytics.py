@@ -2533,6 +2533,59 @@ class TestBulkDiagnoseHelpers:
         assert "..." in out
 
 
+class TestTagFilterParser:
+    """Pure-helper tests for parse_tag_filter (#145)."""
+
+    def test_empty_returns_empty_list(self):
+        from zbbx_mcp.tag_filter import parse_tag_filter
+        assert parse_tag_filter("") == []
+        assert parse_tag_filter("   ") == []
+
+    def test_single_key_value_equals(self):
+        from zbbx_mcp.tag_filter import parse_tag_filter
+        assert parse_tag_filter("role:edge") == [
+            {"tag": "role", "value": "edge", "operator": 0}
+        ]
+
+    def test_multiple_pairs_and_combined(self):
+        from zbbx_mcp.tag_filter import parse_tag_filter
+        out = parse_tag_filter("role:edge,env:prod")
+        assert out == [
+            {"tag": "role", "value": "edge", "operator": 0},
+            {"tag": "env", "value": "prod", "operator": 0},
+        ]
+
+    def test_whitespace_tolerated(self):
+        from zbbx_mcp.tag_filter import parse_tag_filter
+        out = parse_tag_filter("role:edge ,  env:prod  ")
+        assert out == [
+            {"tag": "role", "value": "edge", "operator": 0},
+            {"tag": "env", "value": "prod", "operator": 0},
+        ]
+
+    def test_bare_key_means_exists(self):
+        from zbbx_mcp.tag_filter import parse_tag_filter
+        assert parse_tag_filter("role") == [
+            {"tag": "role", "value": "", "operator": 4}
+        ]
+
+    def test_empty_value_after_colon_means_exists(self):
+        from zbbx_mcp.tag_filter import parse_tag_filter
+        assert parse_tag_filter("role:") == [
+            {"tag": "role", "value": "", "operator": 4}
+        ]
+
+    def test_empty_key_is_skipped(self):
+        from zbbx_mcp.tag_filter import parse_tag_filter
+        assert parse_tag_filter(":value,") == []
+
+    def test_trailing_comma_does_not_break(self):
+        from zbbx_mcp.tag_filter import parse_tag_filter
+        assert parse_tag_filter("role:edge,") == [
+            {"tag": "role", "value": "edge", "operator": 0}
+        ]
+
+
 class TestSubnetMatcher:
     """Pure-helper tests for diagnose_subnet (#149)."""
 

@@ -16,6 +16,7 @@ from zbbx_mcp.data import (
 )
 from zbbx_mcp.formatters import cell, format_host_detail, format_host_list
 from zbbx_mcp.resolver import InstanceResolver
+from zbbx_mcp.tag_filter import parse_tag_filter
 from zbbx_mcp.utils import resolve_group_ids
 
 
@@ -29,18 +30,21 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
             group: str = "",
             country: str = "",
             product: str = "",
+            tags: str = "",
             status: str = "enabled",
             max_results: int = 50,
             format: str = "table",
             instance: str = "",
         ) -> str:
-            """Search Zabbix hosts by name, group, country, or product.
+            """Search Zabbix hosts by name, group, country, product, or tags.
 
             Args:
                 query: Host name substring search
                 group: Host group name filter
                 country: ISO-2 / ISO-3 / English name (e.g. RU, RUS, Russia). Empty = all
                 product: Product name filter (substring match)
+                tags: Tag filter as "key:value,key2:value2" (e.g. "role:edge,env:prod").
+                    Bare key like "role" means "tag exists". AND-combined.
                 status: 'enabled' (default), 'disabled', or 'all'
                 max_results: Max results (default: 50)
                 format: 'table' (default) or 'list'
@@ -54,6 +58,10 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     "selectGroups": ["name"],
                     "sortfield": "host",
                 }
+                tag_filter = parse_tag_filter(tags) if tags else []
+                if tag_filter:
+                    params["tags"] = tag_filter
+                    params["evaltype"] = 0  # AND across tag-key groups
                 # Normalise the country input up front so any branch sees ISO-2.
                 cc_filter = normalize_country(country) if country else ""
                 if country and not cc_filter:
