@@ -4,6 +4,7 @@ import httpx
 
 from zbbx_mcp.formatters import _ts, format_severity
 from zbbx_mcp.resolver import InstanceResolver
+from zbbx_mcp.tag_filter import parse_tag_filter
 from zbbx_mcp.utils import parse_time, resolve_group_ids
 
 TRIGGER_STATES = {"0": "Normal", "1": "Unknown"}
@@ -22,9 +23,11 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
         async def get_triggers(
             host_id: str = "",
             group: str = "",
+            tags: str = "",
             min_severity: int = 0,
             only_problems: bool = False,
             search: str = "",
+            with_dependencies: bool = False,
             max_results: int = 50,
             instance: str = "",
         ) -> str:
@@ -33,15 +36,18 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
             Args:
                 host_id: Filter by host ID (optional)
                 group: Filter by host group name (optional)
+                tags: Tag filter as "key:value,key2:value2"; bare key means "exists"
                 min_severity: Minimum severity 0-5 (default: 0)
                 only_problems: Only show triggers in problem state (default: False)
                 search: Search pattern for trigger description (optional)
+                with_dependencies: Surface each trigger's depends-on list; useful
+                    to spot dependent triggers masked by a parent firing (default: False)
                 max_results: Maximum number of results (default: 50)
                 instance: Zabbix instance name (optional, for multi-instance setups)
             """
             try:
                 client = resolver.resolve(instance)
-                params = {
+                params: dict = {
                     "output": ["triggerid", "description", "priority", "value",
                                "state", "status", "lastchange", "expression"],
                     "selectHosts": ["host"],
@@ -66,6 +72,14 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                         return f"Host group '{group}' not found."
                     params["groupids"] = gids
 
+                tag_filter = parse_tag_filter(tags) if tags else []
+                if tag_filter:
+                    params["tags"] = tag_filter
+                    params["evaltype"] = 0
+
+                if with_dependencies:
+                    params["selectDependencies"] = ["triggerid", "description"]
+
                 data = await client.call("trigger.get", params)
 
                 if not data:
@@ -83,11 +97,111 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                         f"[{state}]{enabled} — {hosts}\n"
                         f"  changed: {changed} | triggerid: {t.get('triggerid', '?')}"
                     )
+                    if with_dependencies:
+                        deps = t.get("dependencies", [])
+                        if deps:
+                            dep_list = ", ".join(
+                                f"{d.get('description', '?')} ({d.get('triggerid', '?')})"
+                                for d in deps[:5]
+                            )
+                            more = f" (+{len(deps) - 5} more)" if len(deps) > 5 else ""
+                            lines.append(f"  depends on: {dep_list}{more}")
 
                 header = f"**Found: {len(data)} triggers**"
                 if len(data) >= max_results:
                     header += f" (showing first {max_results}, more may exist)"
                 return f"{header}\n\n" + "\n".join(lines)
+            except (httpx.HTTPError, ValueError) as e:
+                return f"Error querying Zabbix: {e}"
+
+    if "get_anomaly_triggers" not in skip:
+
+        @mcp.tool()
+        async def get_anomaly_triggers(
+            only_active: bool = True,
+            max_results: int = 50,
+            instance: str = "",
+        ) -> str:
+            """List triggers using Zabbix 6.4's native anomaly / forecast functions.
+
+            Surfaces triggers whose expression references one of the
+            built-in time-series functions:
+
+              - ``anomalystl()`` — STL-decomposition anomaly score
+              - ``baselinewma()`` — weighted moving-average baseline
+              - ``baselinedev()`` — deviation from baseline
+              - ``trendstl()`` — STL on stored trends
+              - ``forecast()`` — linear-regression forecast
+
+            Helps you discover what server-side anomaly alerting is
+            already configured (vs the client-side detectors that the
+            MCP also ships).
+
+            Args:
+                only_active: Show only triggers currently in problem state
+                    (default: True; flip to inspect dormant rules too)
+                max_results: Maximum number of results (default: 50)
+                instance: Zabbix instance name (optional)
+            """
+            try:
+                client = resolver.resolve(instance)
+                params: dict = {
+                    "output": ["triggerid", "description", "priority", "value",
+                               "state", "status", "lastchange", "expression"],
+                    "selectHosts": ["host"],
+                    "expandExpression": True,
+                    "sortfield": "priority",
+                    "sortorder": "DESC",
+                    "limit": 1000,  # over-fetch; client-side filter for fn-usage
+                }
+                if only_active:
+                    params["filter"] = {"value": "1"}
+                    params["only_true"] = True
+
+                data = await client.call("trigger.get", params)
+                if not data:
+                    return "No triggers available to inspect."
+
+                fns = ("anomalystl", "baselinewma", "baselinedev",
+                       "trendstl", "forecast")
+                matched = []
+                for t in data:
+                    expr = (t.get("expression") or "").lower()
+                    used = [fn for fn in fns if f"{fn}(" in expr]
+                    if used:
+                        t["_anomaly_fns"] = used
+                        matched.append(t)
+                    if len(matched) >= max_results:
+                        break
+
+                if not matched:
+                    note = " currently active" if only_active else ""
+                    return (
+                        f"No anomaly-function triggers found{note}.\n\n"
+                        "Looked for: " + ", ".join(f"`{fn}()`" for fn in fns) + "."
+                    )
+
+                lines = [
+                    f"**{len(matched)} anomaly-function trigger(s)** "
+                    f"{'(active only)' if only_active else '(all states)'}",
+                    "",
+                    "| Trigger | Host(s) | Functions | State | Severity | Changed |",
+                    "|---------|---------|-----------|-------|----------|---------|",
+                ]
+                for t in matched:
+                    desc = (t.get("description") or "?")
+                    if len(desc) > 50:
+                        desc = desc[:47] + "..."
+                    hosts = ", ".join(h["host"] for h in t.get("hosts", []))
+                    fns_used = ", ".join(f"`{f}`" for f in t.get("_anomaly_fns", []))
+                    state = "PROBLEM" if t.get("value") == "1" else "OK"
+                    sev = format_severity(t.get("priority", "0"))
+                    changed = _ts(t.get("lastchange", "0"))
+                    lines.append(
+                        f"| {desc} | {hosts} | {fns_used} | "
+                        f"{state} | {sev} | {changed} |"
+                    )
+                return "\n".join(lines)
             except (httpx.HTTPError, ValueError) as e:
                 return f"Error querying Zabbix: {e}"
 
