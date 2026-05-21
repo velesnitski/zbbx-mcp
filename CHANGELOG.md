@@ -5,6 +5,36 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.8.4] - 2026-05-21
+
+### Added — Bulk diagnostic composition
+- **`bulk_diagnose(hosts="", group="", country="")`** — runs the
+  `diagnose_host` pipeline across a target set and returns a compact
+  table (one row per host: verdict, mode, primary signal, action).
+  Supports three filter axes that compose: explicit host list,
+  host-group name, or country (ISO-2 / ISO-3 / English name).
+  Bounded concurrency (semaphore=10), capped at 50 hosts per call.
+  Output rows are sorted by verdict severity. Lands in the `ops`
+  tier.
+- **`diagnose_subnet(subnet)`** — follow-on to `get_outage_clusters`:
+  when a cluster row reports "5 hosts on 1.2.3.0/24", paste that
+  CIDR in here to get a verdict for each host. Accepts /24, /16, or
+  dotted prefix forms. Internally resolves to a host list and reuses
+  the bulk pipeline. Lands in the `ops` tier.
+
+### Changed — Internal refactor
+- `diagnose.py` factored into a shared async data-gather helper
+  (`_collect_diagnosis_inner`) and a shared bulk runner
+  (`_run_bulk_diagnosis`). Both new tools and the existing
+  `diagnose_host` share these helpers. No behaviour change for
+  `diagnose_host`; the rotation-history step is now skipped on
+  bulk calls (set `rotation_days=0`) to keep fan-out responsive.
+
+### Tooling
+- 160 tools across 55 modules.
+- 439 tests (+18 new for `_verdict_primary_signal`,
+  `_render_bulk_table`, `_ip_matches_subnet` pure helpers).
+
 ## [1.8.3] - 2026-05-21
 
 ### Added — Zabbix-version introspection
