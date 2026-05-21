@@ -15,35 +15,34 @@ when ZABBIX_TIER is unset).
 from __future__ import annotations
 
 # Day-to-day Zabbix querying primitives. Every other tier extends this.
+#
+# Composition is evidence-based: 16 days of `get_telemetry_summary` data
+# (ADR 025) drove the cull. Tools with zero calls in the window were
+# either demoted to a thematic tier where the workflow actually lives
+# (acknowledge_problem, get_alerts → ops; get_sla → reports) or dropped
+# from any tier and kept available only in ``full`` (get_templates,
+# get_graphs, get_maintenance, get_services, get_global_macros, get_users,
+# get_proxies, get_maps, get_map_detail).
 CORE_TOOLS: frozenset[str] = frozenset({
     # hosts
     "search_hosts", "get_host", "search_hosts_by_ip", "search_hosts_by_location",
+    "get_server_clusters",
     # problems
-    "get_problems", "get_problem_detail", "acknowledge_problem",
+    "get_problems", "get_problem_detail",
     # host groups
     "get_hostgroups",
     # triggers
     "get_triggers",
-    # templates
-    "get_templates",
     # items
-    "get_host_items", "search_items", "get_item_history", "get_graphs",
+    "get_host_items", "search_items", "get_item_history",
     # events
     "get_events", "get_trends",
     # dashboards
     "get_dashboards", "get_dashboard_detail", "find_host_dashboard",
-    # maintenance
-    "get_maintenance",
     # configuration / audit
     "get_audit_log",
-    # services / SLA
-    "get_services", "get_sla",
     # macros (read-only)
-    "get_host_macros", "get_global_macros",
-    # users / proxies / maps
-    "get_users", "get_proxies", "get_maps", "get_map_detail",
-    # alerts
-    "get_alerts",
+    "get_host_macros",
     # health basics
     "check_connection", "get_active_problems", "get_problem_age_buckets",
     "get_host_availability",
@@ -67,8 +66,10 @@ OPS_EXTRA: frozenset[str] = frozenset({
     "get_external_ip_history", "get_recovery_score",
     # extended health
     "get_agent_unreachable", "get_stale_servers", "get_stale_items",
-    # extended triggers / problems
+    # extended triggers / problems (incident-workflow tools demoted from
+    # core by ADR 025: zero usage there, native to ops)
     "get_trigger_timeline", "bulk_acknowledge",
+    "acknowledge_problem", "get_alerts",
     # traffic-side
     "detect_traffic_drops", "detect_traffic_anomalies", "get_traffic_report",
     "get_traffic_drop_timeline",
@@ -105,6 +106,9 @@ REPORTS_EXTRA: frozenset[str] = frozenset({
     "get_executive_dashboard", "get_month_over_month", "get_fleet_risk_score",
     "get_sla_dashboard", "get_report_snapshot", "get_peak_analysis",
     "get_product_audit", "get_predictive_alerts",
+    # single-host SLA query (demoted from core by ADR 025: zero usage there,
+    # native to reports)
+    "get_sla",
     # inventory
     "get_server_map", "get_product_summary", "get_server_load",
     "get_high_cpu_servers", "get_underloaded_servers",
