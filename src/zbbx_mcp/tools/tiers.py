@@ -66,6 +66,8 @@ OPS_EXTRA: frozenset[str] = frozenset({
     "detect_disruption_wave", "detect_loss_drift",
     # risk + impact
     "get_at_risk_hosts", "get_disruption_blast_radius",
+    # bulk diagnostic — fan-out diagnose_host across a target set / subnet
+    "bulk_diagnose", "diagnose_subnet",
     # external IP history
     "get_external_ip_history", "get_recovery_score",
     # extended health

@@ -2446,6 +2446,138 @@ class TestDiagnoseHostHelpers:
         assert v == "healthy"
 
 
+class TestBulkDiagnoseHelpers:
+    """Pure-helper tests for bulk_diagnose (#148)."""
+
+    def _facts(self, **overrides):
+        base = {
+            "host": "h1", "verdict": "healthy", "mode": "server",
+            "action": "no issues", "problems": [],
+            "agent_ping_val": 1, "agent_ping_age_min": 0.5,
+            "traffic_baseline_mbps": 200.0, "traffic_recent_mbps": 190.0,
+            "https_down": False, "https_age_h": None,
+        }
+        base.update(overrides)
+        return base
+
+    def test_primary_signal_healthy(self):
+        from zbbx_mcp.tools.diagnose import _verdict_primary_signal
+        assert _verdict_primary_signal(self._facts()) == "OK"
+
+    def test_primary_signal_down(self):
+        from zbbx_mcp.tools.diagnose import _verdict_primary_signal
+        f = self._facts(verdict="down")
+        assert "agent" in _verdict_primary_signal(f).lower()
+
+    def test_primary_signal_traffic_lost_shows_mbps(self):
+        from zbbx_mcp.tools.diagnose import _verdict_primary_signal
+        f = self._facts(
+            verdict="traffic_lost",
+            traffic_baseline_mbps=255.9, traffic_recent_mbps=2.3,
+        )
+        s = _verdict_primary_signal(f)
+        assert "256" in s and "2.3" in s
+
+    def test_primary_signal_https_down_shows_hours(self):
+        from zbbx_mcp.tools.diagnose import _verdict_primary_signal
+        f = self._facts(
+            verdict="https_down", mode="domain",
+            https_down=True, https_age_h=17.5,
+        )
+        assert "17" in _verdict_primary_signal(f)
+
+    def test_primary_signal_degraded_with_problems(self):
+        from zbbx_mcp.tools.diagnose import _verdict_primary_signal
+        f = self._facts(
+            verdict="degraded",
+            problems=[{"name": "x"}, {"name": "y"}, {"name": "z"}],
+        )
+        assert "3" in _verdict_primary_signal(f)
+
+    def test_render_bulk_table_empty(self):
+        from zbbx_mcp.tools.diagnose import _render_bulk_table
+        assert "No hosts" in _render_bulk_table([], 0)
+
+    def test_render_bulk_table_sorts_by_severity(self):
+        from zbbx_mcp.tools.diagnose import _render_bulk_table
+        rows = [
+            self._facts(host="ok-host", verdict="healthy"),
+            self._facts(host="dead-host", verdict="down"),
+            self._facts(host="slow-host", verdict="degraded"),
+            self._facts(host="lost-host", verdict="traffic_lost"),
+        ]
+        out = _render_bulk_table(rows, 4)
+        down_pos = out.find("dead-host")
+        traffic_pos = out.find("lost-host")
+        degraded_pos = out.find("slow-host")
+        healthy_pos = out.find("ok-host")
+        assert down_pos < traffic_pos < degraded_pos < healthy_pos
+
+    def test_render_bulk_table_counts_flagged(self):
+        from zbbx_mcp.tools.diagnose import _render_bulk_table
+        rows = [
+            self._facts(host="a", verdict="healthy"),
+            self._facts(host="b", verdict="down"),
+            self._facts(host="c", verdict="traffic_lost"),
+        ]
+        out = _render_bulk_table(rows, 3)
+        assert "2 flagged" in out
+
+    def test_render_bulk_table_truncates_long_action(self):
+        from zbbx_mcp.tools.diagnose import _render_bulk_table
+        rows = [self._facts(
+            verdict="traffic_lost",
+            action="a" * 200,
+        )]
+        out = _render_bulk_table(rows, 1)
+        assert "..." in out
+
+
+class TestSubnetMatcher:
+    """Pure-helper tests for diagnose_subnet (#149)."""
+
+    def test_slash_24_match(self):
+        from zbbx_mcp.tools.diagnose import _ip_matches_subnet
+        assert _ip_matches_subnet("10.1.2.5", "10.1.2.0/24") is True
+
+    def test_slash_24_no_match(self):
+        from zbbx_mcp.tools.diagnose import _ip_matches_subnet
+        assert _ip_matches_subnet("10.1.3.5", "10.1.2.0/24") is False
+
+    def test_slash_16_match(self):
+        from zbbx_mcp.tools.diagnose import _ip_matches_subnet
+        assert _ip_matches_subnet("10.1.42.99", "10.1.0.0/16") is True
+
+    def test_slash_16_no_match(self):
+        from zbbx_mcp.tools.diagnose import _ip_matches_subnet
+        assert _ip_matches_subnet("10.2.42.99", "10.1.0.0/16") is False
+
+    def test_dotted_prefix_match(self):
+        from zbbx_mcp.tools.diagnose import _ip_matches_subnet
+        assert _ip_matches_subnet("10.1.2.5", "10.1.2") is True
+        assert _ip_matches_subnet("10.1.2.5", "10.1.2.") is True
+
+    def test_dotted_prefix_no_match(self):
+        from zbbx_mcp.tools.diagnose import _ip_matches_subnet
+        assert _ip_matches_subnet("10.1.20.5", "10.1.2") is False
+
+    def test_empty_inputs(self):
+        from zbbx_mcp.tools.diagnose import _ip_matches_subnet
+        assert _ip_matches_subnet("", "10.1.2.0/24") is False
+        assert _ip_matches_subnet("10.1.2.5", "") is False
+
+    def test_unsupported_cidr_bits(self):
+        from zbbx_mcp.tools.diagnose import _ip_matches_subnet
+        # /28 etc. are not supported — return False (safer than wrong match)
+        assert _ip_matches_subnet("10.1.2.5", "10.1.2.0/28") is False
+
+    def test_malformed_cidr_does_not_crash(self):
+        from zbbx_mcp.tools.diagnose import _ip_matches_subnet
+        assert _ip_matches_subnet("10.1.2.5", "/24") is False
+        assert _ip_matches_subnet("10.1.2.5", "garbage/24") is False
+        assert _ip_matches_subnet("10.1.2.5", "10.1.2.0/abc") is False
+
+
 class TestAckActionBuilder:
     """Pure-helper tests for _build_ack_action (v1.8.3 acknowledge_problem extension)."""
 
