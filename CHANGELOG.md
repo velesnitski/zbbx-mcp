@@ -5,6 +5,34 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.8.3] - 2026-05-21
+
+### Added — Zabbix-version introspection
+- **`get_zabbix_version`** — wraps `apiinfo.version` and surfaces a
+  feature-availability matrix derived from the parsed version.
+  Operators (and the LLM client) can see at a glance which optional
+  APIs the connected server supports: API token API (5.4+),
+  unacknowledge / severity-change actions (6.0+), suppress /
+  unsuppress (5.2+), cause/symptom rank actions (6.4+), connector
+  API / proxy groups / HA cluster (7.0+). Lands in the `core` tier.
+  See ADR 027.
+
+### Changed — Enhanced acknowledge actions
+- **`acknowledge_problem`** and **`bulk_acknowledge`** now accept
+  two new optional params:
+  - `severity: int = -1` — change the problem severity (0-5) in the
+    same call. Maps to Zabbix `event.acknowledge` action bit 8.
+  - `unack: bool = False` — unacknowledge instead of acknowledge.
+    Maps to action bit 16 (mutually exclusive with the ack bit).
+  Existing callers are unaffected; the new params default to no-op.
+  The action-bitmask computation is now a pure helper
+  (`_build_ack_action`) with 8 dedicated unit tests.
+
+### Tooling
+- 158 tools across 55 modules.
+- 421 tests (16 new for pure-helpers: `_build_ack_action` +
+  `_parse_zabbix_version` + `_feature_matrix`).
+
 ## [1.8.2] - 2026-05-21
 
 ### Added — Composite diagnostic

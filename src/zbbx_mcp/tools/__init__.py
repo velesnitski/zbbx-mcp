@@ -239,6 +239,7 @@ ALL_TOOLS: frozenset[str] = frozenset({
     "get_unknown_providers",
     "get_users",
     "get_web_scenario_status",
+    "get_zabbix_version",
     "get_web_scenarios",
     "identify_providers",
     "import_cluster_ip_fees",
