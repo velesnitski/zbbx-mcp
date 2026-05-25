@@ -2428,6 +2428,47 @@ class TestDiagnoseHostHelpers:
         )
         assert v == "healthy"
 
+    def test_verdict_agent_age_5min_boundary_mutation_sentinel(self):
+        """Mutation sentinel — pins the agent-age threshold's strict-greater semantics.
+
+        ``_classify_verdict`` marks an agent unreachable when
+        ``agent_ping_age_min > 5``. The 5-minute constant is a load-bearing
+        threshold: it gates every server-mode diagnosis. This test fixes
+        three boundary points around it so any off-by-one mutation
+        (``> 5`` → ``>= 5``, ``> 4``, ``> 6``, etc.) shows up as a test
+        failure rather than silently misclassifying healthy hosts as
+        degraded on every run.
+
+        Pairing each boundary point with healthy traffic + healthy
+        agent.ping isolates the age check — the only path to a non-
+        ``healthy`` verdict here goes through the age clause.
+        """
+        from zbbx_mcp.tools.diagnose import _classify_verdict
+
+        common: dict = dict(
+            mode="server",
+            agent_ping_val=1,
+            traffic_baseline_mbps=200.0,
+            traffic_recent_mbps=180.0,
+            open_problems=0,
+            https_down=False,
+            https_age_h=None,
+        )
+
+        # Just below the boundary — must stay healthy.
+        v, _ = _classify_verdict(agent_ping_age_min=4.99, **common)
+        assert v == "healthy", "4.99m must be healthy; catches `> 4` mutations"
+
+        # Exactly at the boundary — must NOT flip (strict-greater).
+        # The off-by-one trap: `>= 5` would mark every host at exactly
+        # 5min ago as degraded — high-volume false positive.
+        v, _ = _classify_verdict(agent_ping_age_min=5.00, **common)
+        assert v == "healthy", "5.00m exactly must stay healthy; catches `>= 5` mutations"
+
+        # Just above — must flip to degraded.
+        v, _ = _classify_verdict(agent_ping_age_min=5.01, **common)
+        assert v == "degraded", "5.01m must mark agent unreachable; catches `> 6` mutations"
+
     def test_verdict_traffic_below_5mbps_baseline_not_flagged_as_traffic_lost(self):
         from zbbx_mcp.tools.diagnose import _classify_verdict
 
