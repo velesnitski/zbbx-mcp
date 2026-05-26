@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.8.8] - 2026-05-26
+
+### Security
+- **Bumped three transitive dependencies past CVE-required minimums**
+  via `uv lock --upgrade-package`:
+  - `python-multipart` 0.0.26 → 0.0.29 (CVE-2026-42561, High)
+  - `urllib3` 2.6.3 → 2.7.0 (CVE-2026-44432, CVE-2026-44431, High)
+  - `idna` 3.11 → 3.16 (CVE-2026-45409, Moderate)
+- Lockfile-only change; no source edits, no API change. See
+  ADR 031.
+
 ## [1.8.7] - 2026-05-26
 
 ### Added — `redact_partial` flag on `get_cost_summary`
