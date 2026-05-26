@@ -5,6 +5,29 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.9.0] - 2026-05-26
+
+### Fixed — Outage-cluster dedupe by canonical host name
+- `get_outage_clusters` previously counted Zabbix sub-hosts of one
+  physical machine as separate "distinct hosts" when checking the
+  `min_hosts` threshold. A multi-VIP box throwing one problem on
+  each VIP could therefore satisfy a 3-host cluster gate while
+  actually being a single machine misbehaving — exactly the
+  false-positive shape ADR 032 fixed for cost tools.
+- Fix: new pure helper `_canonical_host_name()` in `correlation.py`
+  strips the `" <suffix>"` tail. `_cluster_problems()` now uses
+  canonical names in the `uniq_hosts` set and the `hosts` output
+  field, so the threshold check and the displayed cluster size
+  both reflect physical machines.
+- `get_host_floods` already canonicalised via `build_parent_map`;
+  this brings outage clusters to the same standard. See ADR 033.
+
+### Tooling
+- 471 tests (+6 new for `_cluster_problems` canonical fold:
+  parent + sub-hosts below threshold, distinct hosts still cluster,
+  mixed parents/subs counted correctly, sub-hosts only also fold,
+  canonical-name helper pass-through and strip).
+
 ## [1.8.9] - 2026-05-26
 
 ### Fixed — Parent / sub-host double-count in cost tools

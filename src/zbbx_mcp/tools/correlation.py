@@ -118,6 +118,17 @@ def _find_idle_relays(
     return out
 
 
+def _canonical_host_name(name: str) -> str:
+    """Return the canonical parent name for a Zabbix host record.
+
+    Sub-hosts use ``"<parent> <suffix>"`` naming; the canonical name is
+    the first whitespace-delimited token. Standalone hosts pass through.
+    Used by cluster dedupe so a single physical machine with multiple
+    VIPs counts as one distinct host (ADR 032 / tasks.md #151).
+    """
+    return name.split(" ", 1)[0] if " " in name else name
+
+
 def _cluster_problems(
     records: list[dict],
     window_sec: int,
@@ -130,7 +141,9 @@ def _cluster_problems(
 
     Within each key, records are sorted by clock and grouped into maximal
     runs whose first→last span is ≤ window_sec. A run becomes a cluster only
-    when it covers ≥ min_hosts distinct hostids.
+    when it covers ≥ min_hosts distinct **canonical** hosts — sub-hosts of
+    one physical machine collapse to one entry so a multi-VIP box doesn't
+    falsely satisfy the threshold (tasks.md #151, ADR 033).
     """
     per_key: dict[str, list[dict]] = defaultdict(list)
     for r in records:
@@ -146,12 +159,12 @@ def _cluster_problems(
             while j + 1 < n and r_list[j + 1]["clock"] - r_list[i]["clock"] <= window_sec:
                 j += 1
             bucket = r_list[i:j + 1]
-            uniq_hosts = {r["hostid"] for r in bucket}
+            uniq_hosts = {_canonical_host_name(r["host"]) for r in bucket}
             if len(uniq_hosts) >= min_hosts:
                 clusters.append({
                     "key": key,
                     "host_count": len(uniq_hosts),
-                    "hosts": sorted({r["host"] for r in bucket}),
+                    "hosts": sorted(uniq_hosts),
                     "start": bucket[0]["clock"],
                     "end": bucket[-1]["clock"],
                     "events": len(bucket),

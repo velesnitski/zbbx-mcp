@@ -79,6 +79,7 @@ fixed headings (`## Problem`, `## Decision`, `## Test approach`,
 | [030](030-cost-summary-redact-partial.md) | `redact_partial` flag on `get_cost_summary` | Opt-in filter for externally-shared cost summaries — drops partial-coverage rows, recomputes the grand total, suppresses the "M without cost" line |
 | [031](031-cve-bumps-multipart-urllib3-idna.md) | CVE bumps: `python-multipart`, `urllib3`, `idna` | Lockfile-only bumps past CVE-required minimums for three transitive deps |
 | [032](032-canonical-host-groups-parent-fold.md) | `canonical_host_groups` parent fold | New `data.py` helper collapses parent + sub-hosts into one canonical group per physical machine (cost=MAX, traffic=SUM, cpu=MAX). Applied to `get_cost_efficiency`, `get_cost_summary`, `get_cost_gaps` |
+| [033](033-cluster-dedupe-canonical-host-name.md) | Outage-cluster dedupe by canonical host name | `_cluster_problems` counts physical machines (canonical name), not raw hostids — multi-VIP boxes no longer falsely satisfy the cluster threshold |
 
 ## Writing a new ADR
 

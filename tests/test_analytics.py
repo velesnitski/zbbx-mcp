@@ -2972,3 +2972,77 @@ class TestCanonicalHostGroups:
         assert groups[0]["traffic"] == 0.0
         assert groups[0]["cost"] is None
         assert groups[0]["cpu"] is None
+
+
+class TestClusterCanonicalDedupe:
+    """Pure-helper tests for _cluster_problems canonical-host fold (ADR 033)."""
+
+    def _record(self, hostid: str, host: str, clock: int = 100, key: str = "k"):
+        return {
+            "clock": clock, "hostid": hostid, "host": host,
+            "name": "Service down", "severity": 4, "key": key,
+        }
+
+    def test_one_parent_plus_subhosts_does_not_pass_threshold(self):
+        from zbbx_mcp.tools.correlation import _cluster_problems
+        # Single physical machine with three VIPs. Naming: parent + " " + suffix.
+        # Pre-fold this would pass min_hosts=3; post-fold it must not (canonical=1).
+        records = [
+            self._record("1", "parent01", clock=100),
+            self._record("2", "parent01 v1", clock=101),
+            self._record("3", "parent01 v2", clock=102),
+            self._record("4", "parent01 v3", clock=103),
+        ]
+        clusters = _cluster_problems(records, window_sec=60, min_hosts=3)
+        assert clusters == []
+
+    def test_three_distinct_hosts_still_form_cluster(self):
+        from zbbx_mcp.tools.correlation import _cluster_problems
+        # No sub-hosts; the threshold should still fire normally.
+        records = [
+            self._record("1", "host-a", clock=100),
+            self._record("2", "host-b", clock=101),
+            self._record("3", "host-c", clock=102),
+        ]
+        clusters = _cluster_problems(records, window_sec=60, min_hosts=3)
+        assert len(clusters) == 1
+        assert clusters[0]["host_count"] == 3
+        assert clusters[0]["hosts"] == ["host-a", "host-b", "host-c"]
+
+    def test_mixed_parents_and_subhosts(self):
+        from zbbx_mcp.tools.correlation import _cluster_problems
+        # Two distinct hosts plus one parent-with-two-subs.
+        # Canonical count = 3; threshold should fire.
+        records = [
+            self._record("1", "host-a", clock=100),
+            self._record("2", "host-b", clock=101),
+            self._record("3", "parent01", clock=102),
+            self._record("4", "parent01 v1", clock=103),
+            self._record("5", "parent01 v2", clock=104),
+        ]
+        clusters = _cluster_problems(records, window_sec=60, min_hosts=3)
+        assert len(clusters) == 1
+        # The hosts list shows canonical names (parent appears once, not three times)
+        assert clusters[0]["host_count"] == 3
+        assert set(clusters[0]["hosts"]) == {"host-a", "host-b", "parent01"}
+
+    def test_subhosts_only_without_parent_still_dedupe_to_canonical(self):
+        from zbbx_mcp.tools.correlation import _cluster_problems
+        # If only sub-hosts of one machine are in the bucket (parent record
+        # not present), the canonical-name fold still collapses them.
+        records = [
+            self._record("1", "parent02 v1", clock=100),
+            self._record("2", "parent02 v2", clock=101),
+            self._record("3", "parent02 v3", clock=102),
+            self._record("4", "parent02 v4", clock=103),
+        ]
+        clusters = _cluster_problems(records, window_sec=60, min_hosts=3)
+        assert clusters == []  # 1 canonical host < 3
+
+    def test_canonical_name_helper_passes_through_standalone(self):
+        from zbbx_mcp.tools.correlation import _canonical_host_name
+        assert _canonical_host_name("host-a") == "host-a"
+
+    def test_canonical_name_helper_strips_suffix(self):
+        from zbbx_mcp.tools.correlation import _canonical_host_name
+        assert _canonical_host_name("parent01 v1") == "parent01"
