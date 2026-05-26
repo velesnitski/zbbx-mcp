@@ -17,10 +17,12 @@ from zbbx_mcp.data import (
     KEY_service_SECONDARY,
     KEY_service_TERTIARY,
     build_value_map,
+    canonical_host_name,
     extract_country,
     fetch_cpu_map,
     fetch_enabled_hosts,
     fetch_traffic_map,
+    fold_rows_by_canonical_host,
     group_by_country,
     host_ip,
 )
@@ -161,6 +163,13 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
 
                 rows.sort(key=lambda r: (r["service1"] or 100))
 
+                # Fold sub-hosts to canonical (tasks.md #152): one physical
+                # machine = one row. Worst-wins: rows already sorted by
+                # service1 uptime ascending, so the first occurrence per
+                # canonical is the worst sub-host. fold_rows_by_canonical_host
+                # keeps the first occurrence.
+                rows = fold_rows_by_canonical_host(rows, name_key="host")
+
                 # Filter and limit
                 total_all = len(rows)
                 healthy_count = sum(1 for r in rows if r["overall"] == "HEALTHY")
@@ -291,17 +300,40 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
 
                 for ctry in sorted(countries):
                     hs = countries[ctry]
-                    hids = [h["hostid"] for h in hs]
-                    total = len(hids)
+                    # Fold sub-hosts to canonical groups (tasks.md #152): the
+                    # per-country counts are about physical machines. A
+                    # group is "up" only when EVERY sub-host is up (worst
+                    # wins) — i.e. a single failing sub-host marks the
+                    # whole box as down for this metric.
+                    canonical_groups: dict[str, list[str]] = {}
+                    for h in hs:
+                        cn = canonical_host_name(h.get("host", ""))
+                        canonical_groups.setdefault(cn, []).append(h["hostid"])
+                    total = len(canonical_groups)
 
-                    # "Up" = check returned 1 OR server has real traffic (traffic-validated)
-                    service1_up = sum(1 for hid in hids if service1_map.get(hid) == 1 or hid in active_by_traffic)
-                    service2_up = sum(1 for hid in hids if service2_map.get(hid) == 1 or hid in active_by_traffic)
-                    service3_up = sum(1 for hid in hids if service3_map.get(hid, 0) >= 1 or hid in active_by_traffic)
-
-                    service1_checked = sum(1 for hid in hids if hid in service1_map)
-                    service2_checked = sum(1 for hid in hids if hid in service2_map)
-                    service3_checked = sum(1 for hid in hids if hid in service3_map)
+                    # "Up" = every sub-host in the group has the check returning 1
+                    # (or a sub-host has real traffic, traffic-validation fallback).
+                    # Worst-wins: a single failing sub-host marks the whole
+                    # canonical group as down for this metric.
+                    service1_up = 0
+                    service2_up = 0
+                    service3_up = 0
+                    service1_checked = 0
+                    service2_checked = 0
+                    service3_checked = 0
+                    for group_ids in canonical_groups.values():
+                        if all(service1_map.get(hid) == 1 or hid in active_by_traffic for hid in group_ids):
+                            service1_up += 1
+                        if all(service2_map.get(hid) == 1 or hid in active_by_traffic for hid in group_ids):
+                            service2_up += 1
+                        if all((service3_map.get(hid) or 0) >= 1 or hid in active_by_traffic for hid in group_ids):
+                            service3_up += 1
+                        if any(hid in service1_map for hid in group_ids):
+                            service1_checked += 1
+                        if any(hid in service2_map for hid in group_ids):
+                            service2_checked += 1
+                        if any(hid in service3_map for hid in group_ids):
+                            service3_checked += 1
 
                     def _status(up: int, checked: int) -> str:
                         if checked == 0:

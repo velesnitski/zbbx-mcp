@@ -80,6 +80,7 @@ fixed headings (`## Problem`, `## Decision`, `## Test approach`,
 | [031](031-cve-bumps-multipart-urllib3-idna.md) | CVE bumps: `python-multipart`, `urllib3`, `idna` | Lockfile-only bumps past CVE-required minimums for three transitive deps |
 | [032](032-canonical-host-groups-parent-fold.md) | `canonical_host_groups` parent fold | New `data.py` helper collapses parent + sub-hosts into one canonical group per physical machine (cost=MAX, traffic=SUM, cpu=MAX). Applied to `get_cost_efficiency`, `get_cost_summary`, `get_cost_gaps` |
 | [033](033-cluster-dedupe-canonical-host-name.md) | Outage-cluster dedupe by canonical host name | `_cluster_problems` counts physical machines (canonical name), not raw hostids — multi-VIP boxes no longer falsely satisfy the cluster threshold |
+| [034](034-canonical-fold-service-check-tools.md) | Canonical-name fold for service-check tools | `canonical_host_name` promoted to `data.py`; new `fold_rows_by_canonical_host` helper; applied to `generate_service_brief`, `detect_regional_anomalies`, `get_service_uptime_report`, `get_service_health_matrix` |
 
 ## Writing a new ADR
 

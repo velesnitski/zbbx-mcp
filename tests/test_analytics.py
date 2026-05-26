@@ -3040,9 +3040,85 @@ class TestClusterCanonicalDedupe:
         assert clusters == []  # 1 canonical host < 3
 
     def test_canonical_name_helper_passes_through_standalone(self):
-        from zbbx_mcp.tools.correlation import _canonical_host_name
-        assert _canonical_host_name("host-a") == "host-a"
+        from zbbx_mcp.data import canonical_host_name
+        assert canonical_host_name("host-a") == "host-a"
 
     def test_canonical_name_helper_strips_suffix(self):
-        from zbbx_mcp.tools.correlation import _canonical_host_name
-        assert _canonical_host_name("parent01 v1") == "parent01"
+        from zbbx_mcp.data import canonical_host_name
+        assert canonical_host_name("parent01 v1") == "parent01"
+
+
+class TestFoldRowsByCanonicalHost:
+    """Pure-helper tests for fold_rows_by_canonical_host (ADR 034)."""
+
+    def test_no_subhosts_passes_through(self):
+        from zbbx_mcp.data import fold_rows_by_canonical_host
+        rows = [
+            {"host": "host-a", "uptime": 99.0},
+            {"host": "host-b", "uptime": 50.0},
+        ]
+        out = fold_rows_by_canonical_host(rows, name_key="host")
+        # Both rows preserved; no sub_count field added.
+        assert len(out) == 2
+        names = {r["host"] for r in out}
+        assert names == {"host-a", "host-b"}
+        assert all("sub_count" not in r for r in out)
+
+    def test_subhosts_collapse_first_occurrence_wins(self):
+        from zbbx_mcp.data import fold_rows_by_canonical_host
+        rows = [
+            {"host": "parent01", "uptime": 99.0},
+            {"host": "parent01 v1", "uptime": 50.0},
+            {"host": "parent01 v2", "uptime": 70.0},
+        ]
+        out = fold_rows_by_canonical_host(rows, name_key="host")
+        assert len(out) == 1
+        # First occurrence kept (the parent row at 99.0%)
+        assert out[0]["host"] == "parent01"
+        assert out[0]["uptime"] == 99.0
+        assert out[0]["sub_count"] == 2
+
+    def test_sort_key_makes_worst_win(self):
+        from zbbx_mcp.data import fold_rows_by_canonical_host
+        # Sort ascending by uptime → lowest uptime first → it wins after dedup.
+        rows = [
+            {"host": "parent01", "uptime": 99.0},
+            {"host": "parent01 v1", "uptime": 50.0},
+            {"host": "parent01 v2", "uptime": 70.0},
+        ]
+        out = fold_rows_by_canonical_host(
+            rows, name_key="host",
+            sort_key=lambda r: r["uptime"],
+        )
+        assert len(out) == 1
+        assert out[0]["uptime"] == 50.0
+        assert out[0]["host"] == "parent01"  # rewritten to canonical
+        assert out[0]["sub_count"] == 2
+
+    def test_mixed_subhosts_and_distinct_hosts(self):
+        from zbbx_mcp.data import fold_rows_by_canonical_host
+        rows = [
+            {"host": "host-a", "v": 1},
+            {"host": "parent01", "v": 2},
+            {"host": "parent01 v1", "v": 3},
+            {"host": "host-b", "v": 4},
+        ]
+        out = fold_rows_by_canonical_host(rows, name_key="host")
+        names = {r["host"] for r in out}
+        assert names == {"host-a", "parent01", "host-b"}
+        # Only parent01 has a sub_count
+        sub_counts = {r["host"]: r.get("sub_count") for r in out}
+        assert sub_counts["parent01"] == 1
+        assert sub_counts["host-a"] is None
+        assert sub_counts["host-b"] is None
+
+    def test_alternate_name_key(self):
+        from zbbx_mcp.data import fold_rows_by_canonical_host
+        # The helper should accept any key field, not just "host"
+        rows = [
+            {"server_name": "parent01 v1", "x": 1},
+            {"server_name": "parent01 v2", "x": 2},
+        ]
+        out = fold_rows_by_canonical_host(rows, name_key="server_name")
+        assert len(out) == 1
+        assert out[0]["server_name"] == "parent01"
