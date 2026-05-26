@@ -2763,3 +2763,105 @@ class TestZabbixVersionHelpers:
         assert feats["Proxy groups (proxygroup.get)"] is True
         assert feats["HA cluster API (core.ha.get)"] is True
 
+
+class TestCostSummaryRedactPartial:
+    """Pure-helper tests for the redact_partial flag on get_cost_summary (#150)."""
+
+    def _fixture(self):
+        # Two products: ProdA fully priced, ProdB partial (4 of 5 priced).
+        # Two providers: ProvX fully priced, ProvY partial (3 of 4 priced).
+        prod_costs = {
+            "ProdA / t1": {"count": 3, "total": 300.0},
+            "ProdB / t1": {"count": 4, "total": 800.0},
+        }
+        prov_costs = {
+            "ProvX": {"count": 3, "total": 300.0},
+            "ProvY": {"count": 3, "total": 600.0},
+        }
+        prod_totals = {"ProdA / t1": 3, "ProdB / t1": 5}
+        prov_totals = {"ProvX": 3, "ProvY": 4}
+        return dict(
+            prod_costs=prod_costs, prov_costs=prov_costs,
+            prod_totals=prod_totals, prov_totals=prov_totals,
+            costed=7, total_hosts=8,
+        )
+
+    def test_default_preserves_full_output(self):
+        from zbbx_mcp.tools.costs_summary import _render_cost_summary
+        out = _render_cost_summary(**self._fixture(), redact_partial=False)
+        # Grand total includes both products
+        assert "$1,100.00/month" in out
+        # The "Servers with cost" line is present
+        assert "Servers with cost: 7 | Without: 1" in out
+        # Both product rows present
+        assert "ProdA / t1" in out
+        assert "ProdB / t1" in out
+        # Both provider rows present
+        assert "ProvX" in out
+        assert "ProvY" in out
+        # No footer
+        assert "Filtered to fully-attributed lines" not in out
+
+    def test_redact_drops_partial_product_row(self):
+        from zbbx_mcp.tools.costs_summary import _render_cost_summary
+        out = _render_cost_summary(**self._fixture(), redact_partial=True)
+        # Partial product gone, fully-priced kept
+        assert "ProdA / t1" in out
+        assert "ProdB / t1" not in out
+
+    def test_redact_drops_partial_provider_row(self):
+        from zbbx_mcp.tools.costs_summary import _render_cost_summary
+        out = _render_cost_summary(**self._fixture(), redact_partial=True)
+        assert "ProvX" in out
+        assert "ProvY" not in out
+
+    def test_redact_recomputes_grand_total_from_kept_rows(self):
+        from zbbx_mcp.tools.costs_summary import _render_cost_summary
+        out = _render_cost_summary(**self._fixture(), redact_partial=True)
+        # Only ProdA (the kept row) contributes: $300/mo, $3,600/yr
+        assert "$300.00/month" in out
+        assert "$3,600.00/year" in out
+        # The stale $1,100 from default mode must not appear
+        assert "$1,100.00" not in out
+
+    def test_redact_suppresses_without_line(self):
+        from zbbx_mcp.tools.costs_summary import _render_cost_summary
+        out = _render_cost_summary(**self._fixture(), redact_partial=True)
+        assert "Servers with cost" not in out
+        assert "Without:" not in out
+
+    def test_redact_appends_footer(self):
+        from zbbx_mcp.tools.costs_summary import _render_cost_summary
+        out = _render_cost_summary(**self._fixture(), redact_partial=True)
+        assert "Filtered to fully-attributed lines" in out
+
+    def test_redact_with_no_priced_data_yields_zero_total(self):
+        from zbbx_mcp.tools.costs_summary import _render_cost_summary
+        # All groups partial — nothing survives.
+        out = _render_cost_summary(
+            prod_costs={"P / t": {"count": 1, "total": 50.0}},
+            prov_costs={"Q": {"count": 1, "total": 50.0}},
+            prod_totals={"P / t": 2},  # 2 total, 1 priced → partial
+            prov_totals={"Q": 2},
+            costed=1, total_hosts=2,
+            redact_partial=True,
+        )
+        assert "$0.00/month" in out
+        # The footer still goes on so the caller knows redaction was active.
+        assert "Filtered to fully-attributed lines" in out
+
+    def test_unknown_key_in_totals_defaults_to_kept(self):
+        from zbbx_mcp.tools.costs_summary import _render_cost_summary
+        # A product appears in costs but not in totals (defensive: classify
+        # drift between the two passes). Default behaviour: keep the row
+        # rather than silently drop it.
+        out = _render_cost_summary(
+            prod_costs={"Orphan / t": {"count": 1, "total": 100.0}},
+            prov_costs={"P": {"count": 1, "total": 100.0}},
+            prod_totals={},
+            prov_totals={"P": 1},
+            costed=1, total_hosts=1,
+            redact_partial=True,
+        )
+        assert "Orphan / t" in out
+

@@ -5,6 +5,28 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.8.7] - 2026-05-26
+
+### Added — `redact_partial` flag on `get_cost_summary`
+- New optional `redact_partial: bool = False` arg. When True, drops
+  per-product and per-provider rows where some servers in the group
+  have no `{$COST_MONTH}` macro set, recomputes the grand total from
+  the kept rows, suppresses the "Servers with cost / Without" line,
+  and appends a footer marking the output as filtered. Intended for
+  externally-shared artifacts (board decks, partner readouts) where
+  partial-coverage metadata is a finding about process maturity
+  rather than the metric the audience wants. Default is unchanged:
+  internal callers see the full breakdown.
+- Renderer extracted into a pure helper `_render_cost_summary` for
+  testability. See ADR 030.
+
+### Tooling
+- 456 tests (+8 new for `_render_cost_summary` covering: default
+  preserves full output, redact drops partial product/provider rows,
+  recomputes grand total, suppresses the "Without" line, appends
+  footer, handles all-partial edge case, defensive keep-on-missing
+  for keys absent from the totals map).
+
 ## [1.8.6] - 2026-05-21
 
 ### Fixed

@@ -11,15 +11,97 @@ from zbbx_mcp.data import host_ip
 from zbbx_mcp.resolver import InstanceResolver
 
 
+def _render_cost_summary(
+    *,
+    prod_costs: dict[str, dict],
+    prov_costs: dict[str, dict],
+    prod_totals: dict[str, int],
+    prov_totals: dict[str, int],
+    costed: int,
+    total_hosts: int,
+    redact_partial: bool = False,
+) -> str:
+    """Render the get_cost_summary markdown report.
+
+    When ``redact_partial`` is True (intended for externally-shared
+    artifacts), filter both the per-product and per-provider tables
+    to keep only rows where every server in that group has a cost
+    macro set. The grand total is recomputed from the kept product
+    rows, the "Servers with cost / Without" line is suppressed, and
+    a footer flags that the output was filtered.
+
+    Pure helper — testable without a Zabbix server.
+    """
+    if redact_partial:
+        prod_view = {
+            k: v for k, v in prod_costs.items()
+            if v["count"] == prod_totals.get(k, v["count"])
+        }
+        prov_view = {
+            k: v for k, v in prov_costs.items()
+            if v["count"] == prov_totals.get(k, v["count"])
+        }
+        grand_total = sum(v["total"] for v in prod_view.values())
+    else:
+        prod_view = prod_costs
+        prov_view = prov_costs
+        grand_total = sum(v["total"] for v in prod_costs.values())
+
+    parts = [
+        f"**Cost Summary: ${grand_total:,.2f}/month "
+        f"(${grand_total * 12:,.2f}/year)**",
+    ]
+    if not redact_partial:
+        parts.append(f"Servers with cost: {costed} | Without: {total_hosts - costed}")
+    parts.extend([
+        "",
+        "## By Product",
+        "| Product / Tier | Servers | Cost/Month | Cost/Year |",
+        "|---|---|---|---|",
+    ])
+    for key in sorted(prod_view, key=lambda x: -prod_view[x]["total"]):
+        p = prod_view[key]
+        parts.append(
+            f"| {key} | {p['count']} | ${p['total']:,.2f} | ${p['total'] * 12:,.2f} |"
+        )
+
+    parts.extend([
+        "",
+        "## By Provider",
+        "| Provider | Servers | Cost/Month | Cost/Year |",
+        "|---|---|---|---|",
+    ])
+    for prov in sorted(prov_view, key=lambda x: -prov_view[x]["total"]):
+        p = prov_view[prov]
+        parts.append(
+            f"| {prov} | {p['count']} | ${p['total']:,.2f} | ${p['total'] * 12:,.2f} |"
+        )
+
+    if redact_partial:
+        parts.extend(["", "*Filtered to fully-attributed lines.*"])
+    return "\n".join(parts)
+
+
 def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> None:
 
     if "get_cost_summary" not in skip:
 
         @mcp.tool()
-        async def get_cost_summary(instance: str = "") -> str:
+        async def get_cost_summary(
+            redact_partial: bool = False,
+            instance: str = "",
+        ) -> str:
             """Get a summary of server costs from {$COST_MONTH} macros.
 
             Args:
+                redact_partial: When True, drop product/provider rows
+                    where some servers in the group have no cost data.
+                    Recomputes the grand total from kept rows and
+                    suppresses the "Servers without cost" datapoint.
+                    Intended for externally-shared artifacts (board
+                    decks, partner readouts) where partial-coverage
+                    metadata reveals process maturity rather than the
+                    metric the audience cares about. Default: False.
                 instance: Zabbix instance name (optional, for multi-instance setups)
             """
             try:
@@ -49,10 +131,9 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     except (ValueError, TypeError):
                         pass
 
-                # Aggregate by product and provider
+                # Aggregate priced servers by product and provider
                 prod_costs: dict[str, dict] = {}
                 prov_costs: dict[str, dict] = {}
-
                 for hid, cost in cost_map.items():
                     h = host_map.get(hid)
                     if not h:
@@ -70,33 +151,28 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     pv["count"] += 1
                     pv["total"] += cost
 
-                total = sum(cost_map.values())
-                costed = len(cost_map)
-                uncosted = len(hosts) - costed
+                # Total server counts per group (priced + unpriced).
+                # Only consumed when redact_partial fires, but cheap to
+                # always compute and keeps render-side logic uniform.
+                prod_totals: dict[str, int] = {}
+                prov_totals: dict[str, int] = {}
+                for h in hosts:
+                    prod, tier = _classify_host(h.get("groups", []))
+                    ip = host_ip(h)
+                    provider = detect_provider(ip) if ip else "No IP"
+                    pkey = f"{prod} / {tier}"
+                    prod_totals[pkey] = prod_totals.get(pkey, 0) + 1
+                    prov_totals[provider] = prov_totals.get(provider, 0) + 1
 
-                parts = [
-                    f"**Cost Summary: ${total:,.2f}/month (${total * 12:,.2f}/year)**",
-                    f"Servers with cost: {costed} | Without: {uncosted}",
-                    "",
-                    "## By Product",
-                    "| Product / Tier | Servers | Cost/Month | Cost/Year |",
-                    "|---|---|---|---|",
-                ]
-                for key in sorted(prod_costs, key=lambda x: -prod_costs[x]["total"]):
-                    p = prod_costs[key]
-                    parts.append(f"| {key} | {p['count']} | ${p['total']:,.2f} | ${p['total']*12:,.2f} |")
-
-                parts.extend([
-                    "",
-                    "## By Provider",
-                    "| Provider | Servers | Cost/Month | Cost/Year |",
-                    "|---|---|---|---|",
-                ])
-                for prov in sorted(prov_costs, key=lambda x: -prov_costs[x]["total"]):
-                    p = prov_costs[prov]
-                    parts.append(f"| {prov} | {p['count']} | ${p['total']:,.2f} | ${p['total']*12:,.2f} |")
-
-                return "\n".join(parts)
+                return _render_cost_summary(
+                    prod_costs=prod_costs,
+                    prov_costs=prov_costs,
+                    prod_totals=prod_totals,
+                    prov_totals=prov_totals,
+                    costed=len(cost_map),
+                    total_hosts=len(hosts),
+                    redact_partial=redact_partial,
+                )
             except (httpx.HTTPError, ValueError) as e:
                 return f"Error: {e}"
 

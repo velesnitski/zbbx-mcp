@@ -76,6 +76,7 @@ fixed headings (`## Problem`, `## Decision`, `## Test approach`,
 | [027](027-zabbix-version-introspection-and-ack-action-bits.md) | Version introspection + extended ack actions | `get_zabbix_version` with feature matrix; `acknowledge_problem` gains `severity` + `unack` action bits |
 | [028](028-bulk-and-subnet-diagnosis.md) | `bulk_diagnose` + `diagnose_subnet` | Fan-out `diagnose_host` across a target set (hosts / group / country) or a CIDR; one compact table per call |
 | [029](029-tags-deps-and-anomaly-triggers.md) | Tag filtering, dependency surfacing, anomaly-trigger discovery | `parse_tag_filter` plumbed into 4 tools; `with_dependencies` flag on `get_triggers`; new `get_anomaly_triggers` for Zabbix 6.4 native time-series triggers |
+| [030](030-cost-summary-redact-partial.md) | `redact_partial` flag on `get_cost_summary` | Opt-in filter for externally-shared cost summaries — drops partial-coverage rows, recomputes the grand total, suppresses the "M without cost" line |
 
 ## Writing a new ADR
 
