@@ -5,6 +5,47 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.8.9] - 2026-05-26
+
+### Fixed — Parent / sub-host double-count in cost tools
+- New shared helper `canonical_host_groups()` in `data.py` collapses
+  parent + sub-host Zabbix records into one canonical group per
+  physical machine. Aggregation rules:
+  - **cost = MAX** across the group (sub-host `{$COST_MONTH}` macros
+    typically duplicate the parent's bill — summing inflated spend).
+  - **traffic = SUM** across the group (each VIP has its own
+    interface).
+  - **cpu = MAX** across the group (worst-case across VIPs).
+- Three cost tools now iterate canonical groups instead of raw
+  hosts:
+  - `get_cost_efficiency` — the "Waste" list, by-country, and
+    by-provider tables no longer multiply per-VIP. Waste rows
+    annotate sub-host count: `parent (+N sub)`.
+  - `get_cost_summary` — server counts in by-product and by-provider
+    tables now reflect physical machines.
+  - `get_cost_gaps` — "M without cost" counts physical machines, not
+    individual sub-host records.
+- See ADR 032.
+
+### Deferred (queued for v1.9.0)
+- `get_shutdown_candidates` — two-pipeline (candidates + cohorts)
+  plus three metrics (cpu/traffic/service); fold takes a separate
+  pass.
+- `bulk_diagnose` / `diagnose_subnet` — sub-host rows currently
+  dilute the table.
+- `detect_traffic_drops` / `detect_traffic_anomalies` /
+  `get_traffic_report` — drop counts inflate by sub-host count.
+- `get_high_cpu_servers` / `get_underloaded_servers` /
+  `get_low_disk_servers` / `get_low_memory_servers` /
+  `get_stale_servers` — current inheritance pattern is correct but
+  rows still over-count sub-hosts.
+
+### Tooling
+- 465 tests (+9 new for `canonical_host_groups`: standalone, parent
+  + sub-fold, cost=MAX, traffic=SUM, cpu=MAX, cost=None when
+  unpriced, mixed standalone/sub, orphan sub-host, malformed values
+  ignored).
+
 ## [1.8.8] - 2026-05-26
 
 ### Security

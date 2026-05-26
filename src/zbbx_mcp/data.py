@@ -139,6 +139,90 @@ def build_parent_map(hosts: list[dict]) -> dict[str, str]:
                 parent_map[h["hostid"]] = pid
     return parent_map
 
+def canonical_host_groups(
+    hosts: list[dict],
+    *,
+    traffic_map: dict[str, float] | None = None,
+    cost_map: dict[str, float] | None = None,
+    cpu_map: dict[str, float] | None = None,
+) -> list[dict]:
+    """Collapse parent + sub-hosts into one canonical group per physical machine.
+
+    A "sub-host" is a Zabbix host whose name is ``"<parent> <suffix>"``
+    (handled by ``build_parent_map``). For per-host aggregators that
+    answer "how many physical machines?" / "what does the box cost?" /
+    "is this box idle?", iterating the raw host list double-counts.
+
+    Returns one dict per canonical group:
+
+      ``rep_host``    — parent host dict (or the host itself when standalone).
+      ``sub_count``   — number of sub-hosts collapsed into this group.
+      ``sub_hosts``   — sub-host dicts (empty for standalone).
+      ``all_hostids`` — every hostid (parent + sub-hosts) in this group.
+      ``traffic``     — SUM across the group; each sub-host has its own
+                        interface, so traffic per VIP adds up.
+      ``cost``        — MAX across the group; sub-host ``{$COST_MONTH}``
+                        macros typically duplicate the parent's bill,
+                        so summing them inflates spend. ``None`` if no
+                        sub-host carries a cost macro.
+      ``cpu``         — MAX across the group; worst-case CPU across VIPs.
+
+    Metric kwargs are independent — pass only the maps the caller needs.
+    Aggregation rules per tasks.md #150 (2026-05-26).
+    Pure function: no Zabbix calls.
+    """
+    parent_map = build_parent_map(hosts)
+    host_by_id = {h["hostid"]: h for h in hosts}
+
+    groups: dict[str, dict] = {}
+    for h in hosts:
+        hid = h["hostid"]
+        canonical = parent_map.get(hid, hid)
+        if canonical not in groups:
+            rep = host_by_id.get(canonical, h)
+            groups[canonical] = {
+                "rep_host": rep,
+                "sub_count": 0,
+                "sub_hosts": [],
+                "all_hostids": [],
+                "traffic": 0.0,
+                "cost": None,
+                "cpu": None,
+            }
+        g = groups[canonical]
+        g["all_hostids"].append(hid)
+        if canonical != hid:
+            g["sub_count"] += 1
+            g["sub_hosts"].append(h)
+        if traffic_map is not None:
+            try:
+                g["traffic"] += float(traffic_map.get(hid, 0) or 0)
+            except (ValueError, TypeError):
+                pass
+        if cost_map is not None:
+            v = cost_map.get(hid)
+            if v is not None:
+                try:
+                    val = float(v)
+                except (ValueError, TypeError):
+                    val = None
+                if val is not None:
+                    cur = g["cost"]
+                    g["cost"] = val if cur is None else max(cur, val)
+        if cpu_map is not None:
+            v = cpu_map.get(hid)
+            if v is not None:
+                try:
+                    val = float(v)
+                except (ValueError, TypeError):
+                    val = None
+                if val is not None:
+                    cur = g["cpu"]
+                    g["cpu"] = val if cur is None else max(cur, val)
+
+    return list(groups.values())
+
+
 def _resolve(metric_map: dict, hid: str, parent_map: dict[str, str]):
     """Get metric for host, falling back to parent if missing."""
     val = metric_map.get(hid)

@@ -78,6 +78,7 @@ fixed headings (`## Problem`, `## Decision`, `## Test approach`,
 | [029](029-tags-deps-and-anomaly-triggers.md) | Tag filtering, dependency surfacing, anomaly-trigger discovery | `parse_tag_filter` plumbed into 4 tools; `with_dependencies` flag on `get_triggers`; new `get_anomaly_triggers` for Zabbix 6.4 native time-series triggers |
 | [030](030-cost-summary-redact-partial.md) | `redact_partial` flag on `get_cost_summary` | Opt-in filter for externally-shared cost summaries — drops partial-coverage rows, recomputes the grand total, suppresses the "M without cost" line |
 | [031](031-cve-bumps-multipart-urllib3-idna.md) | CVE bumps: `python-multipart`, `urllib3`, `idna` | Lockfile-only bumps past CVE-required minimums for three transitive deps |
+| [032](032-canonical-host-groups-parent-fold.md) | `canonical_host_groups` parent fold | New `data.py` helper collapses parent + sub-hosts into one canonical group per physical machine (cost=MAX, traffic=SUM, cpu=MAX). Applied to `get_cost_efficiency`, `get_cost_summary`, `get_cost_gaps` |
 
 ## Writing a new ADR
 
