@@ -139,6 +139,64 @@ def build_parent_map(hosts: list[dict]) -> dict[str, str]:
                 parent_map[h["hostid"]] = pid
     return parent_map
 
+def canonical_host_name(name: str) -> str:
+    """Return the canonical parent name for a Zabbix host record.
+
+    Sub-hosts use ``"<parent> <suffix>"`` naming; the canonical name is
+    the first whitespace-delimited token. Standalone hosts pass through.
+
+    Pure helper — used by the cluster, service-check, and traffic-anomaly
+    dedup paths so a single physical machine with multiple sub-hosts
+    counts as one row (ADR 033 / tasks.md #151 / #152).
+    """
+    return name.split(" ", 1)[0] if " " in name else name
+
+
+def fold_rows_by_canonical_host(
+    rows: list[dict],
+    name_key: str = "host",
+    sort_key=None,
+) -> list[dict]:
+    """Dedupe a list of row dicts by canonical parent name.
+
+    If ``sort_key`` is provided, sorts ``rows`` first (ascending) and
+    then keeps the FIRST occurrence of each canonical name — use this
+    when "worst wins" by picking a sort key that places the worst row
+    first (e.g. lowest uptime %, lowest service-up count). Without
+    ``sort_key``, keeps the first occurrence in input order.
+
+    Each kept row gets a ``sub_count`` field set to the number of
+    additional sub-hosts collapsed into it (omitted when zero). The
+    ``name_key`` field on the kept row is rewritten to the canonical
+    name so downstream rendering shows one row per physical machine.
+
+    Pure helper — used by service-check and regional-anomaly tools
+    (tasks.md #152).
+    """
+    if sort_key is not None:
+        rows = sorted(rows, key=sort_key)
+
+    seen: dict[str, dict] = {}
+    counts: dict[str, int] = {}
+    for r in rows:
+        name = r.get(name_key, "")
+        canonical = canonical_host_name(name)
+        if canonical in seen:
+            counts[canonical] += 1
+            continue
+        seen[canonical] = r
+        counts[canonical] = 0
+
+    out: list[dict] = []
+    for canonical, row in seen.items():
+        kept = dict(row)
+        kept[name_key] = canonical
+        if counts[canonical]:
+            kept["sub_count"] = counts[canonical]
+        out.append(kept)
+    return out
+
+
 def canonical_host_groups(
     hosts: list[dict],
     *,

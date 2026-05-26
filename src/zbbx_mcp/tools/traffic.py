@@ -8,7 +8,14 @@ import httpx
 
 from zbbx_mcp.classify import classify_host as _classify_host
 from zbbx_mcp.classify import detect_provider
-from zbbx_mcp.data import KEY_CONNECTIONS, TRAFFIC_IN_KEYS, countries_for_region, extract_country, host_ip
+from zbbx_mcp.data import (
+    KEY_CONNECTIONS,
+    TRAFFIC_IN_KEYS,
+    countries_for_region,
+    extract_country,
+    fold_rows_by_canonical_host,
+    host_ip,
+)
 from zbbx_mcp.resolver import InstanceResolver
 
 
@@ -221,6 +228,14 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 # Sort: CRITICAL first, then HIGH, then MEDIUM
                 sev_order = {"CRITICAL": 0, "HIGH": 1, "MEDIUM": 2}
                 all_anomalies.sort(key=lambda a: (sev_order.get(a["severity"], 3), -a["peer_median_mbps"]))
+
+                # Fold sub-hosts to canonical (tasks.md #152): one physical
+                # machine = one anomaly row. Sort above places worst severity
+                # first; fold_rows_by_canonical_host keeps the first occurrence
+                # per canonical name, so the worst sub-host wins.
+                all_anomalies = fold_rows_by_canonical_host(
+                    all_anomalies, name_key="host",
+                )
 
                 # Format output
                 parts = []

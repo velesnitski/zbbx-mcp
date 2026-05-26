@@ -5,6 +5,40 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.9.1] - 2026-05-26
+
+### Fixed — Parent / sub-host fold in service-check tools
+- Four tools that count "failing servers" from service-check items
+  were summing one row per Zabbix host. Multi-record physical
+  machines therefore inflated the count, the same shape that
+  ADR 032 fixed for cost tools and ADR 033 fixed for outage
+  clusters.
+- New shared helpers in `data.py`:
+  - `canonical_host_name(name)` — promoted from `correlation.py`
+    to be the single primitive used by every per-host fold.
+  - `fold_rows_by_canonical_host(rows, name_key, sort_key)` —
+    dedupes a row list by canonical name, keeps first / sorted-
+    first occurrence, annotates `sub_count`.
+- Tools refactored to use canonical fold at the main count site:
+  - `generate_service_brief` — per-check failing-server lists
+    collapse sub-hosts; "Servers Failing" totals reflect physical
+    machines.
+  - `detect_regional_anomalies` — anomaly table sorted worst
+    severity first, then folded to canonical (worst sub-host
+    wins).
+  - `get_service_uptime_report` — per-host rows sorted by
+    primary-check uptime ascending, then folded (lowest uptime
+    sub-host wins).
+  - `get_service_health_matrix` — per-country counts now iterate
+    canonical groups; a group is "up" for a check only when every
+    sub-host is up (or any sub-host is traffic-validated).
+- See ADR 034.
+
+### Tooling
+- 471 tests → 476 (+5 new for `fold_rows_by_canonical_host`:
+  pass-through, sub-host collapse with first-occurrence kept,
+  sort-key picks worst, mixed standalone/sub, alternate name key).
+
 ## [1.9.0] - 2026-05-26
 
 ### Fixed — Outage-cluster dedupe by canonical host name

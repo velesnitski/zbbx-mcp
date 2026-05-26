@@ -20,6 +20,7 @@ from zbbx_mcp.data import (
     KEY_service_SECONDARY,
     KEY_service_TERTIARY,
     build_value_map,
+    canonical_host_name,
     extract_country,
     fetch_enabled_hosts,
     fetch_traffic_map,
@@ -249,6 +250,17 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 for key, val in checks.items():
                     if val == 0:  # DOWN
                         blocked_by_check.setdefault(key, []).append((h["host"], cc, mbps))
+
+            # Fold sub-hosts to canonical names per check (tasks.md #152):
+            # one physical machine = one entry. Multiple sub-host failures
+            # on a single box should not inflate the "servers failing" count.
+            for key, items in blocked_by_check.items():
+                seen: dict[str, tuple[str, str, float]] = {}
+                for host, cc, mbps in items:
+                    cn = canonical_host_name(host)
+                    if cn not in seen:
+                        seen[cn] = (cn, cc, mbps)
+                blocked_by_check[key] = list(seen.values())
 
             # --- Blocking risk predictions: dropping traffic + failing checks
             # Apply idle filter (cpu_now >= IDLE_CPU_THRESHOLD) to skip standby servers
