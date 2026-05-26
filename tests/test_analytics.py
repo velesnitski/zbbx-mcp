@@ -2865,3 +2865,110 @@ class TestCostSummaryRedactPartial:
         )
         assert "Orphan / t" in out
 
+
+class TestCanonicalHostGroups:
+    """Pure-helper tests for canonical_host_groups (ADR 032)."""
+
+    def test_standalone_host_one_group(self):
+        from zbbx_mcp.data import canonical_host_groups
+        hosts = [{"hostid": "1", "host": "solo"}]
+        groups = canonical_host_groups(hosts)
+        assert len(groups) == 1
+        assert groups[0]["rep_host"]["host"] == "solo"
+        assert groups[0]["sub_count"] == 0
+        assert groups[0]["sub_hosts"] == []
+        assert groups[0]["all_hostids"] == ["1"]
+
+    def test_parent_with_subhosts_folds_to_one_group(self):
+        from zbbx_mcp.data import canonical_host_groups
+        # Parent "edge01" with five sub-hosts "edge01 v1".."edge01 v5"
+        hosts = [{"hostid": "1", "host": "edge01"}] + [
+            {"hostid": str(i + 2), "host": f"edge01 v{i + 1}"} for i in range(5)
+        ]
+        groups = canonical_host_groups(hosts)
+        assert len(groups) == 1
+        g = groups[0]
+        assert g["rep_host"]["host"] == "edge01"
+        assert g["sub_count"] == 5
+        assert sorted(g["all_hostids"]) == ["1", "2", "3", "4", "5", "6"]
+
+    def test_cost_uses_max_not_sum(self):
+        from zbbx_mcp.data import canonical_host_groups
+        # The bug we're fixing: 5 sub-hosts each at $280 → group cost = $280,
+        # not $1,400. Sub-host {$COST_MONTH} macros typically duplicate the
+        # parent's bill.
+        hosts = [{"hostid": "1", "host": "edge01"}] + [
+            {"hostid": str(i + 2), "host": f"edge01 v{i + 1}"} for i in range(5)
+        ]
+        cost_map = {str(i + 2): 280.0 for i in range(5)}  # only sub-hosts have macros
+        groups = canonical_host_groups(hosts, cost_map=cost_map)
+        assert len(groups) == 1
+        assert groups[0]["cost"] == 280.0
+
+    def test_traffic_uses_sum(self):
+        from zbbx_mcp.data import canonical_host_groups
+        # Each VIP has its own interface; group traffic adds across.
+        hosts = [{"hostid": "1", "host": "edge01"}] + [
+            {"hostid": str(i + 2), "host": f"edge01 v{i + 1}"} for i in range(3)
+        ]
+        traffic_map = {"2": 50.0, "3": 30.0, "4": 20.0}
+        groups = canonical_host_groups(hosts, traffic_map=traffic_map)
+        assert len(groups) == 1
+        assert groups[0]["traffic"] == 100.0
+
+    def test_cpu_uses_max(self):
+        from zbbx_mcp.data import canonical_host_groups
+        hosts = [{"hostid": "1", "host": "edge01"}] + [
+            {"hostid": str(i + 2), "host": f"edge01 v{i + 1}"} for i in range(3)
+        ]
+        cpu_map = {"1": 10.0, "2": 25.0, "3": 80.0, "4": 15.0}
+        groups = canonical_host_groups(hosts, cpu_map=cpu_map)
+        assert len(groups) == 1
+        assert groups[0]["cpu"] == 80.0
+
+    def test_cost_none_when_no_subhost_has_macro(self):
+        from zbbx_mcp.data import canonical_host_groups
+        hosts = [
+            {"hostid": "1", "host": "edge01"},
+            {"hostid": "2", "host": "edge01 v1"},
+        ]
+        groups = canonical_host_groups(hosts, cost_map={})
+        assert groups[0]["cost"] is None
+
+    def test_mixed_subhost_and_standalone(self):
+        from zbbx_mcp.data import canonical_host_groups
+        hosts = [
+            {"hostid": "1", "host": "edge01"},
+            {"hostid": "2", "host": "edge01 v1"},
+            {"hostid": "3", "host": "solo"},
+        ]
+        groups = canonical_host_groups(hosts)
+        # 2 groups: edge01 (with 1 sub) + solo
+        assert len(groups) == 2
+        by_rep = {g["rep_host"]["host"]: g for g in groups}
+        assert by_rep["edge01"]["sub_count"] == 1
+        assert by_rep["solo"]["sub_count"] == 0
+
+    def test_orphan_subhost_without_visible_parent_is_its_own_group(self):
+        from zbbx_mcp.data import canonical_host_groups
+        # A sub-host pattern but the parent isn't in the host list (e.g.
+        # filtered out upstream). build_parent_map only maps when both
+        # are present — so this host stands alone.
+        hosts = [{"hostid": "1", "host": "edge01 v1"}]
+        groups = canonical_host_groups(hosts)
+        assert len(groups) == 1
+        assert groups[0]["sub_count"] == 0
+
+    def test_malformed_metric_values_dont_crash(self):
+        from zbbx_mcp.data import canonical_host_groups
+        hosts = [{"hostid": "1", "host": "edge01"}]
+        # Defensive: bad strings, None — should be ignored gracefully.
+        groups = canonical_host_groups(
+            hosts,
+            traffic_map={"1": "not-a-number"},  # type: ignore[dict-item]
+            cost_map={"1": None},  # type: ignore[dict-item]
+            cpu_map={"1": "abc"},  # type: ignore[dict-item]
+        )
+        assert groups[0]["traffic"] == 0.0
+        assert groups[0]["cost"] is None
+        assert groups[0]["cpu"] is None

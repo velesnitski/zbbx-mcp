@@ -7,7 +7,7 @@ import asyncio
 
 import httpx
 
-from zbbx_mcp.data import host_ip
+from zbbx_mcp.data import canonical_host_groups, host_ip
 from zbbx_mcp.resolver import InstanceResolver
 
 
@@ -123,7 +123,6 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     }),
                 )
 
-                host_map = {h["hostid"]: h for h in hosts}
                 cost_map = {}
                 for m in macros:
                     try:
@@ -131,19 +130,32 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     except (ValueError, TypeError):
                         pass
 
-                # Aggregate priced servers by product and provider
+                # Fold parent + sub-hosts (tasks.md #150 2026-05-26).
+                # cost=MAX prevents over-counting the bill of a multi-VIP
+                # box; per-group server counts reflect physical machines.
+                groups = canonical_host_groups(hosts, cost_map=cost_map)
+
                 prod_costs: dict[str, dict] = {}
                 prov_costs: dict[str, dict] = {}
-                for hid, cost in cost_map.items():
-                    h = host_map.get(hid)
-                    if not h:
-                        continue
-                    prod, tier = _classify_host(h.get("groups", []))
-                    ip = host_ip(h)
+                prod_totals: dict[str, int] = {}
+                prov_totals: dict[str, int] = {}
+                costed = 0
+                for g in groups:
+                    rep = g["rep_host"]
+                    prod, tier = _classify_host(rep.get("groups", []))
+                    ip = host_ip(rep)
                     provider = detect_provider(ip) if ip else "No IP"
+                    pkey = f"{prod} / {tier}"
 
-                    key = f"{prod} / {tier}"
-                    p = prod_costs.setdefault(key, {"count": 0, "total": 0.0})
+                    prod_totals[pkey] = prod_totals.get(pkey, 0) + 1
+                    prov_totals[provider] = prov_totals.get(provider, 0) + 1
+
+                    cost = g["cost"]
+                    if cost is None:
+                        continue
+                    costed += 1
+
+                    p = prod_costs.setdefault(pkey, {"count": 0, "total": 0.0})
                     p["count"] += 1
                     p["total"] += cost
 
@@ -151,26 +163,13 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     pv["count"] += 1
                     pv["total"] += cost
 
-                # Total server counts per group (priced + unpriced).
-                # Only consumed when redact_partial fires, but cheap to
-                # always compute and keeps render-side logic uniform.
-                prod_totals: dict[str, int] = {}
-                prov_totals: dict[str, int] = {}
-                for h in hosts:
-                    prod, tier = _classify_host(h.get("groups", []))
-                    ip = host_ip(h)
-                    provider = detect_provider(ip) if ip else "No IP"
-                    pkey = f"{prod} / {tier}"
-                    prod_totals[pkey] = prod_totals.get(pkey, 0) + 1
-                    prov_totals[provider] = prov_totals.get(provider, 0) + 1
-
                 return _render_cost_summary(
                     prod_costs=prod_costs,
                     prov_costs=prov_costs,
                     prod_totals=prod_totals,
                     prov_totals=prov_totals,
-                    costed=len(cost_map),
-                    total_hosts=len(hosts),
+                    costed=costed,
+                    total_hosts=len(groups),
                     redact_partial=redact_partial,
                 )
             except (httpx.HTTPError, ValueError) as e:
@@ -208,26 +207,35 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     }),
                 )
 
-                has_cost = {m["hostid"] for m in macros}
-                total = len(hosts)
-                costed = sum(1 for h in hosts if h["hostid"] in has_cost)
+                # Treat each macro entry as a 1.0 cost so the helper marks the
+                # group as "priced" (we only need the boolean, not the value).
+                has_cost_map = {m["hostid"]: 1.0 for m in macros}
+
+                # Fold sub-hosts into canonical groups (tasks.md #150). The
+                # gap question is "how many physical boxes have no macro?",
+                # not "how many Zabbix records"; sub-hosts of a billed parent
+                # were inflating the missing-count.
+                groups = canonical_host_groups(hosts, cost_map=has_cost_map)
+                total = len(groups)
+                costed = sum(1 for g in groups if g["cost"] is not None)
 
                 gaps: dict[str, dict] = {}
                 no_ip = 0
-                for h in hosts:
-                    if h["hostid"] in has_cost:
+                for g in groups:
+                    if g["cost"] is not None:
                         continue
-                    ip = host_ip(h)
+                    rep = g["rep_host"]
+                    ip = host_ip(rep)
                     if not ip:
                         no_ip += 1
                         continue
-                    prod, tier = _classify_host(h.get("groups", []))
+                    prod, tier = _classify_host(rep.get("groups", []))
                     prov = detect_provider(ip)
                     key = f"{prov} / {prod}"
                     entry = gaps.setdefault(key, {"count": 0, "hosts": []})
                     entry["count"] += 1
                     if len(entry["hosts"]) < 3:
-                        entry["hosts"].append(h["host"])
+                        entry["hosts"].append(rep.get("host", ""))
 
                 lines = [
                     f"**Cost gaps: {total - costed} without cost** ({costed}/{total} covered)\n",
@@ -235,11 +243,11 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     "|-------------------|---------|-------------|",
                 ]
                 for key in sorted(gaps, key=lambda k: -gaps[k]["count"])[:max_results]:
-                    g = gaps[key]
-                    lines.append(f"| {key} | {g['count']} | {', '.join(g['hosts'])} |")
+                    g_entry = gaps[key]
+                    lines.append(f"| {key} | {g_entry['count']} | {', '.join(g_entry['hosts'])} |")
 
                 if no_ip:
-                    lines.append(f"\n*{no_ip} hosts without IP (monitoring) — no cost expected*")
+                    lines.append(f"\n*{no_ip} servers without IP (monitoring) — no cost expected*")
                 return "\n".join(lines)
             except (httpx.HTTPError, ValueError) as e:
                 return f"Error: {e}"
@@ -285,18 +293,30 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
 
                 traffic_map = await fetch_traffic_map(client, list(cost_map.keys()))
 
+                # Fold parent + sub-hosts into one canonical group per physical
+                # machine (tasks.md #150 2026-05-26). cost=MAX (sub-host macros
+                # duplicate the parent's bill); traffic=SUM (each VIP has its
+                # own interface). Iterating raw hosts here would over-count
+                # idle sub-hosts in the waste list and inflate $/Gbps totals.
+                groups = canonical_host_groups(
+                    hosts, traffic_map=traffic_map, cost_map=cost_map,
+                )
+
                 by_country: dict[str, dict] = {}
                 by_provider: dict[str, dict] = {}
                 waste = []
+                priced_groups = 0
 
-                for hid, cost in cost_map.items():
-                    h = next((x for x in hosts if x["hostid"] == hid), None)
-                    if not h:
+                for g in groups:
+                    cost = g["cost"]
+                    if cost is None:
                         continue
-                    traffic_mbps = traffic_map.get(hid, 0)
+                    priced_groups += 1
+                    rep = g["rep_host"]
+                    traffic_mbps = g["traffic"]
                     traffic_gbps = traffic_mbps / 1000
-                    cc = extract_country(h["host"])
-                    ip = host_ip(h)
+                    cc = extract_country(rep.get("host", ""))
+                    ip = host_ip(rep)
                     prov = detect_provider(ip) if ip else "?"
 
                     if cc:
@@ -311,9 +331,12 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     p["traffic"] += traffic_gbps
 
                     if traffic_mbps < 1 and cost > 50:
-                        waste.append((h["host"], cc, prov, cost))
+                        label = rep.get("host", "")
+                        if g["sub_count"]:
+                            label = f"{label} (+{g['sub_count']} sub)"
+                        waste.append((label, cc, prov, cost))
 
-                lines = [f"**Cost Efficiency** ({len(cost_map)} servers)\n"]
+                lines = [f"**Cost Efficiency** ({priced_groups} servers)\n"]
                 lines.append("**By Country (most expensive per Gbps first):**")
                 lines.append("| Country | Servers | $/mo | Gbps | $/Gbps |")
                 lines.append("|---------|---------|------|------|--------|")
