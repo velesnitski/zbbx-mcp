@@ -3122,3 +3122,73 @@ class TestFoldRowsByCanonicalHost:
         out = fold_rows_by_canonical_host(rows, name_key="server_name")
         assert len(out) == 1
         assert out[0]["server_name"] == "parent01"
+
+
+class TestExcelFills:
+    """Regression for the lazy-init Fill bug fixed in v1.9.2.
+
+    Before the fix, ``HEADER_FILL`` and friends were ``None`` at import
+    time and only rebound inside ``_init_openpyxl()``. Consumers doing
+    ``from zbbx_mcp.excel import HEADER_FILL`` captured the ``None``
+    binding, which then fired ``TypeError: expected
+    <class 'openpyxl.styles.fills.Fill'>`` during ``wb.save()`` —
+    Sentry issue ``dc717f4d`` against ``generate_full_report``.
+    """
+
+    def test_fills_are_pattern_fill_instances(self):
+        from openpyxl.styles import PatternFill
+
+        from zbbx_mcp.excel import (
+            DARK_RED_FILL,
+            GREEN_FILL,
+            HEADER_FILL,
+            LIGHT_GREEN_FILL,
+            ORANGE_FILL,
+            RED_FILL,
+        )
+        for fill in (HEADER_FILL, RED_FILL, ORANGE_FILL, GREEN_FILL,
+                     LIGHT_GREEN_FILL, DARK_RED_FILL):
+            assert isinstance(fill, PatternFill), (
+                f"{fill!r} should be a PatternFill, not {type(fill).__name__}"
+            )
+
+    def test_workbook_with_module_fills_saves(self):
+        import io
+
+        from openpyxl import Workbook
+
+        from zbbx_mcp.excel import (
+            DARK_RED_FILL,
+            GREEN_FILL,
+            HEADER_FILL,
+            LIGHT_GREEN_FILL,
+            ORANGE_FILL,
+            RED_FILL,
+        )
+        wb = Workbook()
+        ws = wb.active
+        for i, fill in enumerate(
+            (HEADER_FILL, RED_FILL, ORANGE_FILL, GREEN_FILL,
+             LIGHT_GREEN_FILL, DARK_RED_FILL),
+            start=1,
+        ):
+            c = ws.cell(row=i, column=1, value=str(i))
+            c.fill = fill
+        b = io.BytesIO()
+        wb.save(b)
+        assert len(b.getvalue()) > 0
+
+    def test_full_report_module_level_imports_resolve_to_fills(self):
+        # The specific failure mode: ``full_report.py`` does
+        # ``from zbbx_mcp.excel import HEADER_FILL, RED_FILL, ...`` at
+        # module level. After the fix those names must already point to
+        # PatternFill instances at import time.
+        from openpyxl.styles import PatternFill
+
+        from zbbx_mcp.tools import full_report
+        for name in ("RED_FILL", "GREEN_FILL", "ORANGE_FILL"):
+            val = getattr(full_report, name)
+            assert isinstance(val, PatternFill), (
+                f"full_report.{name} is {type(val).__name__}; "
+                f"lazy-init regression"
+            )

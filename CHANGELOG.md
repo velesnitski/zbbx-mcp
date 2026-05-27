@@ -5,6 +5,32 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.9.2] - 2026-05-27
+
+### Fixed — `generate_full_report` crash on save (Sentry dc717f4d)
+- `excel.py` used a lazy-init pattern: the module-level fill
+  constants (`HEADER_FILL`, `RED_FILL`, …) were `None` at import
+  time and only rebound inside `_init_openpyxl()`. Consumers doing
+  `from zbbx_mcp.excel import RED_FILL` at *their* module level
+  captured the `None` binding — the later rebind never propagated.
+- `full_report.py` was the one consumer using that import shape;
+  the others import openpyxl lazily inside functions and so always
+  saw a freshly-constructed fill.
+- Symptom: every `generate_full_report` call raised
+  `TypeError: expected <class 'openpyxl.styles.fills.Fill'>` from
+  `wb.save()` because the cell `.fill` descriptor received `None`.
+- Fix: removed `_init_openpyxl()`; module-level fills are now
+  constructed eagerly (openpyxl is a hard dependency anyway, so
+  the lazy-import saving was illusory). The other style-using
+  tools are unaffected.
+- See ADR 035.
+
+### Tooling
+- 476 tests → 479 (+3 new regression tests for the Fill
+  descriptor: module-level fills are PatternFill instances,
+  a workbook using each fill saves cleanly,
+  `full_report`'s module-level imports resolve to PatternFill).
+
 ## [1.9.1] - 2026-05-26
 
 ### Fixed — Parent / sub-host fold in service-check tools

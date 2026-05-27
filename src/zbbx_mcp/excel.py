@@ -1,10 +1,8 @@
-"""Shared Excel formatting utilities for all report modules.
-
-openpyxl is imported lazily — only when Excel functions are actually called.
-This saves ~15MB RAM for tools that never generate Excel reports.
-"""
+"""Shared Excel formatting utilities for all report modules."""
 
 from __future__ import annotations
+
+from openpyxl.styles import Border, Font, PatternFill, Side
 
 __all__ = [
     "BW_MAX", "BW_RED", "BW_ORANGE", "BW_GREEN",
@@ -13,36 +11,26 @@ __all__ = [
 ]
 
 
-def _init_openpyxl():
-    """Lazy-initialize openpyxl styles. Called once on first Excel operation."""
-    global HEADER_FONT, HEADER_FILL, BOLD_FONT
-    global RED_FILL, DARK_RED_FILL, DARK_RED_FONT, ORANGE_FILL
-    global GREEN_FILL, LIGHT_GREEN_FILL, THIN_BORDER
-    global _openpyxl_loaded
-
-    if _openpyxl_loaded:
-        return
-
-    from openpyxl.styles import Border, Font, PatternFill, Side
-
-    HEADER_FONT = Font(bold=True, color="FFFFFF", size=11)
-    HEADER_FILL = PatternFill(start_color="2F5496", end_color="2F5496", fill_type="solid")
-    BOLD_FONT = Font(bold=True)
-    RED_FILL = PatternFill(start_color="FFC7CE", end_color="FFC7CE", fill_type="solid")
-    DARK_RED_FILL = PatternFill(start_color="C00000", end_color="C00000", fill_type="solid")
-    DARK_RED_FONT = Font(color="FFFFFF", bold=True)
-    ORANGE_FILL = PatternFill(start_color="FFEB9C", end_color="FFEB9C", fill_type="solid")
-    GREEN_FILL = PatternFill(start_color="C6EFCE", end_color="C6EFCE", fill_type="solid")
-    LIGHT_GREEN_FILL = PatternFill(start_color="E2EFDA", end_color="E2EFDA", fill_type="solid")
-    THIN_BORDER = Border(bottom=Side(style="thin", color="D9D9D9"))
-    _openpyxl_loaded = True
-
-
-_openpyxl_loaded = False
-# Placeholders — replaced by _init_openpyxl() on first use
-HEADER_FONT = HEADER_FILL = BOLD_FONT = None
-RED_FILL = DARK_RED_FILL = DARK_RED_FONT = ORANGE_FILL = None
-GREEN_FILL = LIGHT_GREEN_FILL = THIN_BORDER = None
+# Module-level style constants.
+#
+# Previously these were lazy-initialised inside ``_init_openpyxl()`` with
+# the globals defaulting to ``None`` at import time. That broke any
+# consumer doing ``from zbbx_mcp.excel import RED_FILL`` at *its* module
+# level — the import captured the ``None`` binding, and the later rebind
+# inside ``_init_openpyxl()`` did not propagate. Bug fired in production
+# as ``TypeError: expected <class 'openpyxl.styles.fills.Fill'>`` from
+# ``generate_full_report``. Eager-init removes the entire class of bug;
+# openpyxl is a hard dependency anyway.
+HEADER_FONT = Font(bold=True, color="FFFFFF", size=11)
+HEADER_FILL = PatternFill(start_color="2F5496", end_color="2F5496", fill_type="solid")
+BOLD_FONT = Font(bold=True)
+RED_FILL = PatternFill(start_color="FFC7CE", end_color="FFC7CE", fill_type="solid")
+DARK_RED_FILL = PatternFill(start_color="C00000", end_color="C00000", fill_type="solid")
+DARK_RED_FONT = Font(color="FFFFFF", bold=True)
+ORANGE_FILL = PatternFill(start_color="FFEB9C", end_color="FFEB9C", fill_type="solid")
+GREEN_FILL = PatternFill(start_color="C6EFCE", end_color="C6EFCE", fill_type="solid")
+LIGHT_GREEN_FILL = PatternFill(start_color="E2EFDA", end_color="E2EFDA", fill_type="solid")
+THIN_BORDER = Border(bottom=Side(style="thin", color="D9D9D9"))
 
 
 
@@ -67,7 +55,6 @@ def classify_bandwidth(mbps: float | None) -> str:
 
 def bandwidth_fill(mbps: float | None) -> tuple:
     """Return (fill, font) for a traffic value."""
-    _init_openpyxl()
     if mbps is None:
         return None, None
     if mbps >= BW_MAX:
@@ -83,7 +70,6 @@ def bandwidth_fill(mbps: float | None) -> tuple:
 
 def cpu_fill(pct: float | None):
     """Return fill for a CPU usage value."""
-    _init_openpyxl()
     if pct is None:
         return None
     if pct >= 80:
@@ -98,7 +84,6 @@ def cpu_fill(pct: float | None):
 
 def write_headers(ws, headers: list[str]) -> None:
     """Write styled header row."""
-    _init_openpyxl()
     from openpyxl.styles import Alignment
     for col, h in enumerate(headers, 1):
         cell = ws.cell(row=1, column=col, value=h)
