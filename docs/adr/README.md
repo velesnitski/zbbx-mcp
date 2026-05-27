@@ -82,6 +82,7 @@ fixed headings (`## Problem`, `## Decision`, `## Test approach`,
 | [033](033-cluster-dedupe-canonical-host-name.md) | Outage-cluster dedupe by canonical host name | `_cluster_problems` counts physical machines (canonical name), not raw hostids — multi-VIP boxes no longer falsely satisfy the cluster threshold |
 | [034](034-canonical-fold-service-check-tools.md) | Canonical-name fold for service-check tools | `canonical_host_name` promoted to `data.py`; new `fold_rows_by_canonical_host` helper; applied to `generate_service_brief`, `detect_regional_anomalies`, `get_service_uptime_report`, `get_service_health_matrix` |
 | [035](035-eager-init-excel-fills.md) | Eager-init Excel fill constants | Drop lazy-init globals in `excel.py`; fixes `generate_full_report` crashing on `wb.save()` with `TypeError: expected Fill` (Sentry `dc717f4d`) |
+| [036](036-parent-fold-inventory-and-traffic-tools.md) | Parent / sub-host fold for inventory + traffic tools | Seven more aggregators dedupe by canonical name: `get_high_cpu_servers`, `get_underloaded_servers`, `get_low_disk_servers`, `get_low_memory_servers`, `get_stale_servers`, `detect_traffic_drops`, `get_traffic_report` (SUM semantic for the last) |
 
 ## Writing a new ADR
 

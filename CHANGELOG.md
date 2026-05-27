@@ -5,6 +5,36 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.9.3] - 2026-05-27
+
+### Fixed — Parent / sub-host fold in inventory + traffic tools
+- Seven more per-host aggregators now collapse sub-host records to
+  one canonical row each. Same bug shape ADRs 032 / 033 / 034
+  addressed for the cost, outage-cluster, and service-check
+  surfaces.
+- Tools refactored (each with the worst-wins sort that fits its
+  semantic):
+  - `get_high_cpu_servers` — highest CPU per canonical wins.
+  - `get_underloaded_servers` — lowest CPU per canonical wins.
+  - `get_low_disk_servers` — highest disk% per canonical wins.
+    Now fetches hostnames for **all** flagged hosts (not just top
+    N) so the fold runs before the truncate.
+  - `get_low_memory_servers` — lowest free memory per canonical
+    wins. Same upfront-fetch change.
+  - `get_stale_servers` — oldest last-data per canonical wins.
+  - `detect_traffic_drops` — biggest drop % per canonical wins
+    (via `fold_rows_by_canonical_host`).
+  - `get_traffic_report` — different semantics: traffic and
+    connections **SUM** across sub-hosts (each VIP has its own
+    interface and session counter); `bw_per_client` is recomputed
+    from the summed totals.
+- See ADR 036.
+
+### Tooling
+- 479 tests → 482 (+3 new pattern-sanity tests for the inline
+  fold loops: tuple worst-wins, hostid indirection with host_map
+  lookup, traffic-report SUM fold).
+
 ## [1.9.2] - 2026-05-27
 
 ### Fixed — `generate_full_report` crash on save (Sentry dc717f4d)

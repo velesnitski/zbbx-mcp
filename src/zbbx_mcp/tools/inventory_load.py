@@ -11,7 +11,12 @@ from zbbx_mcp.classify import (
 from zbbx_mcp.classify import (
     detect_provider,
 )
-from zbbx_mcp.data import TRAFFIC_IN_KEYS, build_parent_map, extract_country
+from zbbx_mcp.data import (
+    TRAFFIC_IN_KEYS,
+    build_parent_map,
+    canonical_host_name,
+    extract_country,
+)
 from zbbx_mcp.formatters import format_value
 from zbbx_mcp.resolver import InstanceResolver
 
@@ -255,6 +260,19 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()):
 
                 overloaded.sort(key=lambda x: -x[0])
 
+                # Fold parent + sub-hosts to canonical (ADR 036): one
+                # physical machine = one row. Sort above is desc by CPU, so
+                # the first occurrence per canonical is the worst sub-host.
+                seen_canonical: set[str] = set()
+                folded = []
+                for cpu, h in overloaded:
+                    cn = canonical_host_name(h.get("host", ""))
+                    if cn in seen_canonical:
+                        continue
+                    seen_canonical.add(cn)
+                    folded.append((cpu, h))
+                overloaded = folded
+
                 if not overloaded:
                     return f"No servers above {threshold}% CPU usage."
 
@@ -370,6 +388,20 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()):
                         underloaded.append((cpu_used, traffic, h))
 
                 underloaded.sort(key=lambda x: x[0])
+
+                # Fold parent + sub-hosts to canonical (ADR 036): one
+                # physical machine = one row. Sort above is asc by CPU,
+                # so the first occurrence per canonical is the worst
+                # (most-underloaded) sub-host.
+                seen_canonical: set[str] = set()
+                folded = []
+                for cpu, traffic, h in underloaded:
+                    cn = canonical_host_name(h.get("host", ""))
+                    if cn in seen_canonical:
+                        continue
+                    seen_canonical.add(cn)
+                    folded.append((cpu, traffic, h))
+                underloaded = folded
 
                 if not underloaded:
                     return f"No servers below {threshold}% CPU usage."
@@ -701,14 +733,30 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()):
                 if not flagged:
                     return f"No servers above {threshold}% disk usage."
 
-                hids = [hid for hid, _ in flagged[:max_results]]
+                # Fetch hostnames for ALL flagged (not just top max_results)
+                # so the canonical fold has the data it needs before we
+                # truncate. ADR 036: one physical machine = one row.
+                all_hids = [hid for hid, _ in flagged]
                 hosts = await client.call("host.get", {
-                    "hostids": hids,
+                    "hostids": all_hids,
                     "output": ["hostid", "host"],
                     "selectGroups": ["name"],
                     "selectInterfaces": ["ip"],
                 })
                 host_map = {h["hostid"]: h for h in hosts}
+
+                # Fold by canonical name (sort above is desc by pct, so the
+                # worst sub-host per canonical wins).
+                seen_canonical: set[str] = set()
+                folded = []
+                for hid, d in flagged:
+                    h = host_map.get(hid, {})
+                    cn = canonical_host_name(h.get("host", hid))
+                    if cn in seen_canonical:
+                        continue
+                    seen_canonical.add(cn)
+                    folded.append((hid, d))
+                flagged = folded
 
                 lines = [f"**{len(flagged)} servers above {threshold}% disk usage**\n"]
                 lines.append("| Host | Disk % | Mount | Product | Provider |")
@@ -775,14 +823,30 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()):
                 if not flagged:
                     return f"No servers below {threshold_gb} GB free memory."
 
-                hids = [hid for hid, _ in flagged[:max_results]]
+                # Fetch hostnames for ALL flagged so the canonical fold has
+                # the data it needs before truncating (ADR 036).
+                all_hids = [hid for hid, _ in flagged]
                 hosts = await client.call("host.get", {
-                    "hostids": hids,
+                    "hostids": all_hids,
                     "output": ["hostid", "host"],
                     "selectGroups": ["name"],
                     "selectInterfaces": ["ip"],
                 })
                 host_map = {h["hostid"]: h for h in hosts}
+
+                # Fold by canonical name. Sort above is asc by free memory
+                # (lowest first), so the first occurrence per canonical is
+                # the worst (most memory-starved) sub-host.
+                seen_canonical: set[str] = set()
+                folded = []
+                for hid, mem in flagged:
+                    h = host_map.get(hid, {})
+                    cn = canonical_host_name(h.get("host", hid))
+                    if cn in seen_canonical:
+                        continue
+                    seen_canonical.add(cn)
+                    folded.append((hid, mem))
+                flagged = folded
 
                 lines = [f"**{len(flagged)} servers below {threshold_gb} GB free**\n"]
                 lines.append("| Host | Free GB | Product | Provider |")

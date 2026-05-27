@@ -2,7 +2,7 @@ import time as _time
 
 import httpx
 
-from zbbx_mcp.data import fetch_traffic_map
+from zbbx_mcp.data import canonical_host_name, fetch_traffic_map
 from zbbx_mcp.formatters import normalize_problem_name
 from zbbx_mcp.resolver import InstanceResolver
 from zbbx_mcp.tag_filter import parse_tag_filter
@@ -374,6 +374,19 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     return f"All agents reported within {hours}h ({len(ping_map)} checked)."
 
                 stale.sort(key=lambda x: -x[2])
+
+                # Fold parent + sub-hosts to canonical (ADR 036): one
+                # physical machine = one row. Sort above is desc by age,
+                # so the oldest sub-host per canonical wins.
+                seen_canonical: set[str] = set()
+                folded = []
+                for host, ip, age_h in stale:
+                    cn = canonical_host_name(host)
+                    if cn in seen_canonical:
+                        continue
+                    seen_canonical.add(cn)
+                    folded.append((host, ip, age_h))
+                stale = folded
                 shown = stale[:max_results]
 
                 lines = [f"**{len(stale)} stale servers** (data > {hours}h old)\n"]
