@@ -3192,3 +3192,105 @@ class TestExcelFills:
                 f"full_report.{name} is {type(val).__name__}; "
                 f"lazy-init regression"
             )
+
+
+class TestInlineCanonicalFolds:
+    """Sanity checks for the inline canonical folds added in v1.9.3.
+
+    The seven tools (`get_high_cpu_servers`, `get_underloaded_servers`,
+    `get_low_disk_servers`, `get_low_memory_servers`, `get_stale_servers`,
+    `detect_traffic_drops`, `get_traffic_report`) each apply a small
+    dedup-by-canonical loop inline. The pattern is exercised in three
+    representative shapes here: a tuple list dedup, a (hid, value) tuple
+    dedup with host lookup, and a dict-list SUM fold (`get_traffic_report`
+    style).
+    """
+
+    def test_tuple_first_per_canonical_wins_after_sort(self):
+        """Pattern used by `get_high_cpu_servers` / `get_underloaded_servers`."""
+        from zbbx_mcp.data import canonical_host_name
+        # Three sub-hosts of one box plus one standalone host. Sort desc by
+        # value, then keep the first occurrence per canonical.
+        items = [
+            (95, {"host": "parent01 v1"}),
+            (90, {"host": "parent01 v2"}),
+            (80, {"host": "host-a"}),
+            (75, {"host": "parent01 v3"}),
+        ]
+        items.sort(key=lambda x: -x[0])
+        seen: set[str] = set()
+        folded = []
+        for val, h in items:
+            cn = canonical_host_name(h.get("host", ""))
+            if cn in seen:
+                continue
+            seen.add(cn)
+            folded.append((val, h))
+        assert len(folded) == 2
+        # parent01 group represented once (by its worst-wins occurrence at 95)
+        names = {h["host"] for _, h in folded}
+        canonical_names = {canonical_host_name(n) for n in names}
+        assert canonical_names == {"parent01", "host-a"}
+        # Worst value (95) is the surviving parent01 entry
+        parent_val = [v for v, h in folded if "parent01" in h["host"]][0]
+        assert parent_val == 95
+
+    def test_traffic_report_style_sum_fold(self):
+        """Pattern used by `get_traffic_report` — SUM across sub-hosts."""
+        from zbbx_mcp.data import canonical_host_name
+        rows = [
+            {"host": "parent01", "traffic": 100.0, "connections": 10},
+            {"host": "parent01 v1", "traffic": 50.0, "connections": 5},
+            {"host": "parent01 v2", "traffic": 30.0, "connections": 3},
+            {"host": "host-a", "traffic": 20.0, "connections": 2},
+        ]
+        canonical_rows: dict[str, dict] = {}
+        for r in rows:
+            cn = canonical_host_name(r["host"])
+            g = canonical_rows.get(cn)
+            if g is None:
+                canonical_rows[cn] = {**r, "host": cn}
+            else:
+                g["traffic"] += r["traffic"]
+                g["connections"] += r["connections"]
+                g["sub_count"] = g.get("sub_count", 0) + 1
+        for g in canonical_rows.values():
+            g["bw_per_client"] = (
+                g["traffic"] / g["connections"]
+                if g["connections"] > 0 else 0
+            )
+        out = list(canonical_rows.values())
+        assert len(out) == 2
+        by_host = {r["host"]: r for r in out}
+        # parent01 sums to 180 traffic, 18 connections
+        assert by_host["parent01"]["traffic"] == 180.0
+        assert by_host["parent01"]["connections"] == 18
+        assert by_host["parent01"]["sub_count"] == 2
+        assert by_host["parent01"]["bw_per_client"] == 10.0
+        # host-a passes through
+        assert by_host["host-a"]["traffic"] == 20.0
+        assert "sub_count" not in by_host["host-a"]
+
+    def test_hostid_indirection_dedup(self):
+        """Pattern used by `get_low_disk_servers` / `get_low_memory_servers`."""
+        from zbbx_mcp.data import canonical_host_name
+        host_map = {
+            "1": {"host": "parent01"},
+            "2": {"host": "parent01 v1"},
+            "3": {"host": "parent01 v2"},
+            "4": {"host": "host-a"},
+        }
+        # Already sorted worst-first (highest pct first)
+        flagged = [("1", 95), ("2", 90), ("3", 80), ("4", 70)]
+        seen: set[str] = set()
+        folded = []
+        for hid, val in flagged:
+            h = host_map.get(hid, {})
+            cn = canonical_host_name(h.get("host", hid))
+            if cn in seen:
+                continue
+            seen.add(cn)
+            folded.append((hid, val))
+        assert len(folded) == 2
+        # parent01 (worst at val=95) and host-a (val=70)
+        assert [v for _, v in folded] == [95, 70]

@@ -11,6 +11,7 @@ from zbbx_mcp.classify import detect_provider
 from zbbx_mcp.data import (
     KEY_CONNECTIONS,
     TRAFFIC_IN_KEYS,
+    canonical_host_name,
     countries_for_region,
     extract_country,
     fold_rows_by_canonical_host,
@@ -377,6 +378,29 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                         "bw_per_client": bw_per_client,
                     })
 
+                # Fold to canonical (ADR 036): one physical machine = one
+                # row. Traffic SUMs across sub-hosts (each VIP has its own
+                # interface); connections SUM (each VIP carries its own
+                # session count); bw_per_client is recomputed from the
+                # summed totals. The rep_host's product/provider stand in
+                # for the box.
+                canonical_rows: dict[str, dict] = {}
+                for r in rows:
+                    cn = canonical_host_name(r["host"])
+                    g = canonical_rows.get(cn)
+                    if g is None:
+                        canonical_rows[cn] = {**r, "host": cn}
+                    else:
+                        g["traffic"] += r["traffic"]
+                        g["connections"] += r["connections"]
+                        g["sub_count"] = g.get("sub_count", 0) + 1
+                for g in canonical_rows.values():
+                    g["bw_per_client"] = (
+                        g["traffic"] / g["connections"]
+                        if g["connections"] > 0 else 0
+                    )
+                rows = list(canonical_rows.values())
+
                 # Sort
                 if sort_by == "connections":
                     rows.sort(key=lambda r: -r["connections"])
@@ -562,6 +586,11 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                         })
 
                 drops.sort(key=lambda d: -d["drop_pct"])
+
+                # Fold sub-hosts to canonical (ADR 036): one physical
+                # machine = one row. Sort above is desc by drop%, so
+                # the biggest drop per canonical wins.
+                drops = fold_rows_by_canonical_host(drops, name_key="host")
                 drops = drops[:max_results]
 
                 analyzed = len(host_main_item) - sum(skips.values())
