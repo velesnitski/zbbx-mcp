@@ -10,6 +10,7 @@ from zbbx_mcp.classify import detect_provider
 from zbbx_mcp.data import (
     KEY_service_PRIMARY,
     build_parent_map,
+    canonical_host_name,
     extract_country,
     fetch_host_dashboards,
     fetch_service_status,
@@ -409,22 +410,60 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()):
                 for r in trend_rows:
                     host_metrics.setdefault(r.hostid, {})[r.metric] = r
 
-                candidates = []
+                # Pre-fold parent + sub-hosts to canonical groups (ADR 037):
+                # one physical machine = one candidate row. Metric rules
+                # mirror canonical_host_groups (ADR 032):
+                #   - cpu_avg     = MAX across the group (worst-case)
+                #   - traffic_avg = SUM across the group (each VIP has its
+                #                   own interface; per-VIP traffic adds)
+                #   - service     = WORST across the group (DOWN > PARTIAL > OK)
+                # Without this fold a single multi-VIP box surfaces as N
+                # separate DEAD/IDLE candidates — and the cohort headroom
+                # math below would also count it as N peers.
+                canonical_groups: dict[str, list[dict]] = {}
                 for h in filtered:
-                    hid = h["hostid"]
-                    hm = host_metrics.get(hid, {})
-                    cpu = hm.get("cpu")
-                    traffic = hm.get("traffic")
-                    service1_val = service1_map.get(hid)
-                    ip = host_ip(h)
+                    cn = canonical_host_name(h.get("host", ""))
+                    canonical_groups.setdefault(cn, []).append(h)
 
-                    cpu_avg = cpu.avg if cpu else None
-                    traffic_avg = traffic.avg if traffic else None
-                    service = "DOWN" if service1_val == 0 else ("PARTIAL" if service1_val == -1 else ("OK" if service1_val == 1 else ""))
+                def _pick_rep(hs: list[dict]) -> dict:
+                    """Pick the parent (space-free name) as group representative;
+                    fall back to the first sub-host if no parent in the set."""
+                    for h in hs:
+                        if " " not in h.get("host", ""):
+                            return h
+                    return hs[0]
 
+                candidates = []
+                for cn, hs in canonical_groups.items():
+                    rep = _pick_rep(hs)
+
+                    # Aggregate metrics across the group
+                    cpus_avg = []
+                    traffics_avg = []
+                    services = []
+                    for h in hs:
+                        hm = host_metrics.get(h["hostid"], {})
+                        if hm.get("cpu") is not None:
+                            cpus_avg.append(hm["cpu"].avg)
+                        if hm.get("traffic") is not None:
+                            traffics_avg.append(hm["traffic"].avg)
+                        if h["hostid"] in service1_map:
+                            services.append(service1_map[h["hostid"]])
+
+                    cpu_avg = max(cpus_avg) if cpus_avg else None
+                    traffic_avg = sum(traffics_avg) if traffics_avg else None
+                    if 0 in services:
+                        service = "DOWN"
+                    elif -1 in services:
+                        service = "PARTIAL"
+                    elif 1 in services:
+                        service = "OK"
+                    else:
+                        service = ""
+
+                    ip = host_ip(rep)
                     category = None
                     reason = ""
-
                     if traffic_avg is not None and traffic_avg < 1.0 and cpu_avg is not None and cpu_avg < 5.0:
                         category = "DEAD"
                         reason = f"Traffic {traffic_avg} Mbps, CPU {cpu_avg}%"
@@ -440,33 +479,49 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()):
                         reason = f"Traffic {traffic_avg} Mbps, CPU {cpu_avg}%"
 
                     if category:
-                        dash = dash_map.get(hid, "-")
+                        sub_count = len(hs) - 1
+                        display_host = cn + (f" (+{sub_count} sub)" if sub_count > 0 else "")
+                        dash = dash_map.get(rep["hostid"], "-")
                         candidates.append({
-                            "hostid": hid, "host": h["host"], "ip": ip,
+                            "hostid": rep["hostid"], "host": display_host, "ip": ip,
                             "category": category, "reason": reason,
-                            "country": extract_country(h.get("host", "")),
-                            "product": h.get("_prod", ""), "tier": h.get("_tier", ""),
+                            "country": extract_country(rep.get("host", "")),
+                            "product": rep.get("_prod", ""), "tier": rep.get("_tier", ""),
                             "provider": detect_provider(ip) if ip else "",
                             "cpu_avg": cpu_avg, "traffic_avg": traffic_avg, "service": service,
                             "dash": dash,
+                            "_canonical": cn,
+                            "_group_hostids": {h["hostid"] for h in hs},
                         })
 
                 if not candidates:
-                    return f"No shutdown candidates among {len(filtered)} servers."
+                    return f"No shutdown candidates among {len(canonical_groups)} servers."
 
                 # Peer-headroom check: can the cohort absorb each candidate's load?
-                # Cohort = same product+tier+country, excluding self AND other candidates.
-                candidate_ids = {c["hostid"] for c in candidates}
+                # Cohort = same product+tier+country, excluding self AND other
+                # candidate groups. Hosts in the cohort are also folded to
+                # canonical so peer count + headroom reflect physical machines.
+                candidate_hostids: set[str] = set()
+                for c in candidates:
+                    candidate_hostids |= c["_group_hostids"]
+
                 cohorts: dict[tuple[str, str, str], list[dict]] = {}
-                for h in filtered:
-                    if h["hostid"] in candidate_ids:
-                        continue  # peers must be live, not also-shutdown
-                    cc = extract_country(h.get("host", ""))
-                    key = (h.get("_prod", ""), h.get("_tier", ""), cc)
-                    traffic = host_metrics.get(h["hostid"], {}).get("traffic")
+                for hs in canonical_groups.values():
+                    if any(h["hostid"] in candidate_hostids for h in hs):
+                        continue
+                    rep = _pick_rep(hs)
+                    cc = extract_country(rep.get("host", ""))
+                    key = (rep.get("_prod", ""), rep.get("_tier", ""), cc)
+                    peaks = []
+                    avgs = []
+                    for h in hs:
+                        traffic = host_metrics.get(h["hostid"], {}).get("traffic")
+                        if traffic:
+                            peaks.append(traffic.peak)
+                            avgs.append(traffic.avg)
                     cohorts.setdefault(key, []).append({
-                        "peak": traffic.peak if traffic else None,
-                        "avg": traffic.avg if traffic else None,
+                        "peak": sum(peaks) if peaks else None,
+                        "avg": sum(avgs) if avgs else None,
                     })
                 for c in candidates:
                     cohort = cohorts.get((c["product"], c["tier"], c["country"]), [])
