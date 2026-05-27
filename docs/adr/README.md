@@ -83,6 +83,7 @@ fixed headings (`## Problem`, `## Decision`, `## Test approach`,
 | [034](034-canonical-fold-service-check-tools.md) | Canonical-name fold for service-check tools | `canonical_host_name` promoted to `data.py`; new `fold_rows_by_canonical_host` helper; applied to `generate_service_brief`, `detect_regional_anomalies`, `get_service_uptime_report`, `get_service_health_matrix` |
 | [035](035-eager-init-excel-fills.md) | Eager-init Excel fill constants | Drop lazy-init globals in `excel.py`; fixes `generate_full_report` crashing on `wb.save()` with `TypeError: expected Fill` (Sentry `dc717f4d`) |
 | [036](036-parent-fold-inventory-and-traffic-tools.md) | Parent / sub-host fold for inventory + traffic tools | Seven more aggregators dedupe by canonical name: `get_high_cpu_servers`, `get_underloaded_servers`, `get_low_disk_servers`, `get_low_memory_servers`, `get_stale_servers`, `detect_traffic_drops`, `get_traffic_report` (SUM semantic for the last) |
+| [037](037-shutdown-candidates-canonical-fold.md) | Parent / sub-host fold in `get_shutdown_candidates` | Pre-fold candidates + cohort headroom pipelines; CPU=MAX / traffic=SUM / service=WORST aggregation across canonical groups; fixes false-positive DEAD on multi-record boxes + inflated peer counts |
 
 ## Writing a new ADR
 

@@ -5,6 +5,32 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.9.4] - 2026-05-27
+
+### Fixed — Parent / sub-host fold in `get_shutdown_candidates`
+- `get_shutdown_candidates` now pre-folds sub-hosts into canonical
+  groups before classification. The previous per-Zabbix-host loop
+  could surface one multi-record physical machine as N separate
+  DEAD / ZOMBIE / BROKEN / IDLE candidates, **and** count its
+  sub-hosts as N peers in the cohort headroom math — inflating
+  both the candidate count and the apparent peer capacity.
+- Aggregation rules (mirroring ADR 032 conventions):
+  - `cpu_avg` = **MAX** across the group (worst-case CPU)
+  - `traffic_avg` = **SUM** across the group (each VIP has its
+    own interface)
+  - `service` = **WORST** across the group (DOWN > PARTIAL > OK)
+- The peer-headroom cohorts are also built from canonical groups
+  so capacity reflects physical machines. Cohort traffic peak +
+  avg also SUM across sub-hosts.
+- Display: candidate rows annotate `parent (+N sub)` when the
+  group has sub-hosts.
+- See ADR 037.
+
+### Tooling
+- 482 tests → 488 (+6 new metric-aggregation sanity tests:
+  CPU=MAX, traffic=SUM, service=WORST; the all-idle and
+  busy-sub-host-rescues-parent bug cases).
+
 ## [1.9.3] - 2026-05-27
 
 ### Fixed — Parent / sub-host fold in inventory + traffic tools

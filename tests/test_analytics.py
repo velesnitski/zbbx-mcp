@@ -3294,3 +3294,97 @@ class TestInlineCanonicalFolds:
         assert len(folded) == 2
         # parent01 (worst at val=95) and host-a (val=70)
         assert [v for _, v in folded] == [95, 70]
+
+
+class TestShutdownCandidateMetricFold:
+    """Sanity tests for the per-canonical metric aggregation pattern used
+    in `get_shutdown_candidates` (ADR 037).
+
+    cpu = MAX, traffic = SUM, service = WORST across a canonical group.
+    """
+
+    def _aggregate_group(self, hostids, metrics, service_map):
+        cpus_avg = []
+        traffics_avg = []
+        services = []
+        for hid in hostids:
+            hm = metrics.get(hid, {})
+            if hm.get("cpu") is not None:
+                cpus_avg.append(hm["cpu"])
+            if hm.get("traffic") is not None:
+                traffics_avg.append(hm["traffic"])
+            if hid in service_map:
+                services.append(service_map[hid])
+        cpu_avg = max(cpus_avg) if cpus_avg else None
+        traffic_avg = sum(traffics_avg) if traffics_avg else None
+        if 0 in services:
+            service = "DOWN"
+        elif -1 in services:
+            service = "PARTIAL"
+        elif 1 in services:
+            service = "OK"
+        else:
+            service = ""
+        return cpu_avg, traffic_avg, service
+
+    def test_cpu_max_traffic_sum_service_worst(self):
+        metrics = {
+            "1": {"cpu": 5, "traffic": 0.1},
+            "2": {"cpu": 75, "traffic": 50.0},
+            "3": {"cpu": 3, "traffic": 0.5},
+        }
+        services = {"1": 1, "2": 0, "3": 1}
+        cpu, traffic, service = self._aggregate_group(
+            ["1", "2", "3"], metrics, services,
+        )
+        assert cpu == 75
+        assert traffic == 50.6
+        assert service == "DOWN"
+
+    def test_all_idle_group_qualifies_as_dead(self):
+        # Bug-fix case: parent + sub-hosts all idle → one DEAD candidate.
+        metrics = {hid: {"cpu": 0.5, "traffic": 0.1} for hid in "12345"}
+        services = {hid: 1 for hid in "12345"}
+        cpu, traffic, service = self._aggregate_group(
+            list("12345"), metrics, services,
+        )
+        assert cpu == 0.5
+        assert traffic == 0.5
+        assert traffic < 1.0 and cpu < 5.0
+
+    def test_busy_subhost_rescues_parent_from_dead(self):
+        # Parent's own metrics zero but sub-host very busy → group should
+        # NOT qualify as DEAD (post-fold reality).
+        metrics = {
+            "parent": {"cpu": 0, "traffic": 0},
+            "sub1": {"cpu": 80, "traffic": 200.0},
+        }
+        services = {"parent": 1, "sub1": 1}
+        cpu, traffic, service = self._aggregate_group(
+            ["parent", "sub1"], metrics, services,
+        )
+        assert cpu == 80
+        assert traffic == 200.0
+        assert not (traffic < 1.0 and cpu < 5.0)
+        assert not (cpu > 50 and traffic < 1.0)
+        assert service != "DOWN"
+
+    def test_empty_metrics_returns_none(self):
+        cpu, traffic, service = self._aggregate_group([], {}, {})
+        assert cpu is None
+        assert traffic is None
+        assert service == ""
+
+    def test_partial_service_loses_to_down(self):
+        services = {"1": 1, "2": -1, "3": 0}
+        _, _, service = self._aggregate_group(
+            ["1", "2", "3"], {}, services,
+        )
+        assert service == "DOWN"
+
+    def test_partial_service_wins_over_ok(self):
+        services = {"1": 1, "2": -1, "3": 1}
+        _, _, service = self._aggregate_group(
+            ["1", "2", "3"], {}, services,
+        )
+        assert service == "PARTIAL"
