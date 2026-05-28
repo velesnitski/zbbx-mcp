@@ -5,6 +5,36 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.9.6] - 2026-05-28
+
+### Fixed — Pre-fold input list in `bulk_diagnose` / `diagnose_subnet`
+- Both tools shared `_run_bulk_diagnosis`, which ran
+  `_collect_diagnosis_inner` once per resolved Zabbix record.
+  Multi-record physical machines therefore surfaced as N
+  near-identical rows in the output table — same problem as
+  ADRs 032–037 but on the *input* side rather than the per-host
+  aggregator side.
+- Fix: new pure helper `_dedupe_records_by_canonical()` collapses
+  the input list to one record per canonical (physical) machine
+  before the fan-out. Representative selection prefers the parent
+  (host name with no space); falls back to the first sub-host
+  when the parent isn't in the resolved set. Returns a parallel
+  `sub_counts` map so each kept record knows how many sub-host
+  records were collapsed into it.
+- Rendering: each result row's `host` field is annotated
+  `parent (+N sub)` when the canonical group covered more than
+  one Zabbix record. Standalone hosts pass through unchanged.
+- The table header still reports the *original* (pre-dedup)
+  count for the "M of N host(s)" line, so operators can see at a
+  glance when the fold compressed many records.
+- See ADR 039.
+
+### Tooling
+- 488 tests → 493 (+5 new pure-helper tests for
+  `_dedupe_records_by_canonical`: pass-through, full parent +
+  sub fold, sub-host-only set falls back to first, mixed
+  standalone + groups, empty input).
+
 ## [1.9.5] - 2026-05-28
 
 ### Changed — Server name now carries the package version

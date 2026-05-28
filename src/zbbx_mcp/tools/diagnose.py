@@ -27,6 +27,7 @@ from zbbx_mcp.country import resolve_country
 from zbbx_mcp.data import (
     STATUS_ENABLED,
     TRAFFIC_IN_KEYS,
+    canonical_host_name,
     host_ip,
 )
 from zbbx_mcp.formatters import format_age, format_severity
@@ -432,6 +433,37 @@ def _render_bulk_table(rows: list[dict], total_targets: int) -> str:
     return "\n".join(header)
 
 
+def _dedupe_records_by_canonical(records: list[dict]) -> tuple[list[dict], dict[str, int]]:
+    """Collapse a host list to one record per canonical (physical) machine.
+
+    For each canonical group prefer the parent (host name without a space)
+    as the representative; fall back to the first record when no parent is
+    present in the resolved set. Returns ``(deduped_records, sub_counts)``
+    where ``sub_counts`` is keyed by canonical name with the number of
+    sub-host records collapsed into each kept record (0 when standalone).
+
+    Bulk diagnosis previously ran ``_collect_diagnosis_inner`` once per
+    Zabbix record; multi-record physical machines therefore showed up as
+    N near-identical rows in the output. Pre-dedup at the entry of
+    ``_run_bulk_diagnosis`` so the fan-out emits one row per box (ADR 039).
+    """
+    groups: dict[str, list[dict]] = {}
+    for r in records:
+        cn = canonical_host_name(r.get("host", ""))
+        groups.setdefault(cn, []).append(r)
+    deduped: list[dict] = []
+    sub_counts: dict[str, int] = {}
+    for cn, recs in groups.items():
+        rep = recs[0]
+        for r in recs:
+            if " " not in r.get("host", ""):
+                rep = r
+                break
+        deduped.append(rep)
+        sub_counts[cn] = len(recs) - 1
+    return deduped, sub_counts
+
+
 async def _run_bulk_diagnosis(
     client,
     records: list[dict],
@@ -442,12 +474,17 @@ async def _run_bulk_diagnosis(
 ) -> str:
     """Run diagnosis on a resolved host list and render the table.
 
-    Batches one item.get for all hosts at once, then fans out the
-    remaining per-host calls (problem.get, trend.get, auditlog.get)
-    with bounded concurrency.
+    Pre-folds the input list so parent + sub-host records collapse to one
+    diagnostic row per physical machine (ADR 039). Then batches one
+    item.get for the deduped set and fans out per-host calls with
+    bounded concurrency.
     """
     if not records:
         return "No hosts matched the target set."
+
+    original_count = len(records)
+    records, sub_counts = _dedupe_records_by_canonical(records)
+
     hostids = [r["hostid"] for r in records]
     all_items = await client.call("item.get", {
         "hostids": hostids,
@@ -471,7 +508,17 @@ async def _run_bulk_diagnosis(
             )
 
     results = await asyncio.gather(*[diagnose_one(r) for r in records])
-    return _render_bulk_table(results, len(records))
+
+    # Annotate each result with its sub-host count so the rendered table
+    # shows "parent (+N sub)" when the canonical group covered more than
+    # one Zabbix record.
+    for r in results:
+        cn = canonical_host_name(r.get("host", ""))
+        sub = sub_counts.get(cn, 0)
+        if sub > 0:
+            r["host"] = f"{r['host']} (+{sub} sub)"
+
+    return _render_bulk_table(results, original_count)
 
 
 async def _fetch_host_records(

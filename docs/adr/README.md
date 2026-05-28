@@ -85,6 +85,7 @@ fixed headings (`## Problem`, `## Decision`, `## Test approach`,
 | [036](036-parent-fold-inventory-and-traffic-tools.md) | Parent / sub-host fold for inventory + traffic tools | Seven more aggregators dedupe by canonical name: `get_high_cpu_servers`, `get_underloaded_servers`, `get_low_disk_servers`, `get_low_memory_servers`, `get_stale_servers`, `detect_traffic_drops`, `get_traffic_report` (SUM semantic for the last) |
 | [037](037-shutdown-candidates-canonical-fold.md) | Parent / sub-host fold in `get_shutdown_candidates` | Pre-fold candidates + cohort headroom pipelines; CPU=MAX / traffic=SUM / service=WORST aggregation across canonical groups; fixes false-positive DEAD on multi-record boxes + inflated peer counts |
 | [038](038-server-name-includes-version.md) | Server name carries the package version | `FastMCP("zabbix v{__version__}")` so Claude Code `/mcp` panel shows the running version; `__version__` derived from installed dist metadata |
+| [039](039-bulk-diagnose-prefold.md) | Pre-fold input host list in `bulk_diagnose` / `diagnose_subnet` | `_dedupe_records_by_canonical()` collapses parent + sub-hosts to one diagnostic row per physical machine before the fan-out; result rows annotated `parent (+N sub)` |
 
 ## Writing a new ADR
 

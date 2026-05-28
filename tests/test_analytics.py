@@ -3388,3 +3388,71 @@ class TestShutdownCandidateMetricFold:
             ["1", "2", "3"], {}, services,
         )
         assert service == "PARTIAL"
+
+
+class TestBulkDiagnosePreFold:
+    """Pure-helper tests for `_dedupe_records_by_canonical` (ADR 039).
+
+    Pre-fold of the input host list before bulk diagnose so the
+    fan-out emits one row per physical machine.
+    """
+
+    def test_standalone_hosts_pass_through(self):
+        from zbbx_mcp.tools.diagnose import _dedupe_records_by_canonical
+        records = [
+            {"hostid": "1", "host": "host-a"},
+            {"hostid": "2", "host": "host-b"},
+        ]
+        deduped, subs = _dedupe_records_by_canonical(records)
+        assert len(deduped) == 2
+        names = {r["host"] for r in deduped}
+        assert names == {"host-a", "host-b"}
+        assert all(c == 0 for c in subs.values())
+
+    def test_parent_plus_subhosts_collapse_to_parent(self):
+        from zbbx_mcp.tools.diagnose import _dedupe_records_by_canonical
+        records = [
+            {"hostid": "1", "host": "parent01"},
+            {"hostid": "2", "host": "parent01 v1"},
+            {"hostid": "3", "host": "parent01 v2"},
+            {"hostid": "4", "host": "parent01 v3"},
+        ]
+        deduped, subs = _dedupe_records_by_canonical(records)
+        assert len(deduped) == 1
+        # Parent preferred as the representative
+        assert deduped[0]["host"] == "parent01"
+        assert deduped[0]["hostid"] == "1"
+        assert subs["parent01"] == 3
+
+    def test_subhost_only_set_picks_first_as_rep(self):
+        from zbbx_mcp.tools.diagnose import _dedupe_records_by_canonical
+        records = [
+            {"hostid": "2", "host": "parent01 v1"},
+            {"hostid": "3", "host": "parent01 v2"},
+            {"hostid": "4", "host": "parent01 v3"},
+        ]
+        deduped, subs = _dedupe_records_by_canonical(records)
+        assert len(deduped) == 1
+        assert deduped[0]["host"] == "parent01 v1"
+        assert subs["parent01"] == 2
+
+    def test_mixed_standalone_and_groups(self):
+        from zbbx_mcp.tools.diagnose import _dedupe_records_by_canonical
+        records = [
+            {"hostid": "1", "host": "host-a"},
+            {"hostid": "2", "host": "parent01"},
+            {"hostid": "3", "host": "parent01 v1"},
+            {"hostid": "4", "host": "host-b"},
+        ]
+        deduped, subs = _dedupe_records_by_canonical(records)
+        names = {r["host"] for r in deduped}
+        assert names == {"host-a", "parent01", "host-b"}
+        assert subs["host-a"] == 0
+        assert subs["parent01"] == 1
+        assert subs["host-b"] == 0
+
+    def test_empty_input(self):
+        from zbbx_mcp.tools.diagnose import _dedupe_records_by_canonical
+        deduped, subs = _dedupe_records_by_canonical([])
+        assert deduped == []
+        assert subs == {}
