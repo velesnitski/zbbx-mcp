@@ -47,7 +47,10 @@ class TestServerStartup:
         resp = responses[0]
         assert resp.get("id") == 1
         assert "result" in resp
-        assert resp["result"]["serverInfo"]["name"] == "zabbix"
+        # serverInfo.name now includes the version (e.g. "zabbix v1.9.4") so
+        # Claude Code's /mcp UI shows it next to the connection status.
+        # See server.py create_server() comment.
+        assert resp["result"]["serverInfo"]["name"].startswith("zabbix v")
 
     def test_tools_list(self):
         responses = self._run_jsonrpc(

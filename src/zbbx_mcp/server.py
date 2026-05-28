@@ -213,7 +213,12 @@ def create_server() -> tuple[FastMCP, dict[str, ZabbixClient]]:
     """
     _logger.info("Starting zbbx-mcp", extra={"instance": INSTANCE_ID})
 
-    mcp = FastMCP("zabbix")
+    # Include the version in the server name so Claude Code's /mcp UI shows
+    # it next to the connection status (FastMCP propagates this string to
+    # the MCP `initialize` response's `serverInfo.name`, which is the field
+    # the UI renders).
+    from zbbx_mcp import __version__ as _zbbx_version
+    mcp = FastMCP(f"zabbix v{_zbbx_version}")
 
     configs = load_all_configs()
     clients = {name: ZabbixClient(cfg) for name, cfg in configs.items()}

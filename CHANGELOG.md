@@ -5,6 +5,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.9.5] - 2026-05-28
+
+### Changed — Server name now carries the package version
+- `FastMCP(...)` is constructed with `f"zabbix v{__version__}"`
+  instead of the bare `"zabbix"`. The string lands in the MCP
+  `initialize` response under `serverInfo.name`, and Claude Code's
+  `/mcp` UI renders that field next to the connection status.
+  After a server restart the panel reads `zabbix v1.9.5  ✓ connected`
+  instead of just `zabbix  ✓ connected`.
+- `zbbx_mcp.__version__` now resolves at import time via
+  `importlib.metadata.version("zbbx-mcp")` instead of the
+  hard-coded stale `"1.6.0"` string — auto-syncs with
+  `pyproject.toml`. Falls back to `0.0.0+unknown` when the dist
+  isn't installed (editable / source-tree usage).
+- Existing MCP clients that compare `serverInfo.name` to a literal
+  `"zabbix"` will need to switch to `startswith("zabbix")` (the
+  `test_initialize` smoke was updated the same way).
+- See ADR 038.
+
 ## [1.9.4] - 2026-05-27
 
 ### Fixed — Parent / sub-host fold in `get_shutdown_candidates`
