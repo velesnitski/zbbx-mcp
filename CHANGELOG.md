@@ -5,6 +5,47 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.10.0] - 2026-05-29
+
+### Changed — `detect_traffic_drops` rebuilt to suppress false positives
+The old detector compared an instantaneous spot reading against the
+N-day average, so any normal diurnal trough read as an 80–96% "drop."
+Replaced with a layered classifier (new `zbbx_mcp.anomaly` module) that
+distinguishes real blocking — **including immediate/acute blocking
+detected on the current bucket** — from diurnal troughs and demand shifts.
+
+New `anomaly.py` pure helpers (24 unit tests):
+- `classify_drop(...)` → `DropVerdict(state, confidence, drop_pct, reasons)`
+  with states `healthy` / `low_demand` / `blocked_acute` /
+  `blocked_sustained` / `artifact` / `unknown`.
+- `seasonal_floor(hourly, hour_of_day)` — same-hour-of-day percentile
+  band, so a normal nightly trough isn't a "drop" and a genuine drop is
+  flagged immediately (below-band-now == anomalous-now).
+- `pick_traffic_interface(interfaces)` — selects the highest-*baseline*
+  interface (not highest-current), so an idle tunnel reading near zero
+  can't fabricate a drop on a box whose primary uplink is flowing.
+- `percentile(values, pct)` — nearest-rank, for small seasonal buckets.
+
+`detect_traffic_drops` now:
+- compares a recent-window **average** (`recent_hours`, default 6) to the
+  baseline, never an instantaneous `lastvalue`;
+- judges against the seasonal band (`seasonal=True` by default);
+- escalates acute → sustained on persistence (does not gate detection);
+- fetches `agent.ping` to rule out host-down (corroboration);
+- selects the interface by baseline;
+- raised `min_baseline_mbps` default 1.0 → 5.0 (denominator floor);
+- output now reports per-row state + confidence + reason, and separates
+  "low-demand not blocked" from real blocks.
+
+### Behaviour / compat
+- Output format changed: columns are now
+  `Server | Provider | State | Conf | Recent → Baseline | Drop | Why`.
+- New params `recent_hours` and `seasonal`; existing params unchanged.
+- See ADR 040.
+
+### Tooling
+- 493 tests → 517 (+24 in `test_anomaly.py`).
+
 ## [1.9.6] - 2026-05-28
 
 ### Fixed — Pre-fold input list in `bulk_diagnose` / `diagnose_subnet`

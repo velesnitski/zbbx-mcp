@@ -86,6 +86,7 @@ fixed headings (`## Problem`, `## Decision`, `## Test approach`,
 | [037](037-shutdown-candidates-canonical-fold.md) | Parent / sub-host fold in `get_shutdown_candidates` | Pre-fold candidates + cohort headroom pipelines; CPU=MAX / traffic=SUM / service=WORST aggregation across canonical groups; fixes false-positive DEAD on multi-record boxes + inflated peer counts |
 | [038](038-server-name-includes-version.md) | Server name carries the package version | `FastMCP("zabbix v{__version__}")` so Claude Code `/mcp` panel shows the running version; `__version__` derived from installed dist metadata |
 | [039](039-bulk-diagnose-prefold.md) | Pre-fold input host list in `bulk_diagnose` / `diagnose_subnet` | `_dedupe_records_by_canonical()` collapses parent + sub-hosts to one diagnostic row per physical machine before the fan-out; result rows annotated `parent (+N sub)` |
+| [040](040-traffic-drop-classifier.md) | False-positive-resistant traffic-drop classifier | New `anomaly.py` brain: recent-avg vs seasonal same-hour band, acute-vs-sustained, demand-vs-block corroboration, baseline-weighted interface pick; `detect_traffic_drops` rebuilt on it |
 
 ## Writing a new ADR
 
