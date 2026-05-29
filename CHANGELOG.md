@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.10.1] - 2026-05-29
+
+### Fixed — `detect_traffic_drops` 500 on fleet-wide runs
+v1.10.0 fetched trends for *every* traffic interface; a host has one
+real uplink plus many idle `svc`/`tun`/`ppp` interfaces, so a
+fleet-wide `trend.get` (hundreds of hosts × dozens of interfaces ×
+7 days) overran the Zabbix API and returned HTTP 500. Region- or
+group-scoped runs worked; the unfiltered run failed.
+
+Fix: shortlist the top `_IFACE_CANDIDATES` (3) interfaces per host
+**by current value** before the trend fetch, bounding it to ~3
+items/host (same order as pre-1.10.0). An always-idle interface
+never makes the shortlist, so the dead-interface false positive is
+still avoided; baseline-weighted selection (P4) then runs among the
+shortlist. Classifier logic unchanged.
+
 ## [1.10.0] - 2026-05-29
 
 ### Changed — `detect_traffic_drops` rebuilt to suppress false positives

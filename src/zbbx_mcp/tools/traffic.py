@@ -27,6 +27,12 @@ from zbbx_mcp.data import (
 )
 from zbbx_mcp.resolver import InstanceResolver
 
+# Per-host interface shortlist size for detect_traffic_drops. Bounds the
+# trend.get volume: a host has 1 real uplink + many idle svc/tun/ppp
+# interfaces, and fetching trends for all of them fleet-wide overruns the
+# Zabbix API. Top-3-by-current covers the uplink while staying bounded.
+_IFACE_CANDIDATES = 3
+
 
 def _format_skip_breakdown(skips: dict[str, int], min_baseline_mbps: float) -> str:
     """Render the per-reason skip counts that detect_traffic_drops accumulates.
@@ -512,8 +518,17 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 if not filtered_ids:
                     return "No servers match the filter."
 
-                # Get ALL traffic interface items (not just one per host) so we
-                # can pick by baseline, not by momentary current value (P4).
+                # Get traffic interface items + current value. A host can have
+                # dozens of interfaces (primary + many idle svc/tun/ppp);
+                # fetching trends for ALL of them fleet-wide overruns the API
+                # (a single trend.get of 500 hosts x ~30 ifaces is millions of
+                # rows). So we shortlist the top-N interfaces per host by
+                # current value BEFORE the trend fetch — an always-idle iface
+                # never makes the shortlist (its zero reading can't fabricate a
+                # drop), and on a host whose uplink genuinely dropped the
+                # shortlist still includes its (now-low-but-relatively-highest)
+                # interfaces. Baseline-weighted selection (P4) then runs among
+                # the shortlist.
                 traffic_items = await client.call("item.get", {
                     "hostids": filtered_ids,
                     "output": ["itemid", "hostid", "key_", "lastvalue", "value_type"],
@@ -522,6 +537,20 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 })
                 if not traffic_items:
                     return "No traffic items found."
+
+                def _lv(it: dict) -> float:
+                    try:
+                        return float(it.get("lastvalue", "0") or 0)
+                    except (ValueError, TypeError):
+                        return 0.0
+
+                by_host_items: dict[str, list[dict]] = {}
+                for it in traffic_items:
+                    by_host_items.setdefault(it["hostid"], []).append(it)
+                shortlist: list[dict] = []
+                for items in by_host_items.values():
+                    items.sort(key=_lv, reverse=True)
+                    shortlist.extend(items[:_IFACE_CANDIDATES])
 
                 # Agent reachability per host (cheap) — rules out host-down so a
                 # dead box is not mislabelled as a traffic block (corroboration).
@@ -541,8 +570,9 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 baseline_start = now - baseline_days * 86400
                 recent_start = now - recent_hours * 3600
 
-                # One trend fetch for every interface item.
-                all_item_ids = [i["itemid"] for i in traffic_items]
+                # One trend fetch for the shortlisted items only (bounded to
+                # ~_IFACE_CANDIDATES per host).
+                all_item_ids = [i["itemid"] for i in shortlist]
                 trends = await client.call("trend.get", {
                     "itemids": all_item_ids,
                     "time_from": baseline_start,
@@ -564,9 +594,9 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                         return None
                     return sum(float(t["value_avg"]) for t in recs) / len(recs) / 1e6
 
-                # Group interfaces by host; pick the highest-baseline one (P4).
+                # Group shortlisted interfaces by host; pick highest-baseline (P4).
                 host_ifaces: dict[str, list[tuple[str, float | None]]] = {}
-                for i in traffic_items:
+                for i in shortlist:
                     host_ifaces.setdefault(i["hostid"], []).append(
                         (i["itemid"], _baseline_mbps(i["itemid"]))
                     )
