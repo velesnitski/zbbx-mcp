@@ -729,8 +729,21 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
         ) -> str:
             """Predict upcoming problems — disk full, CPU saturation, memory exhaustion.
 
-            Uses linear regression on 7-day trend data to project when thresholds
+            Uses linear regression on 14-day trend data to project when thresholds
             will be crossed. Zero dependencies — pure math.
+
+            Severity tiers (Disk + Memory):
+                CRITICAL = current already in the danger zone AND projection < 3 days
+                HIGH     = current concerning AND projection < 7 days
+                WARNING  = projection < 14 days
+                INFO     = projection within horizon but neither imminent nor severe
+
+            The sanity floor (current-value gate) prevents a wall-of-CRITICAL when
+            many hosts have small noisy upward slopes from low starting points —
+            the projection alone is not enough; the current state has to actually
+            be near failure.
+
+            CPU keeps the simpler 2-band CRITICAL/WARNING/INFO split.
 
             Args:
                 metric: What to predict: disk, cpu, memory, traffic, or all (default: all)
@@ -858,7 +871,11 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     for hid, it in best_item.items():
                         iid = it["itemid"]
                         points = sorted(item_trends.get(iid, []))
-                        if len(points) < 5:  # need at least 5 data points
+                        # Min samples raised 5 → 14: trend data is hourly-aggregated and
+                        # 5 buckets is too noisy for a stable 14-day regression. 14 keeps
+                        # the slope grounded; brand-new hosts (< 14 trend points) fall
+                        # through silently rather than producing junk predictions.
+                        if len(points) < 14:
                             continue
 
                         try:
@@ -906,7 +923,42 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                             rate_display = f"{abs(slope):.2f}/day"
 
                         hostname = host_names.get(hid, hid)
-                        severity = "CRITICAL" if days_to < 7 else "WARNING" if days_to < 14 else "INFO"
+                        # Sanity-floored severity (see tool docstring). Disk + Memory
+                        # require BOTH an imminent projection AND a concerning current
+                        # value before earning CRITICAL — kills the wall-of-CRITICAL
+                        # noise where a low starting point + small noisy slope projects
+                        # disaster within the week.
+                        if metric_name == "disk":
+                            # `current` is free %; danger floor: ≤ 30% free (= ≥ 70% used)
+                            if days_to < 3 and current <= 30:
+                                severity = "CRITICAL"
+                            elif days_to < 7 and current <= 50:
+                                severity = "HIGH"
+                            elif days_to < 14:
+                                severity = "WARNING"
+                            else:
+                                severity = "INFO"
+                        elif metric_name == "memory":
+                            # `current` is bytes available; floors at 1 GB / 2 GB
+                            if days_to < 3 and current <= 1_000_000_000:
+                                severity = "CRITICAL"
+                            elif days_to < 7 and current <= 2_000_000_000:
+                                severity = "HIGH"
+                            elif days_to < 14:
+                                severity = "WARNING"
+                            else:
+                                severity = "INFO"
+                        else:
+                            # CPU and any other metric — simpler 2-band; tiering CPU
+                            # via a "current idle %" floor doesn't add much signal
+                            # because CPU swings are short-window and the linear
+                            # projection is a weaker fit than for disk/RAM.
+                            if days_to < 7:
+                                severity = "CRITICAL"
+                            elif days_to < 14:
+                                severity = "WARNING"
+                            else:
+                                severity = "INFO"
 
                         alerts.append({
                             "severity": severity,
