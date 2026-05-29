@@ -6,6 +6,14 @@ from statistics import median, stdev
 
 import httpx
 
+from zbbx_mcp.anomaly import (
+    BLOCKED_ACUTE,
+    BLOCKED_SUSTAINED,
+    LOW_DEMAND,
+    classify_drop,
+    pick_traffic_interface,
+    seasonal_floor,
+)
 from zbbx_mcp.classify import classify_host as _classify_host
 from zbbx_mcp.classify import detect_provider
 from zbbx_mcp.data import (
@@ -442,20 +450,34 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
             region: str = "",
             drop_pct: float = 50.0,
             baseline_days: int = 7,
-            min_baseline_mbps: float = 1.0,
+            min_baseline_mbps: float = 5.0,
+            recent_hours: int = 6,
+            seasonal: bool = True,
             max_results: int = 50,
             instance: str = "",
         ) -> str:
-            """Detect servers where traffic dropped significantly vs their baseline.
+            """Detect servers where traffic dropped, distinguishing real blocks
+            from diurnal troughs and demand shifts (ADR 040).
+
+            Compares a recent-window *average* (not an instantaneous reading)
+            against the baseline, judged against the same-hour-of-day seasonal
+            band so a normal nightly trough is not mistaken for a drop. Flags
+            an immediate (acute) block on the current bucket and escalates to
+            sustained when it persists; agent reachability rules out
+            host-down. Each row carries a state + confidence + reason.
 
             Args:
                 group: Zabbix host group (optional)
                 product: Filter by product (optional)
                 country: Country code filter (optional)
                 region: LATAM, APAC, EMEA, NA, CIS, ALL (optional)
-                drop_pct: Min drop % to flag (default: 50)
+                drop_pct: Min drop % vs baseline to consider (default: 50)
                 baseline_days: Days for baseline (default: 7)
-                min_baseline_mbps: Skip servers below this baseline avg (default: 1.0)
+                min_baseline_mbps: Skip servers below this baseline avg — the
+                    denominator floor below which a % is meaningless (default: 5.0)
+                recent_hours: Recent-window size for the current average (default: 6)
+                seasonal: Judge against the same-hour-of-day band (default: True);
+                    set False to fall back to plain baseline-ratio (lower confidence)
                 max_results: Max results (default: 50)
                 instance: Zabbix instance (optional)
             """
@@ -490,154 +512,172 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 if not filtered_ids:
                     return "No servers match the filter."
 
-                # Get traffic items (need itemid + hostid + current value)
+                # Get ALL traffic interface items (not just one per host) so we
+                # can pick by baseline, not by momentary current value (P4).
                 traffic_items = await client.call("item.get", {
                     "hostids": filtered_ids,
                     "output": ["itemid", "hostid", "key_", "lastvalue", "value_type"],
                     "search": {"name": "Incoming network traffic"},
                     "filter": {"status": "0"},
                 })
-
-                # Pick the main interface per host (highest current traffic)
-                host_main_item: dict[str, dict] = {}
-                for i in traffic_items:
-                    hid = i["hostid"]
-                    try:
-                        val = float(i.get("lastvalue", "0"))
-                    except (ValueError, TypeError):
-                        continue
-                    current = host_main_item.get(hid)
-                    if current is None or val > float(current.get("lastvalue", "0")):
-                        host_main_item[hid] = i
-
-                if not host_main_item:
+                if not traffic_items:
                     return "No traffic items found."
 
-                # Fetch trends for all main items in parallel
+                # Agent reachability per host (cheap) — rules out host-down so a
+                # dead box is not mislabelled as a traffic block (corroboration).
+                ping_items = await client.call("item.get", {
+                    "hostids": filtered_ids,
+                    "output": ["hostid", "lastvalue"],
+                    "filter": {"key_": "agent.ping", "status": "0"},
+                })
+                agent_up: dict[str, bool] = {}
+                for it in ping_items:
+                    try:
+                        agent_up[it["hostid"]] = int(float(it.get("lastvalue", "0"))) == 1
+                    except (ValueError, TypeError):
+                        pass
+
                 now = int(_time.time())
                 baseline_start = now - baseline_days * 86400
-                day_ago = now - 86400
+                recent_start = now - recent_hours * 3600
 
-                # Batch trend fetch (all items at once)
-                item_ids = [i["itemid"] for i in host_main_item.values()]
+                # One trend fetch for every interface item.
+                all_item_ids = [i["itemid"] for i in traffic_items]
                 trends = await client.call("trend.get", {
-                    "itemids": item_ids,
+                    "itemids": all_item_ids,
                     "time_from": baseline_start,
                     "output": ["itemid", "clock", "value_avg", "value_max"],
-                    "limit": len(item_ids) * baseline_days * 24,
+                    "limit": len(all_item_ids) * baseline_days * 24,
                 })
-
-                # Build per-item trend data
                 item_trends: dict[str, list] = {}
                 for t in trends:
                     item_trends.setdefault(t["itemid"], []).append(t)
 
-                # Analyze each host
-                drops = []
-                min_baseline_bps = min_baseline_mbps * 1e6
-                skips = {"no_history": 0, "no_baseline_window": 0, "below_floor": 0}
-                for hid, item in host_main_item.items():
-                    iid = item["itemid"]
-                    current = float(item.get("lastvalue", "0"))
-                    t_data = item_trends.get(iid, [])
+                # Per-item baseline avg (mbps), excluding the recent window, so
+                # interface selection and the floor both use steady-state load.
+                def _baseline_mbps(iid: str) -> float | None:
+                    recs = [
+                        t for t in item_trends.get(iid, [])
+                        if int(t["clock"]) < recent_start
+                    ]
+                    if not recs:
+                        return None
+                    return sum(float(t["value_avg"]) for t in recs) / len(recs) / 1e6
 
+                # Group interfaces by host; pick the highest-baseline one (P4).
+                host_ifaces: dict[str, list[tuple[str, float | None]]] = {}
+                for i in traffic_items:
+                    host_ifaces.setdefault(i["hostid"], []).append(
+                        (i["itemid"], _baseline_mbps(i["itemid"]))
+                    )
+
+                flagged = []
+                skips = {"no_history": 0, "no_baseline_window": 0,
+                         "below_floor": 0, "healthy": 0, "low_demand": 0}
+                analyzed = 0
+                for hid, ifaces in host_ifaces.items():
+                    iid = pick_traffic_interface(ifaces)
+                    if iid is None:
+                        skips["no_baseline_window"] += 1
+                        continue
+                    t_data = item_trends.get(iid, [])
                     if not t_data:
                         skips["no_history"] += 1
                         continue
 
-                    # Split trends: baseline (older) vs recent (last 24h)
-                    baseline_records = [t for t in t_data if int(t["clock"]) < day_ago]
-                    if not baseline_records:
+                    recent_recs = [t for t in t_data if int(t["clock"]) >= recent_start]
+                    baseline_recs = [t for t in t_data if int(t["clock"]) < recent_start]
+                    if not baseline_recs:
                         skips["no_baseline_window"] += 1
                         continue
+                    analyzed += 1
 
-                    baseline_avg = sum(float(t["value_avg"]) for t in baseline_records) / len(baseline_records)
-                    baseline_peak = max(float(t["value_max"]) for t in baseline_records)
+                    baseline_avg = sum(float(t["value_avg"]) for t in baseline_recs) / len(baseline_recs) / 1e6
+                    recent_avg = (
+                        sum(float(t["value_avg"]) for t in recent_recs) / len(recent_recs) / 1e6
+                        if recent_recs else 0.0
+                    )
 
-                    if baseline_avg < min_baseline_bps:
-                        skips["below_floor"] += 1
-                        continue
+                    # Seasonal floor for the current hour-of-day (P2).
+                    sfloor = None
+                    if seasonal:
+                        hourly = [(int(t["clock"]), float(t["value_avg"]) / 1e6) for t in baseline_recs]
+                        sfloor = seasonal_floor(hourly, (now // 3600) % 24)
 
-                    # Calculate drop
-                    drop = ((baseline_avg - current) / baseline_avg * 100) if baseline_avg > 0 else 0
+                    # Persistence: consecutive recent buckets below the floor (P3).
+                    sustained = 0
+                    if sfloor is not None:
+                        for t in sorted(recent_recs, key=lambda x: -int(x["clock"])):
+                            if float(t["value_avg"]) / 1e6 < sfloor:
+                                sustained += 1
+                            else:
+                                break
 
-                    if drop >= drop_pct:
+                    verdict = classify_drop(
+                        recent_avg=recent_avg,
+                        baseline_avg=baseline_avg,
+                        seasonal_floor_value=sfloor,
+                        min_baseline=min_baseline_mbps,
+                        drop_pct_threshold=drop_pct,
+                        sustained_buckets=sustained,
+                        agent_reachable=agent_up.get(hid),
+                    )
+
+                    if verdict.state in (BLOCKED_ACUTE, BLOCKED_SUSTAINED):
                         h = host_map[hid]
-                        hostname = h["host"]
                         ip = host_ip(h)
-                        provider = detect_provider(ip) if ip else ""
                         prod, tier = _classify_host(h.get("groups", []))
-                        groups = [g["name"] for g in h.get("groups", [])]
-
-                        severity = "CRITICAL" if drop >= 80 else "HIGH" if drop >= 60 else "MEDIUM"
-
-                        drops.append({
-                            "host": hostname,
-                            "ip": ip,
-                            "provider": provider,
+                        flagged.append({
+                            "host": h["host"],
+                            "provider": detect_provider(ip) if ip else "",
                             "product": prod or "",
                             "tier": tier or "",
-                            "groups": ", ".join(groups),
-                            "current_mbps": current / 1e6,
-                            "baseline_avg_mbps": baseline_avg / 1e6,
-                            "baseline_peak_mbps": baseline_peak / 1e6,
-                            "drop_pct": drop,
-                            "severity": severity,
+                            "recent_mbps": recent_avg,
+                            "baseline_mbps": baseline_avg,
+                            "drop_pct": verdict.drop_pct,
+                            "state": verdict.state,
+                            "confidence": verdict.confidence,
+                            "reason": verdict.reasons[-1] if verdict.reasons else "",
                         })
+                    elif verdict.state == LOW_DEMAND:
+                        skips["low_demand"] += 1
+                    else:
+                        skips["healthy"] += 1
 
-                drops.sort(key=lambda d: -d["drop_pct"])
+                # Sort: sustained before acute, then by confidence, then drop.
+                _order = {BLOCKED_SUSTAINED: 0, BLOCKED_ACUTE: 1}
+                flagged.sort(key=lambda d: (_order.get(d["state"], 9),
+                                            -d["confidence"], -d["drop_pct"]))
+                # One row per physical machine (ADR 036/039).
+                flagged = fold_rows_by_canonical_host(flagged, name_key="host")
+                flagged = flagged[:max_results]
 
-                # Fold sub-hosts to canonical (ADR 036): one physical
-                # machine = one row. Sort above is desc by drop%, so
-                # the biggest drop per canonical wins.
-                drops = fold_rows_by_canonical_host(drops, name_key="host")
-                drops = drops[:max_results]
-
-                analyzed = len(host_main_item) - sum(skips.values())
-                skip_note = _format_skip_breakdown(skips, min_baseline_mbps)
-
-                if not drops:
-                    msg = (
-                        f"No traffic drops >{drop_pct:.0f}% detected "
-                        f"(compared to {baseline_days}-day baseline). "
-                        f"Analyzed {analyzed} of {len(host_main_item)} servers."
+                if not flagged:
+                    return (
+                        f"No blocks detected (analyzed {analyzed} servers; "
+                        f"{skips['healthy']} healthy/diurnal, "
+                        f"{skips['low_demand']} low-demand-not-blocked, "
+                        f"{skips['below_floor'] + skips['no_baseline_window'] + skips['no_history']} "
+                        "skipped for insufficient/low baseline)."
                     )
-                    if skip_note:
-                        msg += f" {skip_note}"
-                    return msg
 
+                acute = sum(1 for d in flagged if d["state"] == BLOCKED_ACUTE)
+                sustained_n = sum(1 for d in flagged if d["state"] == BLOCKED_SUSTAINED)
                 parts = [
-                    f"**{len(drops)} servers with traffic drops >{drop_pct:.0f}%** "
-                    f"(vs {baseline_days}-day baseline, analyzed {analyzed} of {len(host_main_item)})\n",
-                    "| Server | Provider | Current | Baseline Avg | Peak | Drop | Severity |",
-                    "|--------|----------|---------|-------------|------|------|----------|",
+                    f"**{len(flagged)} likely blocks** "
+                    f"({sustained_n} sustained, {acute} acute/immediate; "
+                    f"analyzed {analyzed}, {skips['low_demand']} were low-demand not blocked)\n",
+                    "| Server | Provider | State | Conf | Recent → Baseline | Drop | Why |",
+                    "|--------|----------|-------|------|-------------------|------|-----|",
                 ]
-
-                for d in drops:
+                for d in flagged:
+                    state_label = "SUSTAINED" if d["state"] == BLOCKED_SUSTAINED else "ACUTE"
                     parts.append(
-                        f"| {d['host']} | {d['provider']} | "
-                        f"{d['current_mbps']:.1f} Mbps | "
-                        f"{d['baseline_avg_mbps']:.1f} Mbps | "
-                        f"{d['baseline_peak_mbps']:.1f} Mbps | "
-                        f"**{d['drop_pct']:.0f}%** | {d['severity']} |"
+                        f"| {d['host']} | {d['provider']} | {state_label} | "
+                        f"{d['confidence']}% | "
+                        f"{d['recent_mbps']:.1f} → {d['baseline_mbps']:.1f} Mbps | "
+                        f"**{d['drop_pct']:.0f}%** | {d['reason']} |"
                     )
-
-                # Summary by provider (to spot provider-level issues)
-                prov_drops: dict[str, list] = {}
-                for d in drops:
-                    prov_drops.setdefault(d["provider"], []).append(d)
-
-                if len(prov_drops) > 1:
-                    parts.append("\n### Drops by Provider\n")
-                    for prov in sorted(prov_drops, key=lambda x: -len(prov_drops[x])):
-                        plist = prov_drops[prov]
-                        avg_drop = sum(d["drop_pct"] for d in plist) / len(plist)
-                        parts.append(
-                            f"- **{prov}**: {len(plist)} servers, avg drop {avg_drop:.0f}%"
-                        )
-
-                if skip_note:
-                    parts.append(f"\n*{skip_note}*")
 
                 return "\n".join(parts)
             except (httpx.HTTPError, ValueError) as e:
