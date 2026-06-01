@@ -97,6 +97,59 @@ class TestPickTrafficInterface:
         assert pick_traffic_interface(ifaces) == "b"
 
 
+class TestMetricRecentBaselineRatio:
+    """The CPU idle→used inversion is the one place a silent bug would
+    flip corroboration (a busy host read as idle), so it is pinned here."""
+
+    def _series(self, recent_vals, baseline_vals, recent_start=1000):
+        # recent points at >= recent_start, baseline points before it
+        pts = []
+        for i, v in enumerate(baseline_vals):
+            pts.append((recent_start - 100 - i, v))
+        for i, v in enumerate(recent_vals):
+            pts.append((recent_start + i, v))
+        return pts
+
+    def test_plain_ratio(self):
+        from zbbx_mcp.anomaly import metric_recent_baseline_ratio
+        # recent avg 5, baseline avg 10 → 0.5
+        pts = self._series([4.0, 6.0], [10.0, 10.0])
+        assert metric_recent_baseline_ratio(pts, 1000) == 0.5
+
+    def test_idle_inversion_busy_host_high_ratio(self):
+        from zbbx_mcp.anomaly import metric_recent_baseline_ratio
+        # idle: baseline 90% idle (=10% used), recent 80% idle (=20% used)
+        # used-ratio = 20/10 = 2.0 → host got BUSIER (correct direction)
+        pts = self._series([80.0], [90.0])
+        r = metric_recent_baseline_ratio(pts, 1000, invert_pct=True)
+        assert r == 2.0
+
+    def test_idle_inversion_idling_host_low_ratio(self):
+        from zbbx_mcp.anomaly import metric_recent_baseline_ratio
+        # baseline 50% idle (50% used), recent 90% idle (10% used)
+        # used-ratio = 10/50 = 0.2 → host went quiet (demand fell)
+        pts = self._series([90.0], [50.0])
+        r = metric_recent_baseline_ratio(pts, 1000, invert_pct=True)
+        assert abs(r - 0.2) < 1e-9
+
+    def test_empty_window_is_none(self):
+        from zbbx_mcp.anomaly import metric_recent_baseline_ratio
+        # only baseline points, no recent
+        pts = [(500, 10.0), (600, 10.0)]
+        assert metric_recent_baseline_ratio(pts, 1000) is None
+
+    def test_zero_baseline_is_none(self):
+        from zbbx_mcp.anomaly import metric_recent_baseline_ratio
+        pts = self._series([0.0], [0.0])
+        assert metric_recent_baseline_ratio(pts, 1000) is None
+
+    def test_fully_idle_baseline_inverts_to_zero_used_none(self):
+        from zbbx_mcp.anomaly import metric_recent_baseline_ratio
+        # baseline 100% idle → 0% used → b_avg<=0 → None (can't ratio)
+        pts = self._series([100.0], [100.0])
+        assert metric_recent_baseline_ratio(pts, 1000, invert_pct=True) is None
+
+
 class TestClassifyDropFalsePositives:
     """The shapes that must NOT be flagged as blocks."""
 

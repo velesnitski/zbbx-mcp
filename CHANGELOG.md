@@ -5,6 +5,34 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.10.3] - 2026-06-01
+
+### Added — CPU/connection corroboration in `detect_traffic_drops`
+ADR 040 shipped the classifier *accepting* `cpu_ratio` / `conn_ratio`
+but the tool passed only `agent_reachable`, so a coordinated regional
+*demand* trough (traffic down, but users/CPU down with it) still
+classified as `blocked` — it had no signal to tell a block (host still
+serving, connections/CPU hold up while bytes collapse) from low demand
+(everything falls together).
+
+Now a bounded second pass corroborates: for the handful of candidates
+that pass the seasonal gate (not the whole fleet), it fetches CPU and
+connection trends, computes recent/baseline ratios, and re-classifies.
+Candidates whose connections/CPU fell with traffic flip to `low_demand`
+and drop out of the block list. Connections are the strong signal (they
+track users directly); CPU is a weak fallback (fixed OS/overhead floor
+that doesn't scale with traffic). Cost stays bounded — corroboration
+trends are fetched only for candidates, never fleet-wide.
+
+New pure helper `anomaly.metric_recent_baseline_ratio(records,
+recent_start, invert_pct=...)` computes the recent/baseline ratio, with
+`invert_pct` converting an idle-percentage metric (`cpu.util[,idle]`)
+to its used complement before the ratio. See ADR 042.
+
+### Tooling
+- 517 tests → 523 (+6 for `metric_recent_baseline_ratio`, pinning the
+  idle→used inversion).
+
 ## [1.10.2] - 2026-06-01
 
 ### Fixed — `get_predictive_alerts` rendered HIGH tier as INFO

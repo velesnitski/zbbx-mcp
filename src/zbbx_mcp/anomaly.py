@@ -130,6 +130,39 @@ def pick_traffic_interface(
     return max(candidates, key=lambda x: x[1])[0]
 
 
+def metric_recent_baseline_ratio(
+    records: list[tuple[int, float]],
+    recent_start: int,
+    *,
+    invert_pct: bool = False,
+) -> float | None:
+    """Recent-window / baseline-window ratio of a metric's trend series.
+
+    ``records`` is ``[(epoch_seconds, value), ...]``. Splits at
+    ``recent_start`` (>= recent, < baseline), averages each window, and
+    returns recent_avg / baseline_avg. Returns None when either window is
+    empty or the baseline average is non-positive.
+
+    ``invert_pct=True`` converts a percentage-idle metric to its
+    "used" complement (``100 - x``) on both windows *before* the ratio —
+    e.g. ``system.cpu.util[,idle]`` becomes CPU-used, so the ratio
+    reflects load (a busy host has a high used-ratio), not idleness.
+    Getting this inversion wrong would flip CPU corroboration, so it is
+    pinned by tests.
+    """
+    rec = [v for (clock, v) in records if clock >= recent_start]
+    base = [v for (clock, v) in records if clock < recent_start]
+    if not rec or not base:
+        return None
+    r_avg = sum(rec) / len(rec)
+    b_avg = sum(base) / len(base)
+    if invert_pct:
+        r_avg, b_avg = 100.0 - r_avg, 100.0 - b_avg
+    if b_avg <= 0:
+        return None
+    return max(0.0, r_avg / b_avg)
+
+
 def classify_drop(
     *,
     recent_avg: float | None,
@@ -275,5 +308,5 @@ __all__ = [
     "HEALTHY", "LOW_DEMAND", "BLOCKED_ACUTE", "BLOCKED_SUSTAINED",
     "ARTIFACT", "UNKNOWN",
     "DropVerdict", "percentile", "seasonal_floor",
-    "pick_traffic_interface", "classify_drop",
+    "pick_traffic_interface", "metric_recent_baseline_ratio", "classify_drop",
 ]
