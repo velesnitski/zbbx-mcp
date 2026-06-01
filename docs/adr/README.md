@@ -87,6 +87,8 @@ fixed headings (`## Problem`, `## Decision`, `## Test approach`,
 | [038](038-server-name-includes-version.md) | Server name carries the package version | `FastMCP("zabbix v{__version__}")` so Claude Code `/mcp` panel shows the running version; `__version__` derived from installed dist metadata |
 | [039](039-bulk-diagnose-prefold.md) | Pre-fold input host list in `bulk_diagnose` / `diagnose_subnet` | `_dedupe_records_by_canonical()` collapses parent + sub-hosts to one diagnostic row per physical machine before the fan-out; result rows annotated `parent (+N sub)` |
 | [040](040-traffic-drop-classifier.md) | False-positive-resistant traffic-drop classifier | New `anomaly.py` brain: recent-avg vs seasonal same-hour band, acute-vs-sustained, demand-vs-block corroboration, baseline-weighted interface pick; `detect_traffic_drops` rebuilt on it |
+| [041](041-predictive-high-tier-render.md) | Render HIGH tier in `get_predictive_alerts` | Four-tier classifier wrote HIGH but the render collapsed it to INFO and omitted it from the summary — a false-negative; render the canonical severity field directly |
+| [042](042-traffic-drop-corroboration.md) | CPU/connection corroboration in `detect_traffic_drops` | Bounded second pass fetches CPU + connection trends for candidates only; demand troughs (signals fall with traffic) reclassify as `low_demand`; new `metric_recent_baseline_ratio` helper with idle→used inversion |
 
 ## Writing a new ADR
 

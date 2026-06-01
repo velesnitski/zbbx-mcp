@@ -11,6 +11,7 @@ from zbbx_mcp.anomaly import (
     BLOCKED_SUSTAINED,
     LOW_DEMAND,
     classify_drop,
+    metric_recent_baseline_ratio,
     pick_traffic_interface,
     seasonal_floor,
 )
@@ -601,10 +602,13 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                         (i["itemid"], _baseline_mbps(i["itemid"]))
                     )
 
-                flagged = []
+                # ---- Pass 1: classify with agent reachability only. ----
+                # Hosts that come back blocked become "candidates" for the
+                # corroboration pass; everything else is settled here.
                 skips = {"no_history": 0, "no_baseline_window": 0,
                          "below_floor": 0, "healthy": 0, "low_demand": 0}
                 analyzed = 0
+                candidates: list[dict] = []
                 for hid, ifaces in host_ifaces.items():
                     iid = pick_traffic_interface(ifaces)
                     if iid is None:
@@ -654,6 +658,72 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     )
 
                     if verdict.state in (BLOCKED_ACUTE, BLOCKED_SUSTAINED):
+                        candidates.append({
+                            "hid": hid, "recent_avg": recent_avg,
+                            "baseline_avg": baseline_avg, "sfloor": sfloor,
+                            "sustained": sustained,
+                        })
+                    elif verdict.state == LOW_DEMAND:
+                        skips["low_demand"] += 1
+                    else:
+                        skips["healthy"] += 1
+
+                # ---- Pass 2: corroborate candidates with CPU + connections. ----
+                # A block leaves the host serving (CPU/connections hold up while
+                # bytes collapse); low demand drags them down with the traffic.
+                # Connections are the strong signal (they track users directly);
+                # CPU is a weak fallback (it has a fixed OS/overhead floor that
+                # does not scale linearly with traffic). Fetched only for the
+                # handful of candidates, so cost is bounded regardless of fleet
+                # size. ADR 042.
+                cand_hids = [c["hid"] for c in candidates]
+                cpu_ratio: dict[str, float] = {}
+                conn_ratio: dict[str, float] = {}
+                if cand_hids:
+                    corr_specs = [("cpu", "system.cpu.util[,idle]", True)]
+                    if KEY_CONNECTIONS:
+                        corr_specs.append(("conn", KEY_CONNECTIONS, False))
+                    for label, key_, is_idle in corr_specs:
+                        citems = await client.call("item.get", {
+                            "hostids": cand_hids,
+                            "output": ["itemid", "hostid"],
+                            "filter": {"key_": key_, "status": "0"},
+                        })
+                        iid_to_hid = {it["itemid"]: it["hostid"] for it in citems}
+                        if not iid_to_hid:
+                            continue
+                        ctr = await client.call("trend.get", {
+                            "itemids": list(iid_to_hid),
+                            "time_from": baseline_start,
+                            "output": ["itemid", "clock", "value_avg"],
+                            "limit": len(iid_to_hid) * baseline_days * 24,
+                        })
+                        by_hid: dict[str, list] = {}
+                        for t in ctr:
+                            by_hid.setdefault(iid_to_hid[t["itemid"]], []).append(t)
+                        for chid, recs in by_hid.items():
+                            series = [(int(t["clock"]), float(t["value_avg"])) for t in recs]
+                            ratio = metric_recent_baseline_ratio(
+                                series, recent_start, invert_pct=is_idle,
+                            )
+                            if ratio is not None:
+                                (cpu_ratio if label == "cpu" else conn_ratio)[chid] = ratio
+
+                flagged = []
+                for c in candidates:
+                    hid = c["hid"]
+                    verdict = classify_drop(
+                        recent_avg=c["recent_avg"],
+                        baseline_avg=c["baseline_avg"],
+                        seasonal_floor_value=c["sfloor"],
+                        min_baseline=min_baseline_mbps,
+                        drop_pct_threshold=drop_pct,
+                        sustained_buckets=c["sustained"],
+                        agent_reachable=agent_up.get(hid),
+                        cpu_ratio=cpu_ratio.get(hid),
+                        conn_ratio=conn_ratio.get(hid),
+                    )
+                    if verdict.state in (BLOCKED_ACUTE, BLOCKED_SUSTAINED):
                         h = host_map[hid]
                         ip = host_ip(h)
                         prod, tier = _classify_host(h.get("groups", []))
@@ -662,8 +732,8 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                             "provider": detect_provider(ip) if ip else "",
                             "product": prod or "",
                             "tier": tier or "",
-                            "recent_mbps": recent_avg,
-                            "baseline_mbps": baseline_avg,
+                            "recent_mbps": c["recent_avg"],
+                            "baseline_mbps": c["baseline_avg"],
                             "drop_pct": verdict.drop_pct,
                             "state": verdict.state,
                             "confidence": verdict.confidence,
