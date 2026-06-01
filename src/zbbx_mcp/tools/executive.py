@@ -1000,18 +1000,24 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 lines.append("| Severity | Issue | Server | Current | Rate | Days Left |")
                 lines.append("|----------|-------|--------|---------|------|----------|")
                 for a in shown:
-                    sev_cls = "CRITICAL" if a["severity"] == "CRITICAL" else "WARNING" if a["severity"] == "WARNING" else "INFO"
+                    # Severity is already one of CRITICAL / HIGH / WARNING / INFO
+                    # (set by the sanity-floored classifier). Render it directly —
+                    # the previous ternary only knew CRITICAL/WARNING and silently
+                    # collapsed the HIGH tier to INFO, burying real near-term risks.
                     lines.append(
-                        f"| {sev_cls} | {a['label']} | {a['host']} | "
+                        f"| {a['severity']} | {a['label']} | {a['host']} | "
                         f"{a['current']} | {a['rate']} | {a['days']} |"
                     )
 
                 crit = sum(1 for a in deduped if a["severity"] == "CRITICAL")
+                high = sum(1 for a in deduped if a["severity"] == "HIGH")
                 warn = sum(1 for a in deduped if a["severity"] == "WARNING")
                 if crit:
-                    lines.append(f"\n**{crit} CRITICAL** — action needed this week")
+                    lines.append(f"\n**{crit} CRITICAL** — act now (≤3 days)")
+                if high:
+                    lines.append(f"**{high} HIGH** — act this week (≤7 days)")
                 if warn:
-                    lines.append(f"**{warn} WARNING** — action needed within 2 weeks")
+                    lines.append(f"**{warn} WARNING** — within 2 weeks")
                 if len(deduped) > max_results:
                     lines.append(f"*{len(deduped) - max_results} more omitted*")
 
