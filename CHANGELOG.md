@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.10.2] - 2026-06-01
+
+### Fixed — `get_predictive_alerts` rendered HIGH tier as INFO
+The four-tier severity classifier (CRITICAL / HIGH / WARNING / INFO)
+wrote the correct tier into each alert, but the markdown render layer
+still assumed the legacy three tiers: the table-cell mapping collapsed
+anything not CRITICAL/WARNING to INFO (so every HIGH alert showed as
+the lowest tier), and the summary counted only CRITICAL and WARNING
+(so HIGH was omitted entirely). Net effect was a false-*negative* — a
+near-term risk one step below the top displayed as most-benign and was
+missing from the call-to-action summary. Fix renders the canonical
+`severity` field directly and adds a HIGH summary line. Presentation
+only; classifier unchanged. See ADR 041.
+
+### Tooling
+- Lockfile `uv.lock` synced to the current version.
+
 ## [1.10.1] - 2026-05-29
 
 ### Fixed — `detect_traffic_drops` 500 on fleet-wide runs
