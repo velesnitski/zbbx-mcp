@@ -46,75 +46,108 @@ _PHYSICAL_NIC_RE = re.compile(r"^(?:eno|enp|enx|eth|ens|bond|ppp|wlan)\d")
 
 
 def _iface_from_key(key: str) -> str:
-    """Extract the interface name from a `net.if.in[<iface>]` item key."""
-    if not key.startswith("net.if.in[") or not key.endswith("]"):
-        return ""
-    return key[len("net.if.in["):-1]
+    """Extract the interface name from a `net.if.in[<iface>]` / `net.if.out[<iface>]` key."""
+    for pre in ("net.if.in[", "net.if.out["):
+        if key.startswith(pre) and key.endswith("]"):
+            return key[len(pre):-1]
+    return ""
 
 
 def _split_iface_metrics(
-    items: list[dict],
+    in_items: list[dict],
+    out_items: list[dict],
     physical_keys: frozenset[str],
 ) -> dict[str, dict]:
-    """Bucket per-host net.if.in items into physical vs tunnel.
+    """Bucket per-host net.if.in / net.if.out items into physical vs tunnel.
 
-    Physical = exact match on the curated physical-interface key list.
-    Tunnel   = any other net.if.in[*] that is not loopback/docker.
+    Physical = exact match on the curated physical-interface key list (or a
+    kernel physical-NIC naming pattern). Tunnel = any other interface that is
+    not loopback/docker. Outbound is tracked on the physical NIC only — it is
+    the discriminator between a genuine forwarding failure (physical out << in)
+    and a healthy NAT-mode relay that forwards through the physical NIC
+    (out ≈ in) with its tunnel interfaces idle by design.
 
     Returns:
-        {hostid: {"physical_bps": float, "tunnel_bps": float,
-                  "tunnel_count": int, "tunnel_names": list[str]}}
+        {hostid: {"physical_bps": float (in), "physical_out_bps": float,
+                  "tunnel_bps": float (in), "tunnel_count": int,
+                  "tunnel_names": list[str]}}
     """
     per_host: dict[str, dict] = {}
-    for it in items:
-        key = it.get("key_", "")
-        iface = _iface_from_key(key)
-        if not iface:
-            continue
-        if iface in _IGNORED_IFACES or iface.startswith("docker") or iface.startswith("br-"):
-            continue
-        try:
-            val = float(it.get("lastvalue", "0") or 0)
-        except (ValueError, TypeError):
-            val = 0.0
-        hid = it.get("hostid")
-        if not hid:
-            continue
-        slot = per_host.setdefault(
+
+    def _slot(hid: str) -> dict:
+        return per_host.setdefault(
             hid,
-            {"physical_bps": 0.0, "tunnel_bps": 0.0, "tunnel_count": 0, "tunnel_names": []},
+            {"physical_bps": 0.0, "physical_out_bps": 0.0, "tunnel_bps": 0.0,
+             "tunnel_count": 0, "tunnel_names": []},
         )
-        if key in physical_keys or _PHYSICAL_NIC_RE.match(iface):
-            slot["physical_bps"] += val
-        else:
-            slot["tunnel_bps"] += val
-            slot["tunnel_count"] += 1
-            slot["tunnel_names"].append(iface)
+
+    def _accum(items: list[dict], direction: str) -> None:
+        for it in items:
+            key = it.get("key_", "")
+            iface = _iface_from_key(key)
+            if not iface:
+                continue
+            if iface in _IGNORED_IFACES or iface.startswith("docker") or iface.startswith("br-"):
+                continue
+            try:
+                val = float(it.get("lastvalue", "0") or 0)
+            except (ValueError, TypeError):
+                val = 0.0
+            hid = it.get("hostid")
+            if not hid:
+                continue
+            slot = _slot(hid)
+            physical = key in physical_keys or bool(_PHYSICAL_NIC_RE.match(iface))
+            if direction == "in":
+                if physical:
+                    slot["physical_bps"] += val
+                else:
+                    slot["tunnel_bps"] += val
+                    slot["tunnel_count"] += 1
+                    slot["tunnel_names"].append(iface)
+            elif physical:
+                slot["physical_out_bps"] += val
+
+    _accum(in_items, "in")
+    _accum(out_items, "out")
     return per_host
+
+
+# A relay forwards what it receives. Only when physical outbound is below this
+# fraction of physical inbound is traffic "arriving but not relayed" — a real
+# forwarding failure. Healthy NAT-mode relays sit near 1.0 (out ≈ in).
+_OUT_IN_RATIO = 0.1
 
 
 def _find_idle_relays(
     per_host: dict[str, dict],
     min_mgmt_kbps: float,
-) -> list[tuple[str, float, int, list[str]]]:
-    """Return [(hostid, mgmt_kbps, tunnel_count, sample_tunnels), ...].
+) -> list[tuple[str, float, float, int, list[str]]]:
+    """Return [(hostid, in_kbps, out_kbps, tunnel_count, sample_tunnels), ...].
 
-    A relay is "idle" when:
+    A relay is flagged as NOT forwarding only when ALL hold:
     - At least one tunnel-class interface exists (else it is not a relay).
-    - The aggregate physical-NIC throughput is at or above min_mgmt_kbps.
-    - Every tunnel interface reports zero bytes/sec.
+    - Every tunnel interface reports zero bytes/sec in.
+    - Physical-NIC inbound is at or above min_mgmt_kbps.
+    - Physical-NIC outbound is below _OUT_IN_RATIO × inbound (receives but does
+      not relay). This excludes healthy NAT-mode relays (out ≈ in) that were
+      previously false-flagged by the inbound-only check.
     """
-    out: list[tuple[str, float, int, list[str]]] = []
+    out: list[tuple[str, float, float, int, list[str]]] = []
     for hid, data in per_host.items():
         if data["tunnel_count"] == 0:
             continue
         if data["tunnel_bps"] > 0:
             continue
-        mgmt_kbps = data["physical_bps"] / 1000.0
-        if mgmt_kbps < min_mgmt_kbps:
+        in_bps = data["physical_bps"]
+        in_kbps = in_bps / 1000.0
+        if in_kbps < min_mgmt_kbps:
             continue
+        if in_bps <= 0 or data["physical_out_bps"] >= in_bps * _OUT_IN_RATIO:
+            continue  # forwarding looks healthy (out ≈ in) — not a failure
         sample = sorted(set(data["tunnel_names"]))[:4]
-        out.append((hid, mgmt_kbps, data["tunnel_count"], sample))
+        out.append((hid, in_kbps, data["physical_out_bps"] / 1000.0,
+                    data["tunnel_count"], sample))
     out.sort(key=lambda r: -r[1])
     return out
 
@@ -233,11 +266,14 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
         ) -> str:
             """Find relay hosts where mgmt NIC has traffic but tunnel interfaces are at zero.
 
-            NAT-mode relays (no tunnels by design) may show as false positives;
-            cross-check the architecture before acting. See ADR 010, 015.
+            Flags a host only when the physical NIC receives traffic but sends
+            almost none (out < 10% of in) while all tunnel interfaces read 0 —
+            traffic arriving but not relayed. Healthy NAT-mode relays that
+            forward through the physical NIC (out ≈ in) are excluded by the
+            out-vs-in gate. See ADR 010, 015, 043.
 
             Args:
-                min_mgmt_kbps: Floor on aggregate physical-NIC throughput (default: 100)
+                min_mgmt_kbps: Floor on physical-NIC inbound throughput (default: 100)
                 max_results: Maximum results (default: 50)
                 country: 2-letter country code filter (optional)
                 instance: Zabbix instance name (optional)
@@ -258,34 +294,43 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 host_ids = [h["hostid"] for h in hosts]
                 host_map = {h["hostid"]: h for h in hosts}
 
-                items = await client.call("item.get", {
+                in_items = await client.call("item.get", {
                     "hostids": host_ids,
                     "output": ["hostid", "key_", "lastvalue"],
                     "search": {"key_": "net.if.in["},
                     "filter": {"status": "0"},
                 })
+                out_items = await client.call("item.get", {
+                    "hostids": host_ids,
+                    "output": ["hostid", "key_", "lastvalue"],
+                    "search": {"key_": "net.if.out["},
+                    "filter": {"status": "0"},
+                })
 
                 physical_keys = frozenset(TRAFFIC_IN_KEYS)
-                per_host = _split_iface_metrics(items, physical_keys)
+                per_host = _split_iface_metrics(in_items, out_items, physical_keys)
                 idle = _find_idle_relays(per_host, float(min_mgmt_kbps))
 
                 if not idle:
-                    return f"No idle relays found ({len(per_host)} hosts inspected)."
+                    return (f"No forwarding failures found ({len(per_host)} hosts inspected). "
+                            f"Relays with idle tunnels but balanced physical out/in are healthy "
+                            f"NAT-mode and excluded.")
 
                 shown = idle[:max_results]
                 lines = [
-                    f"**{len(idle)} idle relays** "
-                    f"(mgmt ≥ {min_mgmt_kbps} kbps, all tunnel interfaces at 0 bps)\n",
-                    "| Host | IP | Mgmt kbps | Idle tunnels | Sample |",
-                    "|------|----|-----------|--------------|--------|",
+                    f"**{len(idle)} relays not forwarding** "
+                    f"(physical in ≥ {min_mgmt_kbps} kbps, out < 10% of in, tunnels at 0 bps — "
+                    f"traffic arriving but not relayed)\n",
+                    "| Host | IP | In kbps | Out kbps | Idle tunnels | Sample |",
+                    "|------|----|---------|----------|--------------|--------|",
                 ]
-                for hid, mgmt_kbps, tun_count, sample in shown:
+                for hid, in_kbps, out_kbps, tun_count, sample in shown:
                     h = host_map.get(hid, {})
                     ip = host_ip(h)
                     sample_str = ", ".join(sample) if sample else "—"
                     lines.append(
                         f"| {h.get('host', '?')} | {ip} | "
-                        f"{mgmt_kbps:.1f} | {tun_count} | {sample_str} |"
+                        f"{in_kbps:.1f} | {out_kbps:.1f} | {tun_count} | {sample_str} |"
                     )
                 if len(idle) > max_results:
                     lines.append(f"\n*{len(idle) - max_results} more omitted*")
