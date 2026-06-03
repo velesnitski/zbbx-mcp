@@ -593,7 +593,7 @@ class TestIdleRelayDetection:
             {"hostid": "h1", "key_": "net.if.in[gre1]", "lastvalue": "0"},
             {"hostid": "h1", "key_": "net.if.in[lo]", "lastvalue": "999"},  # ignored
         ]
-        per_host = _split_iface_metrics(items, self._phys())
+        per_host = _split_iface_metrics(items, [], self._phys())
         assert per_host["h1"]["physical_bps"] == 20000
         assert per_host["h1"]["tunnel_bps"] == 0
         assert per_host["h1"]["tunnel_count"] == 2
@@ -606,7 +606,7 @@ class TestIdleRelayDetection:
             {"hostid": "h1", "key_": "net.if.in[docker0]", "lastvalue": "1"},
             {"hostid": "h1", "key_": "net.if.in[br-abc]", "lastvalue": "1"},
         ]
-        per_host = _split_iface_metrics(items, self._phys())
+        per_host = _split_iface_metrics(items, [], self._phys())
         assert per_host == {}
 
     def test_split_handles_garbage_values(self):
@@ -618,7 +618,7 @@ class TestIdleRelayDetection:
             {"hostid": "h1", "key_": "not-a-net-key", "lastvalue": "5"},
             {"hostid": "h1", "key_": "net.if.in[", "lastvalue": "5"},  # malformed
         ]
-        per_host = _split_iface_metrics(items, self._phys())
+        per_host = _split_iface_metrics(items, [], self._phys())
         # eth0 zero is still a recorded physical, no tunnel flagged
         assert per_host["h1"]["physical_bps"] == 0.0
         assert per_host["h1"]["tunnel_bps"] == 0.0
@@ -631,6 +631,7 @@ class TestIdleRelayDetection:
         per_host = {
             "h1": {
                 "physical_bps": 200_000,
+                "physical_out_bps": 0,  # receives but doesn't forward → flagged
                 "tunnel_bps": 0,
                 "tunnel_count": 3,
                 "tunnel_names": ["tun0", "tun1", "tun2"],
@@ -638,11 +639,28 @@ class TestIdleRelayDetection:
         }
         idle = _find_idle_relays(per_host, min_mgmt_kbps=100)
         assert len(idle) == 1
-        hid, mgmt_kbps, tun_count, sample = idle[0]
+        hid, in_kbps, out_kbps, tun_count, sample = idle[0]
         assert hid == "h1"
-        assert mgmt_kbps == 200.0
+        assert in_kbps == 200.0
+        assert out_kbps == 0.0
         assert tun_count == 3
         assert sample == ["tun0", "tun1", "tun2"]
+
+    def test_idle_relay_skipped_when_forwarding_healthy(self):
+        # NAT-mode relay: physical out ≈ in (forwards) with idle tunnels by
+        # design — must NOT be flagged (the out<<in gate, ADR 043).
+        from zbbx_mcp.tools.correlation import _find_idle_relays
+
+        per_host = {
+            "h1": {
+                "physical_bps": 200_000,
+                "physical_out_bps": 190_000,  # out ≈ in → healthy forwarder
+                "tunnel_bps": 0,
+                "tunnel_count": 3,
+                "tunnel_names": ["tun0", "tun1", "tun2"],
+            },
+        }
+        assert _find_idle_relays(per_host, min_mgmt_kbps=100) == []
 
     def test_idle_relay_skipped_when_tunnels_have_traffic(self):
         from zbbx_mcp.tools.correlation import _find_idle_relays
@@ -687,9 +705,9 @@ class TestIdleRelayDetection:
         from zbbx_mcp.tools.correlation import _find_idle_relays
 
         per_host = {
-            "h1": {"physical_bps": 100_000, "tunnel_bps": 0, "tunnel_count": 1, "tunnel_names": ["tun0"]},
-            "h2": {"physical_bps": 500_000, "tunnel_bps": 0, "tunnel_count": 1, "tunnel_names": ["tun0"]},
-            "h3": {"physical_bps": 250_000, "tunnel_bps": 0, "tunnel_count": 1, "tunnel_names": ["tun0"]},
+            "h1": {"physical_bps": 100_000, "physical_out_bps": 0, "tunnel_bps": 0, "tunnel_count": 1, "tunnel_names": ["tun0"]},
+            "h2": {"physical_bps": 500_000, "physical_out_bps": 0, "tunnel_bps": 0, "tunnel_count": 1, "tunnel_names": ["tun0"]},
+            "h3": {"physical_bps": 250_000, "physical_out_bps": 0, "tunnel_bps": 0, "tunnel_count": 1, "tunnel_names": ["tun0"]},
         }
         out = _find_idle_relays(per_host, 50)
         assert [r[0] for r in out] == ["h2", "h3", "h1"]
@@ -1547,7 +1565,7 @@ class TestPhysicalNicRegexFallback:
             {"hostid": "h1", "key_": "net.if.in[enp130s0f0]", "lastvalue": "0"},
             {"hostid": "h1", "key_": "net.if.in[tun0]", "lastvalue": "0"},
         ]
-        per_host = _split_iface_metrics(items, frozenset())
+        per_host = _split_iface_metrics(items, [], frozenset())
         # Only tun0 should land in tunnel_names.
         assert per_host["h1"]["tunnel_count"] == 1
         assert per_host["h1"]["tunnel_names"] == ["tun0"]
@@ -1559,7 +1577,7 @@ class TestPhysicalNicRegexFallback:
             {"hostid": "h1", "key_": "net.if.in[enx00aa11bb22cc]", "lastvalue": "0"},
             {"hostid": "h1", "key_": "net.if.in[gre1]", "lastvalue": "0"},
         ]
-        per_host = _split_iface_metrics(items, frozenset())
+        per_host = _split_iface_metrics(items, [], frozenset())
         assert per_host["h1"]["tunnel_names"] == ["gre1"]
 
     def test_explicit_physical_keys_still_win(self):
@@ -1569,7 +1587,7 @@ class TestPhysicalNicRegexFallback:
         items = [
             {"hostid": "h1", "key_": "net.if.in[eth0]", "lastvalue": "100"},
         ]
-        per_host = _split_iface_metrics(items, frozenset({"net.if.in[eth0]"}))
+        per_host = _split_iface_metrics(items, [], frozenset({"net.if.in[eth0]"}))
         assert per_host["h1"]["physical_bps"] == 100
         assert per_host["h1"]["tunnel_count"] == 0
 
@@ -1580,7 +1598,7 @@ class TestPhysicalNicRegexFallback:
             {"hostid": "h1", "key_": "net.if.in[gre1]", "lastvalue": "0"},
             {"hostid": "h1", "key_": "net.if.in[mytun0]", "lastvalue": "0"},
         ]
-        per_host = _split_iface_metrics(items, frozenset())
+        per_host = _split_iface_metrics(items, [], frozenset())
         assert sorted(per_host["h1"]["tunnel_names"]) == ["gre1", "mytun0"]
 
 
