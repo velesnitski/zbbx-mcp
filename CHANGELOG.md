@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.11.1] - 2026-06-04
+
+### Fixed — `generate_service_brief` per-country counters double-counted VIPs
+The per-country ok/partial/down/total tallies iterated raw Zabbix hosts,
+so a multi-VIP physical machine counted once per VIP — inflating the
+marketing-facing service-quality numbers (ADR 034/036 left these
+internal counters for later). Now folds sub-hosts to canonical groups:
+one physical machine = one count, traffic SUMs across the box's VIPs,
+and service checks merge across them worst-wins (a single failing VIP
+check pulls the box below "ok"). New pure helper
+`_classify_country_group(group_mbps, merged_checks)`. See ADR 045.
+
+### Tooling
+- 529 tests → 535 (+6 for `_classify_country_group`).
+
 ## [1.11.0] - 2026-06-04
 
 ### Added — maintenance-suppress filtering (`include_suppressed`)
