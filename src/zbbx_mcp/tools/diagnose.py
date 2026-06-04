@@ -181,6 +181,20 @@ def _verdict_primary_signal(facts: dict) -> str:
     return "—"
 
 
+def _freshest_agent_ping(items: list[dict]) -> dict | None:
+    """Return the `agent.ping` item with the most recent ``lastclock``.
+
+    Items may span a canonical group's VIP records (ADR 049); the freshest
+    reading is the box's true agent state — a stale sub-host record must
+    not override the parent's live agent. None when no ping item present.
+    Pure helper.
+    """
+    pings = [it for it in items if it.get("key_") == "agent.ping"]
+    if not pings:
+        return None
+    return max(pings, key=lambda it: int(it.get("lastclock", "0") or 0))
+
+
 async def _collect_diagnosis_inner(
     client,
     host_record: dict,
@@ -258,7 +272,10 @@ async def _collect_diagnosis_inner(
                     / len(trends_recent) / 1e6
                 )
 
-        ping = next((it for it in items if it.get("key_") == "agent.ping"), None)
+        # Agent ping across the whole box: items may span several VIP records
+        # (ADR 049), so pick the freshest reading — a stale sub-host record
+        # should not override the parent's live agent.
+        ping = _freshest_agent_ping(items)
         if ping:
             try:
                 agent_ping_val = int(float(ping.get("lastvalue", "0")))
@@ -496,9 +513,14 @@ async def _run_bulk_diagnosis(
     original_count = len(records)
     records, sub_counts = _dedupe_records_by_canonical(records)
 
-    hostids = [r["hostid"] for r in records]
+    # Fetch items across every VIP of every box (ADR 049) — traffic lives on
+    # the sub-host interfaces, so a rep-only read can miss it. Map each VIP's
+    # items back to its canonical group so each rep sees the whole box.
+    all_hostids = sorted({
+        hid for r in records for hid in (r.get("_group_hostids") or [r["hostid"]])
+    })
     all_items = await client.call("item.get", {
-        "hostids": hostids,
+        "hostids": all_hostids,
         "output": ["itemid", "hostid", "key_", "lastvalue", "lastclock"],
         "filter": {"status": "0"},
     })
@@ -508,10 +530,16 @@ async def _run_bulk_diagnosis(
     sem = asyncio.Semaphore(_BULK_CONCURRENCY)
     now = int(_time.time())
 
+    def _group_items(rec: dict) -> list[dict]:
+        out: list[dict] = []
+        for hid in (rec.get("_group_hostids") or [rec["hostid"]]):
+            out.extend(items_by_host.get(str(hid), []))
+        return out
+
     async def diagnose_one(rec: dict) -> dict:
         async with sem:
             return await _collect_diagnosis_inner(
-                client, rec, items_by_host.get(str(rec["hostid"]), []),
+                client, rec, _group_items(rec),
                 traffic_hours=traffic_hours,
                 problem_hours=problem_hours,
                 rotation_days=rotation_days,
@@ -637,9 +665,11 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     g["hostid"] for g in group
                     if canonical_host_name(g.get("host", "")) == canonical
                 ] or [rep["hostid"]]
+                # Items across the whole box (ADR 049): traffic lives on the
+                # sub-host VIP interfaces, so a rep-only read can miss it.
                 items = await client.call("item.get", {
-                    "hostids": [rep["hostid"]],
-                    "output": ["itemid", "key_", "lastvalue", "lastclock"],
+                    "hostids": group_hostids,
+                    "output": ["itemid", "hostid", "key_", "lastvalue", "lastclock"],
                     "filter": {"status": "0"},
                 })
                 facts = await _collect_diagnosis_inner(

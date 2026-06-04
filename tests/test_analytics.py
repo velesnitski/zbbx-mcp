@@ -3408,6 +3408,38 @@ class TestShutdownCandidateMetricFold:
         assert service == "PARTIAL"
 
 
+class TestFreshestAgentPing:
+    """Pure-helper tests for _freshest_agent_ping (#158, ADR 049)."""
+
+    def test_none_when_no_ping(self):
+        from zbbx_mcp.tools.diagnose import _freshest_agent_ping
+        assert _freshest_agent_ping([{"key_": "net.if.in[primary]"}]) is None
+
+    def test_picks_freshest_across_vips(self):
+        from zbbx_mcp.tools.diagnose import _freshest_agent_ping
+        # parent's ping is live (clock 200, up); a stale sub-host ping (clock
+        # 100, down) must not win.
+        items = [
+            {"key_": "agent.ping", "lastvalue": "0", "lastclock": "100"},
+            {"key_": "agent.ping", "lastvalue": "1", "lastclock": "200"},
+        ]
+        ping = _freshest_agent_ping(items)
+        assert ping["lastvalue"] == "1" and ping["lastclock"] == "200"
+
+    def test_single_ping_returned(self):
+        from zbbx_mcp.tools.diagnose import _freshest_agent_ping
+        items = [{"key_": "agent.ping", "lastvalue": "1", "lastclock": "50"}]
+        assert _freshest_agent_ping(items)["lastclock"] == "50"
+
+    def test_missing_clock_treated_as_zero(self):
+        from zbbx_mcp.tools.diagnose import _freshest_agent_ping
+        items = [
+            {"key_": "agent.ping", "lastvalue": "1"},  # no clock → 0
+            {"key_": "agent.ping", "lastvalue": "0", "lastclock": "5"},
+        ]
+        assert _freshest_agent_ping(items)["lastclock"] == "5"
+
+
 class TestBulkDiagnosePreFold:
     """Pure-helper tests for `_dedupe_records_by_canonical` (ADR 039).
 

@@ -5,6 +5,29 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.12.2] - 2026-06-04
+
+### Fixed — diagnosis read agent/traffic from the parent only (missed VIP traffic)
+ADR 046 merged sub-host *problems* onto the rep, but `diagnose_host` /
+`bulk_diagnose` still read agent-ping and traffic items from the
+representative record alone. On a multi-VIP box, traffic lives on the
+sub-host VIP interfaces — so the diagnosis reported "No traffic items"
+and could not assess `traffic_lost` on exactly the boxes most likely to
+be multi-VIP. (Observed live: a parent host whose VIPs carried the load
+diagnosed with no traffic data.)
+
+Now both paths fetch items across **every** hostid in the canonical
+group: traffic sums across the box's VIP interfaces, and agent
+reachability uses the freshest `agent.ping` across the group (a stale
+sub-host record can't override the parent's live agent — new
+`_freshest_agent_ping` helper). `bulk_diagnose` fetches group-wide items
+in its existing batch and maps them back per box, so no extra round-trip
+per host. Closes the recurring "traffic lives on the VIPs" gap noted in
+ADR 036/039/046. See ADR 049.
+
+### Tooling
+- 548 tests → 552 (+4 for `_freshest_agent_ping`).
+
 ## [1.12.1] - 2026-06-04
 
 ### Added — trigger dependency collapse (root-cause-only) in `get_active_problems`
