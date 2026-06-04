@@ -89,6 +89,7 @@ fixed headings (`## Problem`, `## Decision`, `## Test approach`,
 | [040](040-traffic-drop-classifier.md) | False-positive-resistant traffic-drop classifier | New `anomaly.py` brain: recent-avg vs seasonal same-hour band, acute-vs-sustained, demand-vs-block corroboration, baseline-weighted interface pick; `detect_traffic_drops` rebuilt on it |
 | [041](041-predictive-high-tier-render.md) | Render HIGH tier in `get_predictive_alerts` | Four-tier classifier wrote HIGH but the render collapsed it to INFO and omitted it from the summary — a false-negative; render the canonical severity field directly |
 | [042](042-traffic-drop-corroboration.md) | CPU/connection corroboration in `detect_traffic_drops` | Bounded second pass fetches CPU + connection trends for candidates only; demand troughs (signals fall with traffic) reclassify as `low_demand`; new `metric_recent_baseline_ratio` helper with idle→used inversion |
+| [043](043-idle-relays-out-vs-in-gate.md) | `get_idle_relays` out-vs-in gate | Gate on physical out/in ratio, not inbound-only — healthy NAT-mode relays (forward through physical NIC, tunnels idle by design) no longer flagged as forwarding failures |
 
 ## Writing a new ADR
 
