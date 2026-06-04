@@ -139,6 +139,26 @@ def build_parent_map(hosts: list[dict]) -> dict[str, str]:
                 parent_map[h["hostid"]] = pid
     return parent_map
 
+def filter_suppressed(problems: list[dict], include_suppressed: bool = False) -> list[dict]:
+    """Drop maintenance-suppressed problems unless ``include_suppressed``.
+
+    Zabbix sets ``suppressed: "1"`` on a problem whose host is inside an
+    active maintenance window. Those are planned downtime, not incidents —
+    counting them inflates every problem-surfacing view the moment ops
+    starts using maintenance. Default behaviour excludes them; pass
+    ``include_suppressed=True`` for full visibility.
+
+    Client-side and version-agnostic (the ``problem.get`` ``suppressed``
+    parameter semantics shifted across Zabbix versions). Requires the
+    caller to request ``suppressed`` in the ``problem.get`` output.
+
+    Pure helper (tasks.md #143, ADR 044).
+    """
+    if include_suppressed:
+        return list(problems)
+    return [p for p in problems if str(p.get("suppressed", "0")) != "1"]
+
+
 def canonical_host_name(name: str) -> str:
     """Return the canonical parent name for a Zabbix host record.
 

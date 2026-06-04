@@ -23,6 +23,7 @@ from zbbx_mcp.data import (
     build_parent_map,
     canonical_host_name,
     extract_country,
+    filter_suppressed,
     host_ip,
 )
 from zbbx_mcp.formatters import format_age, normalize_problem_name
@@ -348,6 +349,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
             min_severity: int = 3,
             max_clusters: int = 10,
             max_age_hours: int = 0,
+            include_suppressed: bool = False,
             instance: str = "",
         ) -> str:
             """Cluster outages on hosts sharing a network or group key.
@@ -360,6 +362,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 min_severity: Minimum severity 0-5 (default: 3 = Average)
                 max_clusters: Max clusters to render (default: 10)
                 max_age_hours: Drop problems older than this; 0 = unlimited (default: 0)
+                include_suppressed: Include maintenance-suppressed problems (default: False)
                 instance: Zabbix instance name (optional)
             """
             # Backwards-compat alias for the original parameter value.
@@ -378,13 +381,14 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 # the fetch — eventid is monotone with creation time so this only
                 # matters for the LIMIT cutoff, where eventid sort is fine.
                 problems = await client.call("problem.get", {
-                    "output": ["eventid", "name", "severity", "clock"],
+                    "output": ["eventid", "name", "severity", "clock", "suppressed"],
                     "severities": list(range(min_severity, 6)),
                     "sortfield": "eventid",
                     "sortorder": "DESC",
                     "limit": 2000,
                     "recent": True,
                 })
+                problems = filter_suppressed(problems, include_suppressed)
                 problems.sort(key=lambda p: -int(p.get("clock", 0)))
                 if max_age_hours > 0:
                     import time as _time

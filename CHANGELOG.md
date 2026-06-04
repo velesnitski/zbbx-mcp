@@ -5,6 +5,29 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.11.0] - 2026-06-04
+
+### Added — maintenance-suppress filtering (`include_suppressed`)
+Zabbix marks a problem `suppressed` when its host is inside an active
+maintenance window — planned downtime, not an incident. The problem-
+surfacing tools counted them anyway, so the moment ops configures a
+maintenance window every report would flag planned downtime as an
+outage. (Latent today — no windows configured — hence shipped as
+insurance before it bites.)
+
+New pure helper `data.filter_suppressed(problems, include_suppressed)`
+drops `suppressed == "1"` rows unless asked to keep them (client-side
+and version-agnostic, since the `problem.get` `suppressed` param
+semantics shifted across Zabbix versions). Wired into the four incident-
+surfacing tools, each gaining `include_suppressed: bool = False`:
+`get_active_problems`, `get_problems`, `get_host_floods`,
+`get_outage_clusters`. Each now requests the `suppressed` field and
+applies the filter. Default excludes — zero behaviour change while no
+maintenance windows exist. See ADR 044.
+
+### Tooling
+- 524 tests → 529 (+5 for `filter_suppressed`).
+
 ## [1.10.4] - 2026-06-04
 
 ### Fixed — `get_idle_relays` flagged healthy NAT-mode relays
