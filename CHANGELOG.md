@@ -5,6 +5,27 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.10.4] - 2026-06-04
+
+### Fixed — `get_idle_relays` flagged healthy NAT-mode relays
+The idle-relay check looked at `net.if.in` only and flagged "physical
+NIC busy + tunnel interfaces at 0 bps" as a forwarding failure. That is
+the normal signature of a NAT-mode relay — it forwards through the
+physical NIC with its tunnel interfaces idle by design — so the tool
+returned healthy relays as failures (busiest first, since sorted by
+throughput). The docstring hedged this but nothing gated on it.
+
+Fix: also fetch `net.if.out` and gate on the physical out/in ratio —
+flag only when the physical NIC receives (>= min) but sends < 10% of
+that (traffic arriving, not relayed) with all tunnels at 0. Healthy
+forwarders (out ~= in) are excluded. `_split_iface_metrics` now buckets
+both directions; `_find_idle_relays` returns in+out kbps; output shows
+both, and an empty result returns a "no forwarding failures" note.
+Mirrors the same fix in the report consumer. See ADR 043.
+
+### Tooling
+- 523 tests → 524 (+1: a balanced-throughput relay is not flagged).
+
 ## [1.10.3] - 2026-06-01
 
 ### Added — CPU/connection corroboration in `detect_traffic_drops`
