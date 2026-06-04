@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.12.3] - 2026-06-04
+
+### Added — dependency collapse in `get_host_floods`
+Completes ADR 048 (the ticket named both tools). `get_host_floods` now
+collapses symptom problems whose trigger depends on another firing
+trigger **before** the per-host count, reusing
+`collapse_dependent_problems`. This is the right interaction with the
+flood threshold: a host with 5 problems that are 1 root + 4 declared
+symptoms now counts as 1 real problem and no longer falsely trips a
+flood. New `collapse_dependent: bool = True` arg; no-op where no trigger
+dependencies are configured. See ADR 050.
+
 ## [1.12.2] - 2026-06-04
 
 ### Fixed — diagnosis read agent/traffic from the parent only (missed VIP traffic)
