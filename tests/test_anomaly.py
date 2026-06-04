@@ -284,6 +284,45 @@ class TestClassifyDropEdges:
         assert v.state == LOW_DEMAND
 
 
+class TestAggregateHourlyByCountry:
+    """Pure-helper tests for aggregate_hourly_by_country (#159, ADR 051)."""
+
+    def test_sums_same_hour_across_country_hosts(self):
+        from zbbx_mcp.anomaly import aggregate_hourly_by_country
+        # two hosts in country A; their hour-3600 values sum
+        host_series = {
+            "1": [(3600, 10.0), (7200, 20.0)],
+            "2": [(3600, 5.0), (7200, 8.0)],
+        }
+        host_country = {"1": "A", "2": "A"}
+        out = aggregate_hourly_by_country(host_series, host_country)
+        assert out["A"] == [(3600, 15.0), (7200, 28.0)]
+
+    def test_separates_countries(self):
+        from zbbx_mcp.anomaly import aggregate_hourly_by_country
+        host_series = {"1": [(3600, 10.0)], "2": [(3600, 7.0)]}
+        host_country = {"1": "A", "2": "B"}
+        out = aggregate_hourly_by_country(host_series, host_country)
+        assert out["A"] == [(3600, 10.0)] and out["B"] == [(3600, 7.0)]
+
+    def test_host_without_country_dropped(self):
+        from zbbx_mcp.anomaly import aggregate_hourly_by_country
+        host_series = {"1": [(3600, 10.0)], "2": [(3600, 99.0)]}
+        host_country = {"1": "A"}  # host 2 has no country
+        out = aggregate_hourly_by_country(host_series, host_country)
+        assert out == {"A": [(3600, 10.0)]}
+
+    def test_result_sorted_by_clock(self):
+        from zbbx_mcp.anomaly import aggregate_hourly_by_country
+        host_series = {"1": [(7200, 2.0), (3600, 1.0)]}
+        out = aggregate_hourly_by_country(host_series, {"1": "A"})
+        assert [c for c, _ in out["A"]] == [3600, 7200]
+
+    def test_empty(self):
+        from zbbx_mcp.anomaly import aggregate_hourly_by_country
+        assert aggregate_hourly_by_country({}, {}) == {}
+
+
 class TestRecentBaselineFromDaily:
     """Pure-helper tests for recent_baseline_from_daily (#153, ADR 047)."""
 

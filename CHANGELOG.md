@@ -5,6 +5,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.12.4] - 2026-06-04
+
+### Added — acute mode for `detect_regional_anomalies`
+ADR 047 put the regional detector on the classifier at a daily grain —
+diurnal-safe, but it can't catch an *immediate* regional block (one that
+started in the last few hours is diluted in today's daily average). New
+opt-in `acute=True` mode adds the deeper treatment: it sums each
+country's hourly traffic into a country-aggregate series and judges it
+against the country's **same-hour-of-day seasonal band** via
+`classify_drop`, flagging acute / sustained regional blocks immediately.
+
+Default stays `acute=False` (the daily roll-up), so existing behaviour
+and volume are unchanged. The acute path fetches one main interface per
+host (bounded, like `detect_traffic_drops`). New pure helper
+`anomaly.aggregate_hourly_by_country`. See ADR 051.
+
+### Tooling
+- 552 tests → 557 (+5 for `aggregate_hourly_by_country`).
+
 ## [1.12.3] - 2026-06-04
 
 ### Added — dependency collapse in `get_host_floods`
