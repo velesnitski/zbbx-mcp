@@ -4,6 +4,12 @@ from __future__ import annotations
 
 import httpx
 
+from zbbx_mcp.anomaly import (
+    BLOCKED_ACUTE,
+    BLOCKED_SUSTAINED,
+    classify_drop,
+    recent_baseline_from_daily,
+)
 from zbbx_mcp.classify import classify_host as _classify_host
 from zbbx_mcp.data import (
     KEY_service_PRIMARY,
@@ -120,15 +126,32 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                         if traffic:
                             country_avg_mbps += traffic.avg
 
-                        if traffic and traffic.avg > 1:
-                            drop_pct = ((traffic.avg - traffic.current) / traffic.avg * 100) if traffic.avg > 0 else 0
-                            if drop_pct >= drop_threshold:
-                                affected += 1
-                                drops.append(drop_pct)
-                        elif traffic and traffic.avg < 1 and traffic.peak > 10:
-                            # Was active, now dead
+                        if not traffic:
+                            continue
+
+                        # Classifier-based judgment (ADR 047): compare a
+                        # recent-DAYS average to the baseline-days average —
+                        # daily aggregates are diurnal-safe, so a nightly
+                        # trough no longer reads as a drop the way the old
+                        # avg-vs-instantaneous-current did. Falls back to
+                        # avg/current only when there aren't enough daily
+                        # points.
+                        recent_avg, baseline_avg = recent_baseline_from_daily(
+                            getattr(traffic, "daily", {}) or {},
+                        )
+                        if recent_avg is None:
+                            recent_avg, baseline_avg = traffic.current, traffic.avg
+                        verdict = classify_drop(
+                            recent_avg=recent_avg,
+                            baseline_avg=baseline_avg,
+                            seasonal_floor_value=None,  # no hourly series at this grain
+                            min_baseline=1.0,
+                            drop_pct_threshold=drop_threshold,
+                            agent_reachable=None if service1_status is None else (service1_status != 0),
+                        )
+                        if verdict.state in (BLOCKED_ACUTE, BLOCKED_SUSTAINED):
                             affected += 1
-                            drops.append(100.0)
+                            drops.append(verdict.drop_pct)
 
                     pct_affected = (affected / total * 100) if total > 0 else 0
 

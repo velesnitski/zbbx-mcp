@@ -130,6 +130,40 @@ def pick_traffic_interface(
     return max(candidates, key=lambda x: x[1])[0]
 
 
+def recent_baseline_from_daily(
+    daily: dict,
+    recent_days: int = 2,
+) -> tuple[float | None, float | None]:
+    """Split a date→value daily series into recent-avg vs baseline-avg.
+
+    ``daily`` maps date strings (lexically sortable, e.g. ``"2026-06-04"``)
+    to that day's average. Returns ``(recent_avg, baseline_avg)`` where
+    recent is the mean of the last ``recent_days`` entries and baseline is
+    the mean of the earlier ones. Returns ``(None, None)`` when there are
+    not enough days to form both windows.
+
+    Daily aggregates are inherently diurnal-safe — a full day's mean can't
+    show a nightly trough — so this is the right grain for the per-country
+    regional detector, which lacks the hourly series needed for a
+    same-hour seasonal floor (ADR 047). Using the most-recent *day* also
+    avoids the instantaneous-spot-reading false positive that the raw
+    ``current`` value produced.
+    """
+    if not daily or len(daily) < recent_days + 1:
+        return None, None
+    ordered = [daily[k] for k in sorted(daily)]
+    recent = ordered[-recent_days:]
+    baseline = ordered[:-recent_days]
+    if not recent or not baseline:
+        return None, None
+    try:
+        r = sum(float(v) for v in recent) / len(recent)
+        b = sum(float(v) for v in baseline) / len(baseline)
+    except (ValueError, TypeError):
+        return None, None
+    return r, b
+
+
 def metric_recent_baseline_ratio(
     records: list[tuple[int, float]],
     recent_start: int,
@@ -308,5 +342,6 @@ __all__ = [
     "HEALTHY", "LOW_DEMAND", "BLOCKED_ACUTE", "BLOCKED_SUSTAINED",
     "ARTIFACT", "UNKNOWN",
     "DropVerdict", "percentile", "seasonal_floor",
-    "pick_traffic_interface", "metric_recent_baseline_ratio", "classify_drop",
+    "pick_traffic_interface", "metric_recent_baseline_ratio",
+    "recent_baseline_from_daily", "classify_drop",
 ]

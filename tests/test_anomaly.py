@@ -282,3 +282,46 @@ class TestClassifyDropEdges:
             cpu_ratio=0.08,   # CPU collapsed with traffic
         )
         assert v.state == LOW_DEMAND
+
+
+class TestRecentBaselineFromDaily:
+    """Pure-helper tests for recent_baseline_from_daily (#153, ADR 047)."""
+
+    def test_splits_recent_vs_baseline(self):
+        from zbbx_mcp.anomaly import recent_baseline_from_daily
+        daily = {
+            "2026-06-01": 100.0, "2026-06-02": 100.0,
+            "2026-06-03": 100.0, "2026-06-04": 50.0, "2026-06-05": 50.0,
+        }
+        r, b = recent_baseline_from_daily(daily, recent_days=2)
+        assert r == 50.0   # mean of last 2 days
+        assert b == 100.0  # mean of the earlier 3
+
+    def test_lexical_date_order_not_dict_order(self):
+        from zbbx_mcp.anomaly import recent_baseline_from_daily
+        # insertion order scrambled — must sort by date key
+        daily = {"2026-06-05": 50.0, "2026-06-01": 100.0,
+                 "2026-06-03": 100.0, "2026-06-02": 100.0, "2026-06-04": 50.0}
+        r, b = recent_baseline_from_daily(daily, recent_days=2)
+        assert r == 50.0 and b == 100.0
+
+    def test_too_few_days_returns_none(self):
+        from zbbx_mcp.anomaly import recent_baseline_from_daily
+        # recent_days=2 needs >= 3 days
+        assert recent_baseline_from_daily({"a": 1.0, "b": 2.0}, recent_days=2) == (None, None)
+
+    def test_empty_returns_none(self):
+        from zbbx_mcp.anomaly import recent_baseline_from_daily
+        assert recent_baseline_from_daily({}, recent_days=2) == (None, None)
+
+    def test_malformed_values_return_none(self):
+        from zbbx_mcp.anomaly import recent_baseline_from_daily
+        daily = {"a": "x", "b": "y", "c": "z", "d": "w"}
+        assert recent_baseline_from_daily(daily, recent_days=2) == (None, None)
+
+    def test_diurnal_safe_no_false_drop_on_stable_days(self):
+        from zbbx_mcp.anomaly import recent_baseline_from_daily
+        # stable daily averages → recent ~ baseline → no drop
+        daily = {f"2026-06-0{i}": 80.0 for i in range(1, 6)}
+        r, b = recent_baseline_from_daily(daily, recent_days=2)
+        assert r == 80.0 and b == 80.0
