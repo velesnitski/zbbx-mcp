@@ -3484,6 +3484,55 @@ class TestBulkDiagnosePreFold:
         assert subs == {}
 
 
+class TestCollapseDependentProblems:
+    """Pure-helper tests for collapse_dependent_problems (#144, ADR 048)."""
+
+    def test_drops_symptom_when_root_firing(self):
+        from zbbx_mcp.data import collapse_dependent_problems
+        problems = [
+            {"eventid": "1", "objectid": "10", "name": "root"},
+            {"eventid": "2", "objectid": "20", "name": "symptom"},
+        ]
+        kept, n = collapse_dependent_problems(problems, {"20": {"10"}})
+        assert n == 1
+        assert {p["objectid"] for p in kept} == {"10"}
+
+    def test_keeps_symptom_when_root_not_firing(self):
+        from zbbx_mcp.data import collapse_dependent_problems
+        problems = [{"eventid": "2", "objectid": "20", "name": "symptom"}]
+        kept, n = collapse_dependent_problems(problems, {"20": {"10"}})
+        assert n == 0 and len(kept) == 1
+
+    def test_no_dependencies_is_noop(self):
+        from zbbx_mcp.data import collapse_dependent_problems
+        problems = [{"eventid": "1", "objectid": "10"}, {"eventid": "2", "objectid": "11"}]
+        kept, n = collapse_dependent_problems(problems, {})
+        assert n == 0 and len(kept) == 2
+
+    def test_collapse_false_is_noop(self):
+        from zbbx_mcp.data import collapse_dependent_problems
+        problems = [{"eventid": "1", "objectid": "10"}, {"eventid": "2", "objectid": "20"}]
+        kept, n = collapse_dependent_problems(problems, {"20": {"10"}}, collapse=False)
+        assert n == 0 and len(kept) == 2
+
+    def test_chain_collapses_only_active_dependency(self):
+        from zbbx_mcp.data import collapse_dependent_problems
+        problems = [
+            {"eventid": "1", "objectid": "10"},
+            {"eventid": "2", "objectid": "20"},
+            {"eventid": "3", "objectid": "30"},
+        ]
+        dep_map = {"30": {"20"}, "20": {"10"}}
+        kept, n = collapse_dependent_problems(problems, dep_map)
+        assert n == 2
+        assert {p["objectid"] for p in kept} == {"10"}
+
+    def test_missing_objectid_kept(self):
+        from zbbx_mcp.data import collapse_dependent_problems
+        kept, n = collapse_dependent_problems([{"eventid": "1"}], {"x": {"y"}})
+        assert n == 0 and len(kept) == 1
+
+
 class TestFilterSuppressed:
     """Pure-helper tests for filter_suppressed (#143, ADR 044)."""
 

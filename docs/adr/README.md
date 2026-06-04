@@ -94,6 +94,7 @@ fixed headings (`## Problem`, `## Decision`, `## Test approach`,
 | [045](045-service-brief-country-fold.md) | `generate_service_brief` per-country fold | Per-country ok/partial/down counters fold sub-hosts to canonical (traffic SUM, service worst-wins) — multi-VIP boxes count once; new `_classify_country_group` helper |
 | [046](046-diagnose-subhost-problems.md) | Diagnosis queries the whole canonical group | `diagnose_host` / `bulk_diagnose` query problems across every VIP hostid, not just the parent — a sub-host problem no longer hides as `healthy` |
 | [047](047-regional-anomalies-classifier.md) | `detect_regional_anomalies` on the classifier | Per-host judgment via `classify_drop` fed a recent-days vs baseline-days average (`recent_baseline_from_daily`) — daily grain is diurnal-safe, killing the spot-reading false positives |
+| [048](048-trigger-dependency-collapse.md) | Trigger dependency collapse | `get_active_problems` drops symptom problems whose trigger depends on another firing trigger (root-cause-only); new `collapse_dependent_problems` helper, `collapse_dependent=True` |
 
 ## Writing a new ADR
 

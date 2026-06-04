@@ -139,6 +139,42 @@ def build_parent_map(hosts: list[dict]) -> dict[str, str]:
                 parent_map[h["hostid"]] = pid
     return parent_map
 
+def collapse_dependent_problems(
+    problems: list[dict],
+    dep_map: dict[str, set],
+    collapse: bool = True,
+) -> tuple[list[dict], int]:
+    """Drop symptom problems whose trigger depends on a firing trigger.
+
+    Zabbix lets a trigger declare it *depends on* another (e.g. a service
+    check depends on "agent unreachable" — when the agent is down the
+    service can't be checked, so both fire). When the dependency is also
+    active, the dependent problem is symptomatic noise; the root cause is
+    what ops should act on.
+
+    ``problems`` each carry ``objectid`` (the firing trigger id).
+    ``dep_map`` maps a trigger id to the set of trigger ids it depends on.
+    A problem is dropped when any of its dependencies is itself in the
+    active set (the trigger ids of ``problems``). Returns
+    ``(kept, collapsed_count)``.
+
+    Pure helper (tasks.md #144, ADR 048). No-op (returns the input) when
+    ``collapse`` is False or no dependencies are configured.
+    """
+    if not collapse:
+        return list(problems), 0
+    active = {p.get("objectid") for p in problems if p.get("objectid")}
+    kept: list[dict] = []
+    collapsed = 0
+    for p in problems:
+        deps = dep_map.get(p.get("objectid", ""), set())
+        if deps & active:
+            collapsed += 1
+            continue
+        kept.append(p)
+    return kept, collapsed
+
+
 def filter_suppressed(problems: list[dict], include_suppressed: bool = False) -> list[dict]:
     """Drop maintenance-suppressed problems unless ``include_suppressed``.
 
