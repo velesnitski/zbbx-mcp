@@ -5,6 +5,30 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.12.0] - 2026-06-04
+
+### Changed — `detect_regional_anomalies` on the false-positive-resistant classifier
+The regional detector judged each host by `(avg − current) / avg` — the
+same instantaneous-spot-reading-vs-average comparison that produced the
+diurnal false positives `detect_traffic_drops` was rebuilt to eliminate
+(ADR 040). On a normal nightly trough it flagged "N countries affected"
+that were fine.
+
+Now each host is judged by `anomaly.classify_drop`, fed a recent-**days**
+average vs a baseline-days average via the new
+`recent_baseline_from_daily` helper. Daily aggregates are inherently
+diurnal-safe (a full day's mean can't show a nightly trough), and the
+classifier's floor + threshold + host-down rule-out (via service status)
+apply. The per-country roll-up (≥ `country_threshold` % of a country's
+hosts affected) and the `min_avg_mbps` micro-market gate are unchanged.
+
+The grain is daily, not hourly: this detector has no hourly series for a
+same-hour seasonal floor, so `seasonal_floor_value` is None here (the
+daily aggregation provides the diurnal safety instead). See ADR 047.
+
+### Tooling
+- 536 tests → 542 (+6 for `recent_baseline_from_daily`).
+
 ## [1.11.2] - 2026-06-04
 
 ### Fixed — diagnosis missed sub-host (VIP) problems

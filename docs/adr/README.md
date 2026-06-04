@@ -93,6 +93,7 @@ fixed headings (`## Problem`, `## Decision`, `## Test approach`,
 | [044](044-maintenance-suppress-filter.md) | Maintenance-suppress filtering | `filter_suppressed` helper + `include_suppressed=False` on `get_active_problems` / `get_problems` / `get_host_floods` / `get_outage_clusters` — planned-downtime problems no longer counted as incidents |
 | [045](045-service-brief-country-fold.md) | `generate_service_brief` per-country fold | Per-country ok/partial/down counters fold sub-hosts to canonical (traffic SUM, service worst-wins) — multi-VIP boxes count once; new `_classify_country_group` helper |
 | [046](046-diagnose-subhost-problems.md) | Diagnosis queries the whole canonical group | `diagnose_host` / `bulk_diagnose` query problems across every VIP hostid, not just the parent — a sub-host problem no longer hides as `healthy` |
+| [047](047-regional-anomalies-classifier.md) | `detect_regional_anomalies` on the classifier | Per-host judgment via `classify_drop` fed a recent-days vs baseline-days average (`recent_baseline_from_daily`) — daily grain is diurnal-safe, killing the spot-reading false positives |
 
 ## Writing a new ADR
 
