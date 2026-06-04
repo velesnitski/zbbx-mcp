@@ -2,7 +2,12 @@ import time as _time
 
 import httpx
 
-from zbbx_mcp.data import canonical_host_name, fetch_traffic_map, filter_suppressed
+from zbbx_mcp.data import (
+    canonical_host_name,
+    collapse_dependent_problems,
+    fetch_traffic_map,
+    filter_suppressed,
+)
 from zbbx_mcp.formatters import normalize_problem_name
 from zbbx_mcp.resolver import InstanceResolver
 from zbbx_mcp.tag_filter import parse_tag_filter
@@ -207,6 +212,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
             max_results: int = 30,
             tags: str = "",
             include_suppressed: bool = False,
+            collapse_dependent: bool = True,
             instance: str = "",
         ) -> str:
             """Active problems summary — grouped by severity with counts.
@@ -217,6 +223,9 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 tags: Tag filter as "key:value,key2:value2" (e.g. "role:edge,env:prod").
                     Bare key like "role" means "tag exists". AND-combined.
                 include_suppressed: Include maintenance-suppressed problems (default: False)
+                collapse_dependent: Drop symptom problems whose trigger depends on
+                    another firing trigger — show root cause only (default: True;
+                    no-op where no trigger dependencies are configured)
                 instance: Zabbix instance name (optional)
             """
             try:
@@ -235,6 +244,25 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     _params["evaltype"] = 0
                 problems = await client.call("problem.get", _params)
                 problems = filter_suppressed(problems, include_suppressed)
+
+                # Collapse dependent (symptom) problems whose trigger depends on
+                # another firing trigger — show root cause only (ADR 048). No-op
+                # where no trigger dependencies are configured.
+                collapsed_count = 0
+                if collapse_dependent and problems:
+                    trigger_ids = sorted({p["objectid"] for p in problems if p.get("objectid")})
+                    trigs = await client.call("trigger.get", {
+                        "triggerids": trigger_ids,
+                        "output": ["triggerid"],
+                        "selectDependencies": ["triggerid"],
+                    })
+                    dep_map = {
+                        t["triggerid"]: {d["triggerid"] for d in t.get("dependencies", [])}
+                        for t in trigs
+                    }
+                    problems, collapsed_count = collapse_dependent_problems(
+                        problems, dep_map, collapse_dependent,
+                    )
 
                 # problem.get doesn't reliably return hosts in Zabbix 6.4 — use event.get
                 if problems:
@@ -262,7 +290,11 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     s = _SEV.get(int(p.get("severity", 0)), "?")
                     sev_counts[s] = sev_counts.get(s, 0) + 1
 
-                lines = [f"**{len(problems)} active problems**\n"]
+                _collapsed_note = (
+                    f" ({collapsed_count} dependent symptom(s) collapsed)"
+                    if collapsed_count else ""
+                )
+                lines = [f"**{len(problems)} active problems**{_collapsed_note}\n"]
                 # Summary by severity
                 for sev in ["Disaster", "High", "Average", "Warning", "Info"]:
                     if sev in sev_counts:

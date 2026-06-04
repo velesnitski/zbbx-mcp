@@ -5,6 +5,27 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.12.1] - 2026-06-04
+
+### Added — trigger dependency collapse (root-cause-only) in `get_active_problems`
+Zabbix lets a trigger declare it depends on another — when a service
+check depends on "agent unreachable", an agent-down event fires both,
+and the dependent one is symptomatic noise. `get_active_problems` now
+collapses those: it fetches `trigger.get` with `selectDependencies` for
+the firing triggers and drops any problem whose trigger depends on
+another currently-firing trigger, leaving the root cause. New
+`collapse_dependent: bool = True` arg; the header notes how many
+symptoms were collapsed.
+
+New pure helper `data.collapse_dependent_problems(problems, dep_map,
+collapse)`. No-op where no trigger dependencies are configured (the
+monitored instance currently has none), so zero behaviour change today —
+pure noise reduction for environments that wire dependencies. See
+ADR 048.
+
+### Tooling
+- 542 tests → 548 (+6 for `collapse_dependent_problems`).
+
 ## [1.12.0] - 2026-06-04
 
 ### Changed — `detect_regional_anomalies` on the false-positive-resistant classifier
