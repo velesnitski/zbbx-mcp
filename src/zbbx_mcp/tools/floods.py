@@ -18,7 +18,11 @@ from datetime import datetime, timezone
 
 import httpx
 
-from zbbx_mcp.data import build_parent_map, filter_suppressed
+from zbbx_mcp.data import (
+    build_parent_map,
+    collapse_dependent_problems,
+    filter_suppressed,
+)
 from zbbx_mcp.formatters import format_age, normalize_problem_name
 from zbbx_mcp.resolver import InstanceResolver
 
@@ -98,6 +102,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
             max_results: int = 20,
             max_age_hours: int = 0,
             include_suppressed: bool = False,
+            collapse_dependent: bool = True,
             instance: str = "",
         ) -> str:
             """Find hosts with many simultaneous active problems (whole-host outages).
@@ -110,12 +115,15 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 max_results: Maximum hosts to render (default: 20)
                 max_age_hours: Drop floods whose earliest problem is older than this; 0 = unlimited (default: 0)
                 include_suppressed: Include maintenance-suppressed problems (default: False)
+                collapse_dependent: Drop symptom problems whose trigger depends on
+                    another firing trigger before counting (default: True; no-op
+                    where no trigger dependencies are configured)
                 instance: Zabbix instance name (optional)
             """
             try:
                 client = resolver.resolve(instance)
                 problems = await client.call("problem.get", {
-                    "output": ["eventid", "name", "severity", "clock", "suppressed"],
+                    "output": ["eventid", "name", "severity", "clock", "suppressed", "objectid"],
                     "severities": list(range(min_severity, 6)),
                     "sortfield": "eventid",
                     "sortorder": "DESC",
@@ -123,6 +131,24 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     "recent": True,
                 })
                 problems = filter_suppressed(problems, include_suppressed)
+
+                # Collapse dependent (symptom) problems before counting, so a
+                # cascade on one host (root + its declared symptoms) doesn't
+                # inflate that host past the flood threshold (ADR 050). No-op
+                # where no trigger dependencies are configured.
+                if collapse_dependent and problems:
+                    trigger_ids = sorted({p["objectid"] for p in problems if p.get("objectid")})
+                    trigs = await client.call("trigger.get", {
+                        "triggerids": trigger_ids,
+                        "output": ["triggerid"],
+                        "selectDependencies": ["triggerid"],
+                    })
+                    dep_map = {
+                        t["triggerid"]: {d["triggerid"] for d in t.get("dependencies", [])}
+                        for t in trigs
+                    }
+                    problems, _ = collapse_dependent_problems(problems, dep_map, collapse_dependent)
+
                 if not problems:
                     return f"No active problems (severity >= {min_severity})."
 
