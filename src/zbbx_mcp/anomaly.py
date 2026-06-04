@@ -130,6 +130,32 @@ def pick_traffic_interface(
     return max(candidates, key=lambda x: x[1])[0]
 
 
+def aggregate_hourly_by_country(
+    host_series: dict[str, list[tuple[int, float]]],
+    host_country: dict[str, str],
+) -> dict[str, list[tuple[int, float]]]:
+    """Sum per-host hourly series into per-country hourly series.
+
+    ``host_series`` maps hostid → ``[(epoch, value), ...]``;
+    ``host_country`` maps hostid → country code. Values at the same epoch
+    (hour bucket) are summed across a country's hosts, giving the
+    country's aggregate hourly throughput — the series the acute regional
+    detector classifies (ADR 051). Returns country → sorted
+    ``[(epoch, summed), ...]``.
+
+    Pure helper.
+    """
+    by_country: dict[str, dict[int, float]] = {}
+    for hid, series in host_series.items():
+        cc = host_country.get(hid)
+        if not cc:
+            continue
+        acc = by_country.setdefault(cc, {})
+        for clock, val in series:
+            acc[clock] = acc.get(clock, 0.0) + float(val)
+    return {cc: sorted(acc.items()) for cc, acc in by_country.items()}
+
+
 def recent_baseline_from_daily(
     daily: dict,
     recent_days: int = 2,
@@ -343,5 +369,5 @@ __all__ = [
     "ARTIFACT", "UNKNOWN",
     "DropVerdict", "percentile", "seasonal_floor",
     "pick_traffic_interface", "metric_recent_baseline_ratio",
-    "recent_baseline_from_daily", "classify_drop",
+    "recent_baseline_from_daily", "aggregate_hourly_by_country", "classify_drop",
 ]

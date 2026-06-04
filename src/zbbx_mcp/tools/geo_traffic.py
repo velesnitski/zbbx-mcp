@@ -2,13 +2,17 @@
 
 from __future__ import annotations
 
+import time as _time
+
 import httpx
 
 from zbbx_mcp.anomaly import (
     BLOCKED_ACUTE,
     BLOCKED_SUSTAINED,
+    aggregate_hourly_by_country,
     classify_drop,
     recent_baseline_from_daily,
+    seasonal_floor,
 )
 from zbbx_mcp.classify import classify_host as _classify_host
 from zbbx_mcp.data import (
@@ -25,6 +29,128 @@ from zbbx_mcp.data import (
 from zbbx_mcp.resolver import InstanceResolver
 
 
+async def _detect_regional_acute(
+    client,
+    countries: dict[str, list[dict]],
+    *,
+    baseline_days: int,
+    recent_hours: int,
+    drop_threshold: float,
+    min_avg_mbps: float,
+) -> str:
+    """Acute regional detection (ADR 051): sum each country's hourly traffic
+    and classify the country aggregate against its same-hour seasonal band.
+
+    Catches an immediate regional block — one that started in the last few
+    hours — which the daily-grain default cannot (a fresh drop is diluted
+    in today's daily average).
+    """
+    all_ids = [h["hostid"] for hs in countries.values() for h in hs]
+    host_country = {
+        h["hostid"]: cc for cc, hs in countries.items() for h in hs
+    }
+
+    # One main traffic interface per host (highest current value), bounded.
+    traffic_items = await client.call("item.get", {
+        "hostids": all_ids,
+        "output": ["itemid", "hostid", "lastvalue"],
+        "search": {"name": "Incoming network traffic"},
+        "filter": {"status": "0"},
+    })
+
+    def _lv(it: dict) -> float:
+        try:
+            return float(it.get("lastvalue", "0") or 0)
+        except (ValueError, TypeError):
+            return 0.0
+
+    main_item: dict[str, dict] = {}
+    for it in traffic_items:
+        hid = it["hostid"]
+        if hid not in main_item or _lv(it) > _lv(main_item[hid]):
+            main_item[hid] = it
+    if not main_item:
+        return "No traffic items found for acute analysis."
+
+    now = int(_time.time())
+    item_ids = [it["itemid"] for it in main_item.values()]
+    trends = await client.call("trend.get", {
+        "itemids": item_ids,
+        "time_from": now - baseline_days * 86400,
+        "output": ["itemid", "clock", "value_avg"],
+        "limit": len(item_ids) * baseline_days * 24,
+    })
+    iid_to_hid = {it["itemid"]: hid for hid, it in main_item.items()}
+    host_series: dict[str, list[tuple[int, float]]] = {}
+    for t in trends:
+        hid = iid_to_hid.get(t["itemid"])
+        if hid is None:
+            continue
+        host_series.setdefault(hid, []).append(
+            (int(t["clock"]), float(t.get("value_avg", 0) or 0) / 1e6)
+        )
+
+    country_series = aggregate_hourly_by_country(host_series, host_country)
+    recent_start = now - recent_hours * 3600
+    cur_hour = (now // 3600) % 24
+
+    flagged = []
+    for cc, series in country_series.items():
+        recent = [v for (c, v) in series if c >= recent_start]
+        baseline = [v for (c, v) in series if c < recent_start]
+        if not recent or not baseline:
+            continue
+        recent_avg = sum(recent) / len(recent)
+        baseline_avg = sum(baseline) / len(baseline)
+        sfloor = seasonal_floor(series, cur_hour)
+        sustained = 0
+        if sfloor is not None:
+            recent_desc = sorted(
+                (pt for pt in series if pt[0] >= recent_start), reverse=True,
+            )
+            for _clock, v in recent_desc:
+                if v < sfloor:
+                    sustained += 1
+                else:
+                    break
+        verdict = classify_drop(
+            recent_avg=recent_avg,
+            baseline_avg=baseline_avg,
+            seasonal_floor_value=sfloor,
+            min_baseline=min_avg_mbps,
+            drop_pct_threshold=drop_threshold,
+            sustained_buckets=sustained,
+        )
+        if verdict.state in (BLOCKED_ACUTE, BLOCKED_SUSTAINED):
+            flagged.append({
+                "country": cc, "recent": recent_avg, "baseline": baseline_avg,
+                "state": verdict.state, "confidence": verdict.confidence,
+                "drop_pct": verdict.drop_pct, "reason": verdict.reasons[-1] if verdict.reasons else "",
+            })
+
+    if not flagged:
+        return (
+            f"No acute regional anomalies (analyzed {len(country_series)} countries; "
+            "country-aggregate hourly traffic within the seasonal band)."
+        )
+    _order = {BLOCKED_SUSTAINED: 0, BLOCKED_ACUTE: 1}
+    flagged.sort(key=lambda d: (_order.get(d["state"], 9), -d["confidence"]))
+    parts = [
+        f"**Acute regional anomalies: {len(flagged)} countr(y/ies)** "
+        "(country-aggregate hourly vs same-hour seasonal band)\n",
+        "| Country | State | Conf | Recent → Baseline | Drop | Why |",
+        "|---------|-------|------|-------------------|------|-----|",
+    ]
+    for d in flagged:
+        label = "SUSTAINED" if d["state"] == BLOCKED_SUSTAINED else "ACUTE"
+        parts.append(
+            f"| {d['country']} | {label} | {d['confidence']}% | "
+            f"{d['recent']:.1f} → {d['baseline']:.1f} Mbps | "
+            f"**{d['drop_pct']:.0f}%** | {d['reason']} |"
+        )
+    return "\n".join(parts)
+
+
 def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> None:
 
     if "detect_regional_anomalies" not in skip:
@@ -38,6 +164,8 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
             min_servers: int = 2,
             min_avg_mbps: float = 10.0,
             product: str = "",
+            acute: bool = False,
+            recent_hours: int = 6,
             instance: str = "",
         ) -> str:
             """Detect country-level regional traffic anomalies by analyzing traffic drops per country.
@@ -51,6 +179,12 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 min_avg_mbps: Min avg country traffic to alert (default: 10 Mbps,
                     filters micro-markets where % drops are statistical noise)
                 product: Filter by product (optional)
+                acute: Acute mode (ADR 051) — sum each country's hourly traffic and
+                    judge the country aggregate against its same-hour seasonal band,
+                    so an immediate regional block (started in the last few hours) is
+                    caught now. Default False uses the diurnal-safe daily-grain
+                    per-host roll-up (ADR 047).
+                recent_hours: Recent-window size for acute mode (default: 6)
                 instance: Zabbix instance (optional)
             """
             try:
@@ -78,6 +212,13 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 countries = {c: hs for c, hs in countries.items() if len(hs) >= min_servers}
                 if not countries:
                     return "No countries with enough servers for analysis."
+
+                if acute:
+                    return await _detect_regional_acute(
+                        client, countries, baseline_days=baseline_days,
+                        recent_hours=recent_hours, drop_threshold=drop_threshold,
+                        min_avg_mbps=min_avg_mbps,
+                    )
 
                 # Get trends for all hosts
                 all_ids = [h["hostid"] for c_hosts in countries.values() for h in c_hosts]

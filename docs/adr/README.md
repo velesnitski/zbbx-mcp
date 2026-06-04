@@ -97,6 +97,7 @@ fixed headings (`## Problem`, `## Decision`, `## Test approach`,
 | [048](048-trigger-dependency-collapse.md) | Trigger dependency collapse | `get_active_problems` drops symptom problems whose trigger depends on another firing trigger (root-cause-only); new `collapse_dependent_problems` helper, `collapse_dependent=True` |
 | [049](049-diagnose-group-wide-facts.md) | Diagnosis reads agent/traffic group-wide | `diagnose_host` / `bulk_diagnose` read items across every VIP — traffic sums across the box, agent uses the freshest ping; closes the "traffic lives on the VIPs" gap |
 | [050](050-floods-dependency-collapse.md) | Dependency collapse in `get_host_floods` | Completes ADR 048's ticket — collapse symptom problems before the per-host count so a cascade (root + declared symptoms) doesn't falsely trip a flood |
+| [051](051-regional-acute-mode.md) | Acute mode for `detect_regional_anomalies` | Opt-in `acute=True` sums each country's hourly traffic and judges it against its same-hour seasonal band (`aggregate_hourly_by_country`) — catches immediate regional blocks the daily grain dilutes |
 
 ## Writing a new ADR
 
