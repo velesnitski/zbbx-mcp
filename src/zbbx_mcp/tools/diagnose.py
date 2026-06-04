@@ -189,6 +189,7 @@ async def _collect_diagnosis_inner(
     traffic_hours: int = 6,
     problem_hours: int = 24,
     rotation_days: int = 14,
+    group_hostids: list[str] | None = None,
     now: int | None = None,
 ) -> dict:
     """Gather diagnosis facts for one host given pre-fetched ``host_record`` + ``items``.
@@ -196,15 +197,22 @@ async def _collect_diagnosis_inner(
     Returns a dict of facts plus ``verdict`` and ``action``.
     Used by both ``diagnose_host`` (renders verbose) and
     ``bulk_diagnose`` (renders one row).
+
+    ``group_hostids`` — when the host is a multi-VIP physical machine,
+    the hostids of every VIP in the canonical group. Problems are queried
+    across all of them so a sub-host-specific problem still affects the
+    verdict (ADR 046). Defaults to the rep host alone.
     """
     if now is None:
         now = int(_time.time())
     hid = host_record["hostid"]
     mode = _classify_host_mode(host_record, items)
 
-    # Active problems
+    # Active problems — across every VIP of the box when known, so a
+    # sub-host problem is not invisible to the verdict.
+    problem_hostids = group_hostids or [hid]
     problems = await client.call("problem.get", {
-        "hostids": [hid],
+        "hostids": problem_hostids,
         "output": ["eventid", "name", "severity", "clock"],
         "sortfield": "eventid",
         "sortorder": "DESC",
@@ -459,6 +467,9 @@ def _dedupe_records_by_canonical(records: list[dict]) -> tuple[list[dict], dict[
             if " " not in r.get("host", ""):
                 rep = r
                 break
+        # Carry the whole group's hostids so the diagnosis can query
+        # problems across every VIP, not just the rep (ADR 046).
+        rep["_group_hostids"] = [r["hostid"] for r in recs]
         deduped.append(rep)
         sub_counts[cn] = len(recs) - 1
     return deduped, sub_counts
@@ -504,6 +515,7 @@ async def _run_bulk_diagnosis(
                 traffic_hours=traffic_hours,
                 problem_hours=problem_hours,
                 rotation_days=rotation_days,
+                group_hostids=rec.get("_group_hostids"),
                 now=now,
             )
 
@@ -611,16 +623,31 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 })
                 if not hosts:
                     return f"Host not found or disabled: {host}"
+                rep = hosts[0]
+                # Pull the whole canonical group (parent + VIP sub-hosts) so a
+                # sub-host-specific problem still affects the verdict (ADR 046).
+                canonical = canonical_host_name(rep["host"])
+                group = await client.call("host.get", {
+                    "output": ["hostid", "host"],
+                    "search": {"host": canonical},
+                    "searchWildcardsEnabled": False,
+                    "filter": {"status": STATUS_ENABLED},
+                })
+                group_hostids = [
+                    g["hostid"] for g in group
+                    if canonical_host_name(g.get("host", "")) == canonical
+                ] or [rep["hostid"]]
                 items = await client.call("item.get", {
-                    "hostids": [hosts[0]["hostid"]],
+                    "hostids": [rep["hostid"]],
                     "output": ["itemid", "key_", "lastvalue", "lastclock"],
                     "filter": {"status": "0"},
                 })
                 facts = await _collect_diagnosis_inner(
-                    client, hosts[0], items,
+                    client, rep, items,
                     traffic_hours=traffic_hours,
                     problem_hours=problem_hours,
                     rotation_days=rotation_days,
+                    group_hostids=group_hostids,
                 )
                 return _render_full_report(
                     facts,

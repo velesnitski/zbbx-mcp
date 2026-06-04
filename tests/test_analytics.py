@@ -3441,6 +3441,14 @@ class TestBulkDiagnosePreFold:
         assert deduped[0]["host"] == "parent01"
         assert deduped[0]["hostid"] == "1"
         assert subs["parent01"] == 3
+        # The rep carries every VIP's hostid so the diagnosis queries
+        # problems across the whole box (ADR 046).
+        assert set(deduped[0]["_group_hostids"]) == {"1", "2", "3", "4"}
+
+    def test_standalone_group_hostids_is_self(self):
+        from zbbx_mcp.tools.diagnose import _dedupe_records_by_canonical
+        deduped, _ = _dedupe_records_by_canonical([{"hostid": "9", "host": "solo"}])
+        assert deduped[0]["_group_hostids"] == ["9"]
 
     def test_subhost_only_set_picks_first_as_rep(self):
         from zbbx_mcp.tools.diagnose import _dedupe_records_by_canonical
