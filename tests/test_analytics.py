@@ -3508,3 +3508,35 @@ class TestFilterSuppressed:
         src = [{"eventid": "1", "suppressed": "0"}]
         out = filter_suppressed(src, include_suppressed=True)
         assert out == src and out is not src
+
+
+class TestClassifyCountryGroup:
+    """Pure-helper tests for service_brief per-country group fold (#154, ADR 045)."""
+
+    def test_real_traffic_is_validated(self):
+        from zbbx_mcp.tools.service_brief import _classify_country_group
+        # summed box traffic >= floor → validated regardless of checks
+        assert _classify_country_group(6.0, [0, 0]) == "validated"
+
+    def test_no_traffic_no_checks_skipped(self):
+        from zbbx_mcp.tools.service_brief import _classify_country_group
+        assert _classify_country_group(0.0, []) == "skip"
+
+    def test_all_checks_up_is_ok(self):
+        from zbbx_mcp.tools.service_brief import _classify_country_group
+        assert _classify_country_group(0.0, [1, 1, 1]) == "ok"
+
+    def test_one_failing_vip_check_drops_to_partial(self):
+        from zbbx_mcp.tools.service_brief import _classify_country_group
+        # worst-wins across merged VIP checks: a single failure → partial
+        assert _classify_country_group(0.0, [1, 1, 0]) == "partial"
+
+    def test_all_checks_down_is_down(self):
+        from zbbx_mcp.tools.service_brief import _classify_country_group
+        assert _classify_country_group(0.0, [0, 0]) == "down"
+
+    def test_summed_subhost_traffic_validates_box(self):
+        from zbbx_mcp.tools.service_brief import _classify_country_group
+        # two VIPs at 3 Mbps each = 6 summed → above the 5 Mbps floor.
+        # (the point of the fold: per-VIP each would be below the floor)
+        assert _classify_country_group(3.0 + 3.0, [0]) == "validated"

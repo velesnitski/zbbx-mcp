@@ -35,6 +35,27 @@ TRAFFIC_VALIDATED_MBPS = 5.0
 IDLE_CPU_THRESHOLD = 2.0
 
 
+def _classify_country_group(group_mbps: float, merged_checks: list) -> str:
+    """Classify one canonical (physical-machine) group for the per-country
+    service tally. Returns one of: ``validated`` (real traffic ≥ floor,
+    counts as ok), ``ok`` / ``partial`` / ``down`` (from merged VIP checks,
+    worst-wins), or ``skip`` (no traffic, no checks — not counted).
+
+    ``merged_checks`` is every check value across the box's VIPs; a single
+    failing VIP check pulls the box below ``ok``. Pure helper (ADR 045).
+    """
+    if group_mbps >= TRAFFIC_VALIDATED_MBPS:
+        return "validated"
+    if not merged_checks:
+        return "skip"
+    ok_count = sum(1 for v in merged_checks if v == 1)
+    if ok_count == len(merged_checks):
+        return "ok"
+    if ok_count > 0:
+        return "partial"
+    return "down"
+
+
 _CSS = """
 body{font-family:-apple-system,'Segoe UI',Roboto,sans-serif;color:#1a1a2e;background:#f8f9fa;line-height:1.55;font-size:13px;margin:0;padding:24px;max-width:1100px;margin:0 auto}
 h1{font-size:24px;margin:0 0 4px}h2{font-size:17px;margin:28px 0 10px;color:#1a1a2e;border-bottom:1px solid #e5e7eb;padding-bottom:6px}
@@ -211,34 +232,46 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
             product_scores.sort(key=lambda x: -x["traffic_mbps"])
 
             # --- Per-country service quality (probability language) ---
-            country_data: dict[str, dict] = {}
+            # Fold sub-hosts to canonical (ADR 045): one physical machine =
+            # one count. Traffic SUMs across the box's VIPs; service checks
+            # merge across them with worst-wins (a single failing VIP check
+            # marks the box at least partial). Without this a multi-VIP box
+            # inflates the marketing-facing ok/partial/down tallies.
+            canon_groups: dict[str, list[dict]] = {}
             for h in hosts:
-                cc = extract_country(h["host"])
+                if extract_country(h["host"]):
+                    canon_groups.setdefault(canonical_host_name(h["host"]), []).append(h)
+
+            country_data: dict[str, dict] = {}
+            for group in canon_groups.values():
+                rep = group[0]
+                for g in group:  # prefer the parent (space-free) as representative
+                    if " " not in g.get("host", ""):
+                        rep = g
+                        break
+                cc = extract_country(rep["host"])
                 if not cc:
                     continue
-                hid = h["hostid"]
                 cd = country_data.setdefault(cc, {
                     "total": 0, "ok": 0, "partial": 0, "down": 0,
                     "traffic": 0.0, "checks_configured": 0, "validated": 0,
                 })
                 cd["total"] += 1
-                mbps = traffic_map.get(hid, 0.0)
-                cd["traffic"] += mbps
-                checks = host_checks.get(hid, {})
-                if mbps >= TRAFFIC_VALIDATED_MBPS:
+                group_mbps = sum(traffic_map.get(g["hostid"], 0.0) for g in group)
+                cd["traffic"] += group_mbps
+                # Merge all check values across the box's VIPs.
+                merged_checks: list = []
+                for g in group:
+                    merged_checks.extend(host_checks.get(g["hostid"], {}).values())
+                klass = _classify_country_group(group_mbps, merged_checks)
+                if klass == "validated":
                     cd["validated"] += 1
                     cd["ok"] += 1
+                elif klass == "skip":
                     continue
-                if not checks:
-                    continue
-                cd["checks_configured"] += 1
-                ok_count = sum(1 for v in checks.values() if v == 1)
-                if ok_count == len(checks):
-                    cd["ok"] += 1
-                elif ok_count > 0:
-                    cd["partial"] += 1
                 else:
-                    cd["down"] += 1
+                    cd["checks_configured"] += 1
+                    cd[klass] += 1
 
             # --- Per-protocol blocked servers table ---
             blocked_by_check: dict[str, list[tuple[str, str, float]]] = {}
