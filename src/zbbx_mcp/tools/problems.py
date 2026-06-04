@@ -2,6 +2,7 @@ import asyncio
 
 import httpx
 
+from zbbx_mcp.data import filter_suppressed
 from zbbx_mcp.formatters import _ts, format_problem_list, format_severity
 from zbbx_mcp.resolver import InstanceResolver
 from zbbx_mcp.tag_filter import parse_tag_filter
@@ -169,6 +170,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
             time_from: str = "",
             time_till: str = "",
             include_resolved: bool = False,
+            include_suppressed: bool = False,
             event_eventid: str = "",
             instance: str = "",
         ) -> str:
@@ -186,6 +188,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 time_from: Start of window — epoch, ISO, or relative ("24h", "7d") (optional)
                 time_till: End of window — same formats as time_from (optional)
                 include_resolved: Include OK transitions in the window (default: False)
+                include_suppressed: Include maintenance-suppressed problems (default: False)
                 event_eventid: Return full PROBLEM↔OK timeline for a specific event ID
                 instance: Zabbix instance name (optional, for multi-instance setups)
             """
@@ -272,6 +275,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     params["groupids"] = gids
 
                 data = await client.call("problem.get", params)
+                data = filter_suppressed(data, include_suppressed)
 
                 result = format_problem_list(data)
                 count = len(data)

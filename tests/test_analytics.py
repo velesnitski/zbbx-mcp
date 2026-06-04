@@ -3474,3 +3474,37 @@ class TestBulkDiagnosePreFold:
         deduped, subs = _dedupe_records_by_canonical([])
         assert deduped == []
         assert subs == {}
+
+
+class TestFilterSuppressed:
+    """Pure-helper tests for filter_suppressed (#143, ADR 044)."""
+
+    def _probs(self):
+        return [
+            {"eventid": "1", "name": "real", "suppressed": "0"},
+            {"eventid": "2", "name": "maint", "suppressed": "1"},
+            {"eventid": "3", "name": "also-real"},  # field absent → not suppressed
+        ]
+
+    def test_default_excludes_suppressed(self):
+        from zbbx_mcp.data import filter_suppressed
+        out = filter_suppressed(self._probs())
+        assert {p["eventid"] for p in out} == {"1", "3"}
+
+    def test_include_keeps_all(self):
+        from zbbx_mcp.data import filter_suppressed
+        assert len(filter_suppressed(self._probs(), include_suppressed=True)) == 3
+
+    def test_missing_field_treated_as_visible(self):
+        from zbbx_mcp.data import filter_suppressed
+        assert len(filter_suppressed([{"eventid": "9"}])) == 1
+
+    def test_empty_input(self):
+        from zbbx_mcp.data import filter_suppressed
+        assert filter_suppressed([]) == []
+
+    def test_returns_new_list_not_alias(self):
+        from zbbx_mcp.data import filter_suppressed
+        src = [{"eventid": "1", "suppressed": "0"}]
+        out = filter_suppressed(src, include_suppressed=True)
+        assert out == src and out is not src

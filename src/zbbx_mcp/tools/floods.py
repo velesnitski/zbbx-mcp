@@ -18,7 +18,7 @@ from datetime import datetime, timezone
 
 import httpx
 
-from zbbx_mcp.data import build_parent_map
+from zbbx_mcp.data import build_parent_map, filter_suppressed
 from zbbx_mcp.formatters import format_age, normalize_problem_name
 from zbbx_mcp.resolver import InstanceResolver
 
@@ -97,6 +97,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
             min_severity: int = 2,
             max_results: int = 20,
             max_age_hours: int = 0,
+            include_suppressed: bool = False,
             instance: str = "",
         ) -> str:
             """Find hosts with many simultaneous active problems (whole-host outages).
@@ -108,18 +109,20 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 min_severity: Minimum severity (0=info ... 5=disaster, default: 2)
                 max_results: Maximum hosts to render (default: 20)
                 max_age_hours: Drop floods whose earliest problem is older than this; 0 = unlimited (default: 0)
+                include_suppressed: Include maintenance-suppressed problems (default: False)
                 instance: Zabbix instance name (optional)
             """
             try:
                 client = resolver.resolve(instance)
                 problems = await client.call("problem.get", {
-                    "output": ["eventid", "name", "severity", "clock"],
+                    "output": ["eventid", "name", "severity", "clock", "suppressed"],
                     "severities": list(range(min_severity, 6)),
                     "sortfield": "eventid",
                     "sortorder": "DESC",
                     "limit": 5000,
                     "recent": True,
                 })
+                problems = filter_suppressed(problems, include_suppressed)
                 if not problems:
                     return f"No active problems (severity >= {min_severity})."
 

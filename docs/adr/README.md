@@ -90,6 +90,7 @@ fixed headings (`## Problem`, `## Decision`, `## Test approach`,
 | [041](041-predictive-high-tier-render.md) | Render HIGH tier in `get_predictive_alerts` | Four-tier classifier wrote HIGH but the render collapsed it to INFO and omitted it from the summary — a false-negative; render the canonical severity field directly |
 | [042](042-traffic-drop-corroboration.md) | CPU/connection corroboration in `detect_traffic_drops` | Bounded second pass fetches CPU + connection trends for candidates only; demand troughs (signals fall with traffic) reclassify as `low_demand`; new `metric_recent_baseline_ratio` helper with idle→used inversion |
 | [043](043-idle-relays-out-vs-in-gate.md) | `get_idle_relays` out-vs-in gate | Gate on physical out/in ratio, not inbound-only — healthy NAT-mode relays (forward through physical NIC, tunnels idle by design) no longer flagged as forwarding failures |
+| [044](044-maintenance-suppress-filter.md) | Maintenance-suppress filtering | `filter_suppressed` helper + `include_suppressed=False` on `get_active_problems` / `get_problems` / `get_host_floods` / `get_outage_clusters` — planned-downtime problems no longer counted as incidents |
 
 ## Writing a new ADR
 
