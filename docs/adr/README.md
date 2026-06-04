@@ -92,6 +92,7 @@ fixed headings (`## Problem`, `## Decision`, `## Test approach`,
 | [043](043-idle-relays-out-vs-in-gate.md) | `get_idle_relays` out-vs-in gate | Gate on physical out/in ratio, not inbound-only — healthy NAT-mode relays (forward through physical NIC, tunnels idle by design) no longer flagged as forwarding failures |
 | [044](044-maintenance-suppress-filter.md) | Maintenance-suppress filtering | `filter_suppressed` helper + `include_suppressed=False` on `get_active_problems` / `get_problems` / `get_host_floods` / `get_outage_clusters` — planned-downtime problems no longer counted as incidents |
 | [045](045-service-brief-country-fold.md) | `generate_service_brief` per-country fold | Per-country ok/partial/down counters fold sub-hosts to canonical (traffic SUM, service worst-wins) — multi-VIP boxes count once; new `_classify_country_group` helper |
+| [046](046-diagnose-subhost-problems.md) | Diagnosis queries the whole canonical group | `diagnose_host` / `bulk_diagnose` query problems across every VIP hostid, not just the parent — a sub-host problem no longer hides as `healthy` |
 
 ## Writing a new ADR
 

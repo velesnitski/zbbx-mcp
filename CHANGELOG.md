@@ -5,6 +5,29 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.11.2] - 2026-06-04
+
+### Fixed — diagnosis missed sub-host (VIP) problems
+`diagnose_host` / `bulk_diagnose` queried `problem.get` for the
+representative (parent) hostid only. On a multi-VIP physical machine a
+problem firing on a sub-host VIP was invisible to the verdict, so a box
+with a real per-VIP problem could read `healthy` — a false-negative,
+the dangerous direction.
+
+Now the diagnosis queries problems across **every** hostid in the
+canonical group:
+- `_collect_diagnosis_inner` gains `group_hostids` (defaults to the rep
+  alone, so single hosts are unchanged);
+- `_dedupe_records_by_canonical` attaches `_group_hostids` to each rep,
+  threaded through `_run_bulk_diagnosis`;
+- `diagnose_host` fetches the canonical group's VIPs and passes their
+  hostids.
+
+The verdict's open-problem count now reflects the whole box. See ADR 046.
+
+### Tooling
+- 535 tests → 536 (+2 for `_group_hostids`, −1 reshaped).
+
 ## [1.11.1] - 2026-06-04
 
 ### Fixed — `generate_service_brief` per-country counters double-counted VIPs
