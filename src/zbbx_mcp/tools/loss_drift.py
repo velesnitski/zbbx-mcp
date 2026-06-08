@@ -49,6 +49,9 @@ def split_baseline_recent(
     return base, recent
 
 
+_BASELINE_LOSS_MAX = 20.0  # baseline loss above this = outage baseline; deltas vs it are noise
+
+
 def compute_loss_drift(
     loss_baseline: float | None,
     loss_recent: float | None,
@@ -78,6 +81,11 @@ def compute_loss_drift(
         "rtt_delta_pct": None,
     }
 
+    # A baseline measured during heavy packet loss is an outage baseline — its
+    # RTT is unreliable, so RTT deltas against it are false drift (baseline loss
+    # 47% → recent 0% is RECOVERY, not "rtt-up").
+    baseline_degraded = loss_baseline is not None and loss_baseline >= _BASELINE_LOSS_MAX
+
     if loss_baseline is not None and loss_recent is not None:
         delta = loss_recent - loss_baseline
         details["loss_delta"] = delta
@@ -86,7 +94,8 @@ def compute_loss_drift(
             if loss_baseline < 1.0:
                 flags.add("new-loss")
 
-    if rtt_baseline is not None and rtt_recent is not None and rtt_baseline > 0:
+    if (rtt_baseline is not None and rtt_recent is not None and rtt_baseline > 0
+            and not baseline_degraded):
         delta_pct = (rtt_recent - rtt_baseline) / rtt_baseline * 100.0
         details["rtt_delta_pct"] = delta_pct
         if delta_pct >= rtt_step_pct:

@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.12.6] - 2026-06-05
+
+### Fixed — false RTT drift against a degraded baseline
+ADR 053. `compute_loss_drift` (behind `detect_loss_drift`) flagged `rtt-up`
+when a host's recent RTT climbed above its 14-day baseline — but a baseline
+measured during an outage (heavy packet loss) has an unreliable RTT, so a
+host that has since *recovered* (e.g. baseline 47% loss / 76 ms → recent
+0.09% loss / 142 ms) read as drift when it was actually returning to
+normal. The RTT-drift branch is now skipped when baseline loss ≥ 20%
+(`_BASELINE_LOSS_MAX`); loss-based detection is unaffected. Mirrors
+zabbix-reports `_classify_loss_drift`. Pure-helper change, no API surface.
+Tests: +1 (560 → 561).
+
 ## [1.12.5] - 2026-06-04
 
 ### Added — complete maintenance-suppress coverage
