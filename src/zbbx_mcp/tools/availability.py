@@ -9,7 +9,7 @@ from datetime import datetime, timezone
 import httpx
 
 from zbbx_mcp.classify import classify_host
-from zbbx_mcp.data import extract_country, host_ip
+from zbbx_mcp.data import extract_country, filter_suppressed, host_ip
 from zbbx_mcp.resolver import InstanceResolver
 
 
@@ -102,6 +102,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
         async def get_recent_changes(
             hours: int = 24,
             limit: int = 50,
+            include_suppressed: bool = False,
             instance: str = "",
         ) -> str:
             """Show what happened recently: new problems, resolved problems, host status changes.
@@ -109,6 +110,8 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
             Args:
                 hours: Look back period in hours (default: 24)
                 limit: Max results per category (default: 50)
+                include_suppressed: Show maintenance-suppressed problems
+                    (default: False — planned downtime is hidden)
                 instance: Zabbix instance name (optional)
             """
             try:
@@ -118,7 +121,8 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 # Fetch in parallel: current problems, recent events, recently resolved
                 current_problems, recent_events = await asyncio.gather(
                     client.call("problem.get", {
-                        "output": ["eventid", "name", "severity", "clock", "acknowledged"],
+                        "output": ["eventid", "name", "severity", "clock",
+                                   "acknowledged", "suppressed"],
                         "selectHosts": ["host"],
                         "time_from": time_from,
                         "sortfield": "eventid",
@@ -135,6 +139,10 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                         "limit": limit * 2,
                         "value": "0",  # resolved events
                     }),
+                )
+
+                current_problems = filter_suppressed(
+                    current_problems, include_suppressed
                 )
 
                 def _fmt_time(ts: str) -> str:

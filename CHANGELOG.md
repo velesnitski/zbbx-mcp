@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.12.5] - 2026-06-04
+
+### Added — complete maintenance-suppress coverage
+ADR 052. The suppress filter from ADR 044 (`filter_suppressed`) was wired
+into four problem-surfacing tools but three others that also call
+`problem.get` were left out — so a host inside a maintenance window read
+its planned downtime as live problems. This closes the gap: the
+diagnosis path (`diagnose_host` / `bulk_diagnose` / `diagnose_subnet` via
+`_collect_diagnosis_inner`), `get_recent_changes`, and
+`send_slack_report` now drop maintenance-suppressed problems by default.
+Each gains an `include_suppressed: bool = False` flag to restore full
+visibility. No-op today (no maintenance windows configured); structural —
+suppressed problems now drop out of all seven problem-consuming tools
+uniformly. Tests: +3 (`TestDiagnoseSuppressThreading`).
+
 ## [1.12.4] - 2026-06-04
 
 ### Added — acute mode for `detect_regional_anomalies`

@@ -3565,6 +3565,79 @@ class TestCollapseDependentProblems:
         assert n == 0 and len(kept) == 1
 
 
+class _ProblemOnlyClient:
+    """Minimal async client returning a fixed problem.get payload.
+
+    Records every call so a test can assert nothing else was hit. A
+    domain-mode host (no items) makes ``_collect_diagnosis_inner`` issue
+    only ``problem.get``, which keeps this stub tiny.
+    """
+
+    def __init__(self, problems):
+        self._problems = problems
+        self.calls = []
+
+    async def call(self, method, params):
+        self.calls.append((method, params))
+        if method == "problem.get":
+            return [dict(p) for p in self._problems]
+        return []
+
+
+class TestDiagnoseSuppressThreading:
+    """ADR 052 — _collect_diagnosis_inner honours include_suppressed."""
+
+    async def test_suppressed_only_reads_healthy_by_default(self):
+        """A box whose only problem is maintenance-suppressed must not
+        read degraded — the false-positive class ADR 052 closes."""
+        from zbbx_mcp.tools.diagnose import _collect_diagnosis_inner
+
+        now = 1_000_000
+        problems = [
+            {"eventid": "1", "name": "planned reboot", "severity": "4",
+             "clock": str(now - 60), "suppressed": "1"},
+        ]
+        client = _ProblemOnlyClient(problems)
+        facts = await _collect_diagnosis_inner(
+            client, {"hostid": "10", "host": "h"}, [],  # no items → domain mode
+            now=now,
+        )
+        assert facts["problems"] == []
+        assert facts["verdict"] == "healthy"
+
+    async def test_include_suppressed_keeps_maintenance_problem(self):
+        from zbbx_mcp.tools.diagnose import _collect_diagnosis_inner
+
+        now = 1_000_000
+        problems = [
+            {"eventid": "1", "name": "planned reboot", "severity": "4",
+             "clock": str(now - 60), "suppressed": "1"},
+        ]
+        client = _ProblemOnlyClient(problems)
+        facts = await _collect_diagnosis_inner(
+            client, {"hostid": "10", "host": "h"}, [],
+            now=now, include_suppressed=True,
+        )
+        assert [p["name"] for p in facts["problems"]] == ["planned reboot"]
+        assert facts["verdict"] == "degraded"
+
+    async def test_mixed_keeps_only_live_problem(self):
+        from zbbx_mcp.tools.diagnose import _collect_diagnosis_inner
+
+        now = 1_000_000
+        problems = [
+            {"eventid": "1", "name": "live", "severity": "4",
+             "clock": str(now - 60), "suppressed": "0"},
+            {"eventid": "2", "name": "maint", "severity": "4",
+             "clock": str(now - 60), "suppressed": "1"},
+        ]
+        client = _ProblemOnlyClient(problems)
+        facts = await _collect_diagnosis_inner(
+            client, {"hostid": "10", "host": "h"}, [], now=now,
+        )
+        assert [p["name"] for p in facts["problems"]] == ["live"]
+
+
 class TestFilterSuppressed:
     """Pure-helper tests for filter_suppressed (#143, ADR 044)."""
 

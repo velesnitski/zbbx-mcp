@@ -98,6 +98,7 @@ fixed headings (`## Problem`, `## Decision`, `## Test approach`,
 | [049](049-diagnose-group-wide-facts.md) | Diagnosis reads agent/traffic group-wide | `diagnose_host` / `bulk_diagnose` read items across every VIP — traffic sums across the box, agent uses the freshest ping; closes the "traffic lives on the VIPs" gap |
 | [050](050-floods-dependency-collapse.md) | Dependency collapse in `get_host_floods` | Completes ADR 048's ticket — collapse symptom problems before the per-host count so a cascade (root + declared symptoms) doesn't falsely trip a flood |
 | [051](051-regional-acute-mode.md) | Acute mode for `detect_regional_anomalies` | Opt-in `acute=True` sums each country's hourly traffic and judges it against its same-hour seasonal band (`aggregate_hourly_by_country`) — catches immediate regional blocks the daily grain dilutes |
+| [052](052-complete-suppress-coverage.md) | Complete maintenance-suppress coverage | Wires `filter_suppressed` (ADR 044) into the last three problem-consuming tools — `diagnose_host`/`bulk_diagnose`/`diagnose_subnet`, `get_recent_changes`, `send_slack_report` — each gains `include_suppressed=False`; planned downtime no longer reads as live problems |
 
 ## Writing a new ADR
 
