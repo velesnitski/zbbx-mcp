@@ -28,6 +28,7 @@ from zbbx_mcp.data import (
     STATUS_ENABLED,
     TRAFFIC_IN_KEYS,
     canonical_host_name,
+    filter_suppressed,
     host_ip,
 )
 from zbbx_mcp.formatters import format_age, format_severity
@@ -204,6 +205,7 @@ async def _collect_diagnosis_inner(
     problem_hours: int = 24,
     rotation_days: int = 14,
     group_hostids: list[str] | None = None,
+    include_suppressed: bool = False,
     now: int | None = None,
 ) -> dict:
     """Gather diagnosis facts for one host given pre-fetched ``host_record`` + ``items``.
@@ -216,6 +218,10 @@ async def _collect_diagnosis_inner(
     the hostids of every VIP in the canonical group. Problems are queried
     across all of them so a sub-host-specific problem still affects the
     verdict (ADR 046). Defaults to the rep host alone.
+
+    ``include_suppressed`` — when False (default), maintenance-suppressed
+    problems are dropped, so a host in a maintenance window does not read
+    ``degraded`` from planned downtime (ADR 052).
     """
     if now is None:
         now = int(_time.time())
@@ -227,12 +233,13 @@ async def _collect_diagnosis_inner(
     problem_hostids = group_hostids or [hid]
     problems = await client.call("problem.get", {
         "hostids": problem_hostids,
-        "output": ["eventid", "name", "severity", "clock"],
+        "output": ["eventid", "name", "severity", "clock", "suppressed"],
         "sortfield": "eventid",
         "sortorder": "DESC",
         "limit": 30,
         "recent": True,
     })
+    problems = filter_suppressed(problems, include_suppressed)
     problem_cutoff = now - problem_hours * 3600
     problems = [p for p in problems if int(p.get("clock", 0)) >= problem_cutoff]
 
@@ -499,6 +506,7 @@ async def _run_bulk_diagnosis(
     traffic_hours: int,
     problem_hours: int,
     rotation_days: int = 0,
+    include_suppressed: bool = False,
 ) -> str:
     """Run diagnosis on a resolved host list and render the table.
 
@@ -544,6 +552,7 @@ async def _run_bulk_diagnosis(
                 problem_hours=problem_hours,
                 rotation_days=rotation_days,
                 group_hostids=rec.get("_group_hostids"),
+                include_suppressed=include_suppressed,
                 now=now,
             )
 
@@ -622,6 +631,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
             traffic_hours: int = 6,
             problem_hours: int = 24,
             rotation_days: int = 14,
+            include_suppressed: bool = False,
             instance: str = "",
         ) -> str:
             """Run a multi-step diagnostic on a single host and return a verdict.
@@ -637,6 +647,8 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 traffic_hours: Recent-window for traffic comparison (default: 6)
                 problem_hours: Look-back for active problems (default: 24)
                 rotation_days: Look-back for IP-rotation history (default: 14)
+                include_suppressed: Count maintenance-suppressed problems in the
+                    verdict (default: False — a maintenance host won't read degraded)
                 instance: Zabbix instance name (optional)
             """
             if not host:
@@ -678,6 +690,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     problem_hours=problem_hours,
                     rotation_days=rotation_days,
                     group_hostids=group_hostids,
+                    include_suppressed=include_suppressed,
                 )
                 return _render_full_report(
                     facts,
@@ -698,6 +711,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
             traffic_hours: int = 6,
             problem_hours: int = 24,
             max_hosts: int = 20,
+            include_suppressed: bool = False,
             instance: str = "",
         ) -> str:
             """Run diagnose_host across a target set; return one row per host.
@@ -717,6 +731,8 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 traffic_hours: Recent-window for traffic comparison (default: 6)
                 problem_hours: Look-back for active problems (default: 24)
                 max_hosts: Safety cap on fan-out (default: 20, max: 50)
+                include_suppressed: Count maintenance-suppressed problems
+                    (default: False)
                 instance: Zabbix instance name (optional)
             """
             host_list = [
@@ -740,6 +756,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     traffic_hours=traffic_hours,
                     problem_hours=problem_hours,
                     rotation_days=0,  # skip auditlog for speed in bulk
+                    include_suppressed=include_suppressed,
                 )
             except (httpx.HTTPError, ValueError) as e:
                 return f"Error: {e}"
@@ -752,6 +769,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
             traffic_hours: int = 6,
             problem_hours: int = 24,
             max_hosts: int = 20,
+            include_suppressed: bool = False,
             instance: str = "",
         ) -> str:
             """Diagnose every host whose interface IP falls in a subnet.
@@ -770,6 +788,8 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 traffic_hours: Recent-window for traffic comparison (default: 6)
                 problem_hours: Look-back for active problems (default: 24)
                 max_hosts: Safety cap on fan-out (default: 20, max: 50)
+                include_suppressed: Count maintenance-suppressed problems
+                    (default: False)
                 instance: Zabbix instance name (optional)
             """
             if not subnet:
@@ -795,6 +815,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     traffic_hours=traffic_hours,
                     problem_hours=problem_hours,
                     rotation_days=0,
+                    include_suppressed=include_suppressed,
                 )
             except (httpx.HTTPError, ValueError) as e:
                 return f"Error: {e}"

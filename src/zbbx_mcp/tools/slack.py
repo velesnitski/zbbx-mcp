@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 
 import httpx
 
-from zbbx_mcp.data import host_ip
+from zbbx_mcp.data import filter_suppressed, host_ip
 from zbbx_mcp.resolver import InstanceResolver
 
 SLACK_WEBHOOK_ENV = "SLACK_WEBHOOK_URL"
@@ -61,6 +61,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
             include_problems: bool = True,
             include_high_cpu: bool = True,
             cpu_threshold: float = 80.0,
+            include_suppressed: bool = False,
             instance: str = "",
         ) -> str:
             """Generate and send a Zabbix infrastructure summary to Slack.
@@ -71,6 +72,8 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 include_problems: Include problems section (default: True)
                 include_high_cpu: Include high CPU section (default: True)
                 cpu_threshold: CPU % threshold (default: 80)
+                include_suppressed: Count maintenance-suppressed problems
+                    (default: False — planned downtime stays out of the report)
                 instance: Zabbix instance (optional)
             """
             from zbbx_mcp.classify import classify_host as _classify_host
@@ -93,7 +96,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 ]
                 if include_problems:
                     tasks.append(client.call("problem.get", {
-                        "output": ["eventid", "name", "severity"],
+                        "output": ["eventid", "name", "severity", "suppressed"],
                         "sortfield": ["eventid"],
                         "sortorder": ["DESC"],
                         "recent": True,
@@ -103,6 +106,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 results = await asyncio.gather(*tasks)
                 hosts = results[0]
                 problems = results[1] if include_problems and len(results) > 1 else []
+                problems = filter_suppressed(problems, include_suppressed)
 
                 # Product summary
                 prod_counts: dict[str, dict] = {}
