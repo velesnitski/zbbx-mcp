@@ -1093,6 +1093,14 @@ class TestLossDriftDetection:
         # Tighten to 2 → +3 flags.
         assert compute_loss_drift(2.0, 5.0, None, None, loss_step=2.0)[0] == "loss-up"
 
+    def test_degraded_baseline_suppresses_false_rtt_drift(self):
+        from zbbx_mcp.tools.loss_drift import compute_loss_drift
+
+        # Baseline measured during an outage (47% loss); recent recovered to ~0%.
+        # RTT "doubling" vs that unreliable baseline is recovery, not real drift.
+        label, _ = compute_loss_drift(47.24, 0.09, 76.4, 142.5)
+        assert label == "ok"
+
 
 class TestOutageClusterGroupingV2:
     """Pure-helper tests for multi-level cluster grouping (#119)."""
