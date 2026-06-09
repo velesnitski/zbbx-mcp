@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.12.7] - 2026-06-09
+
+### Security — clear CVE-2026-48710 (starlette)
+ADR 054. GitHub Dependabot flagged the transitive `starlette == 1.0.0`
+pin against CVE-2026-48710 (CVSS 6.5, moderate) — an HTTP request-
+smuggling flaw where the `Host` header was used to reconstruct
+`request.url` without validation, allowing security middleware to be
+bypassed (affected 0.8.3–1.0.0, fixed 1.0.1). Re-resolved via
+`uv lock --upgrade-package starlette`, moving starlette `1.0.0 → 1.2.1`
+(transitive via `mcp` / `sse-starlette`; no direct dependency added).
+Lockfile-only — no source or API change. 561 tests green on the new
+Starlette.
+
 ## [1.12.6] - 2026-06-05
 
 ### Fixed — false RTT drift against a degraded baseline

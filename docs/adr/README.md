@@ -100,6 +100,7 @@ fixed headings (`## Problem`, `## Decision`, `## Test approach`,
 | [051](051-regional-acute-mode.md) | Acute mode for `detect_regional_anomalies` | Opt-in `acute=True` sums each country's hourly traffic and judges it against its same-hour seasonal band (`aggregate_hourly_by_country`) — catches immediate regional blocks the daily grain dilutes |
 | [052](052-complete-suppress-coverage.md) | Complete maintenance-suppress coverage | Wires `filter_suppressed` (ADR 044) into the last three problem-consuming tools — `diagnose_host`/`bulk_diagnose`/`diagnose_subnet`, `get_recent_changes`, `send_slack_report` — each gains `include_suppressed=False`; planned downtime no longer reads as live problems |
 | [053](053-loss-drift-degraded-baseline.md) | Suppress false RTT drift vs degraded baseline | `compute_loss_drift` skips the RTT-drift branch when baseline loss ≥ 20% (`_BASELINE_LOSS_MAX`) — an outage baseline has unreliable RTT, so a recovered host (47% loss → 0%) no longer reads as `rtt-up`; mirrors zabbix-reports `_classify_loss_drift` |
+| [054](054-starlette-cve-2026-48710.md) | Bump starlette to clear CVE-2026-48710 | Transitive `starlette 1.0.0 → 1.2.1` via `uv lock --upgrade-package` — clears the Dependabot-flagged Host-header request-smuggling CVE (CVSS 6.5); lockfile-only, 561 tests green |
 
 ## Writing a new ADR
 
