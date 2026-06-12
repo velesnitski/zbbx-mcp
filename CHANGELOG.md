@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.13.2] - 2026-06-12
+
+### Added — token-expiry early warning
+ADR 057. `check_connection` now also inventories API tokens via
+`token.get` and warns when any enabled token expires within 30 days
+(soonest-first, with "EXPIRED Nd ago" for lapsed ones). An expired token
+kills every authenticated tool at once — the same failure shape the 7.2
+upgrade just demonstrated — and this catches it weeks ahead from the tool
+an operator naturally runs first. Degrades silently when `token.get` is
+unavailable or denied. New pure helper `summarize_token_expiry`; +4 tests
+(570 → 574).
+
 ## [1.13.1] - 2026-06-12
 
 ### Fixed — `get_proxies` never called a real API method

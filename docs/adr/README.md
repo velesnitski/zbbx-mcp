@@ -103,6 +103,7 @@ fixed headings (`## Problem`, `## Decision`, `## Test approach`,
 | [054](054-starlette-cve-2026-48710.md) | Bump starlette to clear CVE-2026-48710 | Transitive `starlette 1.0.0 → 1.2.1` via `uv lock --upgrade-package` — clears the Dependabot-flagged Host-header request-smuggling CVE (CVSS 6.5); lockfile-only, 561 tests green |
 | [055](055-zabbix-7-api-compat.md) | Zabbix 7.2+ API compatibility | Instance upgraded 6.4 → 7.4.9. Client now sends `Authorization: Bearer` (the 7.2-removed `auth` body property is gone) and translates `host.get`/`trigger.get` `selectGroups`↔`selectHostGroups` / `groups`↔`hostgroups` — one client boundary, no call-site churn; spans 6.2–7.x. +5 wire-format tests |
 | [056](056-fix-get-proxies.md) | Fix `get_proxies` (never called a real method) | The tool called non-existent `relay.get`/`relayid` (scrub artifact) — errored on every invocation. Rewritten on `proxy.get` with 7.0 `name`/`operating_mode`, plus `version`/`compatibility` skew flags (⚠ outdated / ✗ unsupported) |
+| [057](057-token-expiry-warning.md) | Token-expiry warning in `check_connection` | `token.get` inventory checked on every connection check — enabled tokens expiring within 30 days are listed soonest-first (`summarize_token_expiry`); silent degradation when the token API is unavailable. Catches the all-tools-die-at-once failure weeks early |
 
 ## Writing a new ADR
 
