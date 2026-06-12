@@ -105,6 +105,7 @@ fixed headings (`## Problem`, `## Decision`, `## Test approach`,
 | [056](056-fix-get-proxies.md) | Fix `get_proxies` (never called a real method) | The tool called non-existent `relay.get`/`relayid` (scrub artifact) — errored on every invocation. Rewritten on `proxy.get` with 7.0 `name`/`operating_mode`, plus `version`/`compatibility` skew flags (⚠ outdated / ✗ unsupported) |
 | [057](057-token-expiry-warning.md) | Token-expiry warning in `check_connection` | `token.get` inventory checked on every connection check — enabled tokens expiring within 30 days are listed soonest-first (`summarize_token_expiry`); silent degradation when the token API is unavailable. Catches the all-tools-die-at-once failure weeks early |
 | [058](058-why-unclassified-audit.md) | Why-unclassified breakdown in `get_product_audit` | Auditing `product="Unknown"` now appends each unmapped group name with its Unknown-host count (`unmapped_group_counts`) — the exact `ZABBIX_PRODUCT_MAP` entries to add, prioritised by impact; skip-mappings respected |
+| [059](059-native-problem-snooze.md) | Native problem snooze (suppress write path) | `acknowledge_problem`/`bulk_acknowledge` gain `suppress_hours` (-1 = until resolve) and `unsuppress` via ack bits 32/64 + `suppress_until` — activates the ADR 052 read path: snoozed noise drops out of every suppress-aware view, in Zabbix itself and all 7 tools here |
 
 ## Writing a new ADR
 
