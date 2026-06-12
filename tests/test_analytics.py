@@ -3646,6 +3646,30 @@ class TestDiagnoseSuppressThreading:
         assert [p["name"] for p in facts["problems"]] == ["live"]
 
 
+class TestUnmappedGroupCounts:
+    """Pure-helper tests for unmapped_group_counts (ADR 058)."""
+
+    def test_counts_sorted_desc_then_name(self):
+        from zbbx_mcp.classify import unmapped_group_counts
+        sets = [["GrpA"], ["GrpA", "GrpB"], ["GrpB"], ["GrpB"]]
+        out = unmapped_group_counts(sets, {})
+        assert out == [("GrpB", 3), ("GrpA", 2)]
+
+    def test_mapped_and_skip_mapped_excluded(self):
+        from zbbx_mcp.classify import unmapped_group_counts
+        pmap = {"Mapped": ("Prod", "Tier"), "Skipped": (None, None)}
+        sets = [["Mapped", "Gap"], ["Skipped", "Gap"]]
+        assert unmapped_group_counts(sets, pmap) == [("Gap", 2)]
+
+    def test_groupless_host_counted(self):
+        from zbbx_mcp.classify import unmapped_group_counts
+        assert unmapped_group_counts([[]], {}) == [("(no groups)", 1)]
+
+    def test_empty_input(self):
+        from zbbx_mcp.classify import unmapped_group_counts
+        assert unmapped_group_counts([], {"X": ("P", "T")}) == []
+
+
 class TestSummarizeTokenExpiry:
     """Pure-helper tests for summarize_token_expiry (ADR 057)."""
 
