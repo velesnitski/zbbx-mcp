@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.13.4] - 2026-06-12
+
+### Added — native problem snooze (the suppress write path)
+ADR 059. ADR 044→052 made all seven problem-consuming tools *read*
+suppression correctly, but nothing could *create* one short of a
+maintenance window. `acknowledge_problem` and `bulk_acknowledge` now take
+`suppress_hours` (N hours; `-1` = until the problem resolves) and
+`unsuppress`, mapped to `event.acknowledge` bits 32/64 +
+`suppress_until`. Because suppression is recorded in Zabbix itself, a
+snoozed problem disappears from the Zabbix UI's default views, pauses
+suppression-aware escalations, and drops out of every suppress-aware tool
+here — then returns automatically when the timer lapses.
+`include_suppressed=True` remains the audit lens. New pure helper
+`_suppress_until_from_hours`; +7 tests (578 → 585).
+
 ## [1.13.3] - 2026-06-12
 
 ### Added — why-unclassified breakdown in `get_product_audit`

@@ -2743,6 +2743,44 @@ class TestAckActionBuilder:
         # unack(16) + close(1) + msg(4) = 21
         assert _build_ack_action(unack=True, close=True, message="x") == 21
 
+    def test_suppress_bit(self):
+        from zbbx_mcp.tools.problems import _build_ack_action
+        # ack(2) + suppress(32) — ADR 059
+        assert _build_ack_action(suppress=True) == 34
+
+    def test_unsuppress_bit(self):
+        from zbbx_mcp.tools.problems import _build_ack_action
+        # ack(2) + unsuppress(64)
+        assert _build_ack_action(unsuppress=True) == 66
+
+    def test_suppress_with_message_combo(self):
+        from zbbx_mcp.tools.problems import _build_ack_action
+        # ack(2) + msg(4) + suppress(32) = 38
+        assert _build_ack_action(message="snooze", suppress=True) == 38
+
+
+class TestSuppressUntilFromHours:
+    """Pure-helper tests for _suppress_until_from_hours (ADR 059)."""
+
+    NOW = 1_000_000
+
+    def test_zero_means_no_suppression(self):
+        from zbbx_mcp.tools.problems import _suppress_until_from_hours
+        assert _suppress_until_from_hours(0, self.NOW) is None
+
+    def test_positive_hours_to_epoch(self):
+        from zbbx_mcp.tools.problems import _suppress_until_from_hours
+        assert _suppress_until_from_hours(4, self.NOW) == self.NOW + 4 * 3600
+
+    def test_fractional_hours(self):
+        from zbbx_mcp.tools.problems import _suppress_until_from_hours
+        assert _suppress_until_from_hours(0.5, self.NOW) == self.NOW + 1800
+
+    def test_negative_means_indefinite_zero(self):
+        from zbbx_mcp.tools.problems import _suppress_until_from_hours
+        # Zabbix encodes "until the problem resolves" as suppress_until=0.
+        assert _suppress_until_from_hours(-1, self.NOW) == 0
+
 
 class TestZabbixVersionHelpers:
     """Pure-helper tests for version parsing + feature matrix."""

@@ -1,4 +1,5 @@
 import asyncio
+import time
 
 import httpx
 
@@ -17,6 +18,8 @@ def _build_ack_action(
     message: str = "",
     severity: int = -1,
     unack: bool = False,
+    suppress: bool = False,
+    unsuppress: bool = False,
 ) -> int:
     """Compute the Zabbix event.acknowledge action bitmask.
 
@@ -26,6 +29,8 @@ def _build_ack_action(
       4  = add message
       8  = change severity
       16 = unacknowledge (mutually exclusive with 2)
+      32 = suppress (with ``suppress_until``; ADR 059)
+      64 = unsuppress
 
     Pure helper — testable without a Zabbix server.
     """
@@ -36,7 +41,25 @@ def _build_ack_action(
         action |= 4
     if 0 <= severity <= 5:
         action |= 8
+    if suppress:
+        action |= 32
+    if unsuppress:
+        action |= 64
     return action
+
+
+def _suppress_until_from_hours(suppress_hours: float, now: int) -> int | None:
+    """Translate the tool-level ``suppress_hours`` into ``suppress_until``.
+
+    ``0`` → no suppression (None); ``-1`` → indefinite (Zabbix encodes this
+    as ``suppress_until = 0``, i.e. until the problem resolves); positive →
+    epoch ``now + hours``. Pure helper (ADR 059).
+    """
+    if suppress_hours == 0:
+        return None
+    if suppress_hours < 0:
+        return 0
+    return now + int(suppress_hours * 3600)
 
 
 def _format_event_list(events: list) -> str:
@@ -357,9 +380,16 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
             close: bool = False,
             severity: int = -1,
             unack: bool = False,
+            suppress_hours: float = 0,
+            unsuppress: bool = False,
             instance: str = "",
         ) -> str:
-            """Acknowledge a Zabbix problem (also close, re-prioritise, or unack).
+            """Acknowledge a Zabbix problem (also close, re-prioritise, snooze, or unack).
+
+            Snoozing (``suppress_hours``) marks the problem suppressed in
+            Zabbix itself, so it drops out of every suppress-aware view —
+            including all this server's problem tools (ADR 052) — until the
+            timer lapses or it is unsuppressed.
 
             Args:
                 event_id: Zabbix event ID to acknowledge
@@ -367,13 +397,23 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 close: Also close the problem (default: False)
                 severity: Change severity to this value (0-5); -1 = no change
                 unack: Unacknowledge instead of acknowledge (mutually exclusive)
+                suppress_hours: Snooze for N hours; -1 = until the problem
+                    resolves; 0 = no snooze (default)
+                unsuppress: Lift an existing suppression (default: False)
                 instance: Zabbix instance name (optional)
             """
+            if suppress_hours != 0 and unsuppress:
+                return "suppress_hours and unsuppress are mutually exclusive."
             try:
                 client = resolver.resolve(instance)
+                suppress_until = _suppress_until_from_hours(
+                    suppress_hours, int(time.time())
+                )
                 action = _build_ack_action(
                     close=close, message=message,
                     severity=severity, unack=unack,
+                    suppress=suppress_until is not None,
+                    unsuppress=unsuppress,
                 )
                 payload: dict = {
                     "eventids": [event_id],
@@ -382,6 +422,8 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 }
                 if 0 <= severity <= 5:
                     payload["severity"] = severity
+                if suppress_until is not None:
+                    payload["suppress_until"] = suppress_until
                 await client.call("event.acknowledge", payload)
 
                 verb = "unacknowledged" if unack else "acknowledged"
@@ -390,6 +432,14 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     parts.append("Marked for closing.")
                 if 0 <= severity <= 5:
                     parts.append(f"Severity set to {severity}.")
+                if suppress_until is not None:
+                    parts.append(
+                        "Snoozed until the problem resolves."
+                        if suppress_until == 0
+                        else f"Snoozed for {suppress_hours:g}h."
+                    )
+                if unsuppress:
+                    parts.append("Suppression lifted.")
                 if message:
                     parts.append(f"Message: {message}")
                 return " ".join(parts)
@@ -405,9 +455,15 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
             close: bool = False,
             severity: int = -1,
             unack: bool = False,
+            suppress_hours: float = 0,
+            unsuppress: bool = False,
             instance: str = "",
         ) -> str:
             """Acknowledge many events in one API call (mass-incident response).
+
+            ``suppress_hours`` snoozes all listed problems (see
+            acknowledge_problem) — useful for silencing a known-chronic
+            cluster of alerts in one call.
 
             Args:
                 event_ids: Comma- or space-separated Zabbix event IDs
@@ -415,17 +471,27 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 close: Also mark each problem for closing (default: False)
                 severity: Change severity (0-5) for all listed events; -1 = no change
                 unack: Unacknowledge instead of acknowledge (mutually exclusive)
+                suppress_hours: Snooze all for N hours; -1 = until each
+                    resolves; 0 = no snooze (default)
+                unsuppress: Lift existing suppression on all (default: False)
                 instance: Zabbix instance name (optional)
             """
+            if suppress_hours != 0 and unsuppress:
+                return "suppress_hours and unsuppress are mutually exclusive."
             try:
                 ids = [e.strip() for e in event_ids.replace(",", " ").split() if e.strip()]
                 if not ids:
                     return "No event IDs provided."
 
                 client = resolver.resolve(instance)
+                suppress_until = _suppress_until_from_hours(
+                    suppress_hours, int(time.time())
+                )
                 action = _build_ack_action(
                     close=close, message=message,
                     severity=severity, unack=unack,
+                    suppress=suppress_until is not None,
+                    unsuppress=unsuppress,
                 )
                 payload: dict = {
                     "eventids": ids,
@@ -434,6 +500,8 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 }
                 if 0 <= severity <= 5:
                     payload["severity"] = severity
+                if suppress_until is not None:
+                    payload["suppress_until"] = suppress_until
                 await client.call("event.acknowledge", payload)
 
                 verb = "Unacknowledged" if unack else "Acknowledged"
@@ -442,6 +510,14 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     parts.append("Marked for closing.")
                 if 0 <= severity <= 5:
                     parts.append(f"Severity set to {severity}.")
+                if suppress_until is not None:
+                    parts.append(
+                        "Snoozed until each resolves."
+                        if suppress_until == 0
+                        else f"Snoozed for {suppress_hours:g}h."
+                    )
+                if unsuppress:
+                    parts.append("Suppression lifted.")
                 if message:
                     parts.append(f"Message: {message}")
                 return " ".join(parts)
