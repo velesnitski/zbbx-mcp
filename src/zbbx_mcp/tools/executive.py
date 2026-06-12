@@ -11,7 +11,7 @@ from datetime import datetime, timezone
 import httpx
 
 from zbbx_mcp.classify import classify_host as _classify_host
-from zbbx_mcp.classify import detect_provider
+from zbbx_mcp.classify import detect_provider, get_product_map, unmapped_group_counts
 from zbbx_mcp.data import (
     KEY_service_PRIMARY,
     build_value_map,
@@ -634,10 +634,15 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                         primary_traffic[hostname] = traffic_map.get(h["hostid"], 0)
 
                 matched = []
+                unknown_group_sets: list[list[str]] = []
                 for h in hosts:
                     prod, tier = _classify_host(h.get("groups", []))
                     if not prod or product.lower() not in prod.lower():
                         continue
+                    if prod == "Unknown":
+                        unknown_group_sets.append(
+                            [g.get("name", "") for g in h.get("groups", [])]
+                        )
                     hid = h["hostid"]
                     traffic = traffic_map.get(hid, 0)
                     cpu = cpu_map.get(hid, 0)
@@ -711,6 +716,25 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                         lines.append(f"| {s['host']} | {s['cc'] or '-'} | {s['dash']} | {s['traffic']:.1f} | {s['cpu']}% | {service_str} |")
                     if len(servers) > 12:
                         lines.append(f"*+{len(servers) - 12} more*")
+
+                # Why-unclassified breakdown (ADR 058): when auditing the
+                # Unknown bucket, show which unmapped group names cause it —
+                # the exact ZABBIX_PRODUCT_MAP entries the operator should add.
+                if unknown_group_sets:
+                    gaps = unmapped_group_counts(
+                        unknown_group_sets, get_product_map()
+                    )
+                    if gaps:
+                        lines.append(
+                            f"\n**Why unclassified** ({len(unknown_group_sets)} hosts)"
+                            " — unmapped group names; add to ZABBIX_PRODUCT_MAP:"
+                        )
+                        lines.append("| Group | Hosts |")
+                        lines.append("|-------|-------|")
+                        for gname, cnt in gaps[:15]:
+                            lines.append(f"| {gname} | {cnt} |")
+                        if len(gaps) > 15:
+                            lines.append(f"*+{len(gaps) - 15} more group names*")
 
                 return "\n".join(lines)
             except (httpx.HTTPError, ValueError) as e:

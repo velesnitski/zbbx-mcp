@@ -78,6 +78,28 @@ def classify_host(groups: list[dict]) -> tuple[str, str]:
     return "Unknown", "Unknown"
 
 
+def unmapped_group_counts(
+    group_sets: list[list[str]],
+    pmap: dict[str, tuple],
+) -> list[tuple[str, int]]:
+    """Count which group names leave hosts unclassified (ADR 058).
+
+    ``group_sets`` is one list of group names per Unknown-classified host.
+    Returns ``(group_name, host_count)`` sorted by count desc, name asc —
+    excluding names already in ``pmap`` (mapped or explicitly skipped:
+    those are intentional, not gaps). Hosts with no groups at all are
+    counted under ``"(no groups)"``. Pure helper.
+    """
+    counts: dict[str, int] = {}
+    for names in group_sets:
+        gaps = [n for n in names if n and n not in pmap]
+        if not gaps and not names:
+            gaps = ["(no groups)"]
+        for n in gaps:
+            counts[n] = counts.get(n, 0) + 1
+    return sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))
+
+
 
 PROVIDER_CIDRS: dict[str, list[str]] = {
     "A2 Hosting": ["68.66.192.0/18", "206.72.192.0/18"],

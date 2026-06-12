@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.13.3] - 2026-06-12
+
+### Added — why-unclassified breakdown in `get_product_audit`
+ADR 058. ~21% of the fleet classifies as Unknown/Unknown because host
+groups carry names `ZABBIX_PRODUCT_MAP` doesn't map — but nothing ever
+said *which* names. Auditing `product="Unknown"` now appends a "Why
+unclassified" table: every unmapped group name with its Unknown-host
+count, sorted by impact — literally the map entries to add. Explicit
+skip-mappings are respected; group-less hosts counted under `(no
+groups)`. New pure helper `classify.unmapped_group_counts`; additive
+output only, no extra API calls. +4 tests (574 → 578).
+
 ## [1.13.2] - 2026-06-12
 
 ### Added — token-expiry early warning
