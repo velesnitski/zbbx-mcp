@@ -4,7 +4,7 @@ Instructions for Claude Code when working in this repository.
 
 ## Project
 
-Zabbix MCP server — 127 tools across 43 modules. Python 3.10+, FastMCP framework, async httpx HTTP/2 client.
+Zabbix MCP server — 162 tools across 40+ modules. Python 3.10+, FastMCP framework, async httpx HTTP/2 client.
 
 ## Commands
 
@@ -37,7 +37,7 @@ uv run pytest -k "test_name"               # single test by name
 | Module | Tools | Purpose |
 |--------|-------|---------|
 | `hosts.py` | 7 | `search_hosts`, `get_host`, CRUD, `get_server_clusters`, `search_hosts_by_location` |
-| `problems.py` | 3 | `get_problems`, `get_problem_detail`, `acknowledge_problem` |
+| `problems.py` | 6 | `get_problems`, `get_problem_detail`, `get_problem_age_buckets`, `acknowledge_problem`, `bulk_acknowledge`, `rank_problem_cause` |
 | `hostgroups.py` | 3 | CRUD for host groups |
 | `triggers.py` | 4 | CRUD for triggers |
 | `templates.py` | 3 | `get_templates`, link/unlink |

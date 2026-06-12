@@ -33,6 +33,7 @@ EXPECTED_TOOLS = {
     "get_problem_age_buckets",
     "acknowledge_problem",
     "bulk_acknowledge",
+    "rank_problem_cause",
     # hostgroups.py
     "get_hostgroups",
     "create_hostgroup",

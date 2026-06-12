@@ -61,6 +61,7 @@ from zbbx_mcp.tools import (
 WRITE_TOOLS = frozenset({
     "acknowledge_problem",
     "bulk_acknowledge",
+    "rank_problem_cause",
     # Host CRUD
     "create_host",
     "update_host",
@@ -251,6 +252,7 @@ ALL_TOOLS: frozenset[str] = frozenset({
     "import_from_xlsx",
     "import_server_costs",
     "link_template",
+    "rank_problem_cause",
     "reconcile_billing_audit",
     "rollback_by_index",
     "rollback_last",
