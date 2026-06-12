@@ -10,9 +10,18 @@ from zbbx_mcp.rollback import SNAPSHOT_CONFIG, Action, RollbackLog
 
 __all__ = ["ZabbixClient"]
 
+# Zabbix 7.2 renamed the host-group selector on these methods
+# (`selectGroups` -> `selectHostGroups`) and the returned property
+# (`groups` -> `hostgroups`). The client translates both ways (see `call`) so
+# the tool layer keeps the 6.x spelling and runs unchanged on 6.2+ and 7.x.
+_GROUP_SELECT_METHODS = frozenset({"host.get", "trigger.get"})
+
 
 class ZabbixClient:
-    """Async client for Zabbix JSON-RPC API (6.0+).
+    """Async client for Zabbix JSON-RPC API (6.2 through 7.x).
+
+    Bearer-header auth and the host-group selector translation (see `call`)
+    keep a single tool layer working across the 6.4 -> 7.2+ breaking changes.
 
     Performance notes:
     - httpx.AsyncClient keeps a connection pool with keepalive by default
@@ -75,6 +84,12 @@ class ZabbixClient:
         # Methods that must be called without auth (Zabbix requirement)
         no_auth = method in ("apiinfo.version", "user.login")
 
+        # Forward-compat: rewrite the 6.x host-group selector to its 7.2 name.
+        # Copy params so the caller's dict is never mutated.
+        if method in _GROUP_SELECT_METHODS and params and "selectGroups" in params:
+            params = {**params, "selectHostGroups": params["selectGroups"]}
+            del params["selectGroups"]
+
         request_id = next(self._request_id)
         payload = {
             "jsonrpc": "2.0",
@@ -82,10 +97,17 @@ class ZabbixClient:
             "params": params or {},
             "id": request_id,
         }
+        # Zabbix 7.2 removed the `auth` request-body property; authentication is
+        # the HTTP `Authorization: Bearer <token>` header (supported since 6.0,
+        # so this path works on 6.x and 7.x alike). apiinfo.version / user.login
+        # must be called with no auth at all.
+        headers = None
         if not no_auth:
-            payload["auth"] = self._config.token
+            headers = {"Authorization": f"Bearer {self._config.token}"}
 
-        resp = await self._client.post("/api_jsonrpc.php", json=payload)
+        resp = await self._client.post(
+            "/api_jsonrpc.php", json=payload, headers=headers
+        )
         resp.raise_for_status()
         body = resp.json()
 
@@ -103,7 +125,14 @@ class ZabbixClient:
                 )
             raise ValueError(f"Zabbix API error ({err.get('code', '?')}): {msg}")
 
-        return body.get("result", {})
+        result = body.get("result", {})
+        # Alias the 7.2 `hostgroups` property back to `groups` so the 6.x-era
+        # tool code (which reads `groups`) keeps working on 7.x.
+        if method in _GROUP_SELECT_METHODS and isinstance(result, list):
+            for item in result:
+                if isinstance(item, dict) and "hostgroups" in item and "groups" not in item:
+                    item["groups"] = item["hostgroups"]
+        return result
 
     async def snapshot(self, object_type: str, object_id: str) -> dict:
         """Fetch the current state of an object for rollback purposes."""
