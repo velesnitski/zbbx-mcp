@@ -3646,6 +3646,26 @@ class TestDiagnoseSuppressThreading:
         assert [p["name"] for p in facts["problems"]] == ["live"]
 
 
+class TestFormatProxyCompat:
+    """Pure-helper tests for format_proxy_compat (ADR 056)."""
+
+    def test_current_version_no_annotation(self):
+        from zbbx_mcp.tools.proxies import format_proxy_compat
+        assert format_proxy_compat("1", "7.4.9") == " v7.4.9"
+
+    def test_outdated_flagged(self):
+        from zbbx_mcp.tools.proxies import format_proxy_compat
+        assert "OUTDATED" in format_proxy_compat("2", "7.0.0")
+
+    def test_unsupported_flagged(self):
+        from zbbx_mcp.tools.proxies import format_proxy_compat
+        assert "UNSUPPORTED" in format_proxy_compat("3", "6.0.1")
+
+    def test_unknown_version_and_undefined_compat_empty(self):
+        from zbbx_mcp.tools.proxies import format_proxy_compat
+        assert format_proxy_compat("0", "0") == ""
+
+
 class TestFilterSuppressed:
     """Pure-helper tests for filter_suppressed (#143, ADR 044)."""
 
