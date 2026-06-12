@@ -2759,6 +2759,23 @@ class TestAckActionBuilder:
         assert _build_ack_action(message="snooze", suppress=True) == 38
 
 
+class TestBuildRankAction:
+    """Pure-helper tests for _build_rank_action (ADR 060)."""
+
+    def test_rank_as_symptom(self):
+        from zbbx_mcp.tools.problems import _build_rank_action
+        assert _build_rank_action() == 256
+
+    def test_unrank_to_cause(self):
+        from zbbx_mcp.tools.problems import _build_rank_action
+        assert _build_rank_action(unrank=True) == 128
+
+    def test_message_adds_bit_4(self):
+        from zbbx_mcp.tools.problems import _build_rank_action
+        assert _build_rank_action(message="correlated by subnet") == 260
+        assert _build_rank_action(unrank=True, message="split") == 132
+
+
 class TestSuppressUntilFromHours:
     """Pure-helper tests for _suppress_until_from_hours (ADR 059)."""
 

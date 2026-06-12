@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.14.0] - 2026-06-12
+
+### Added — `rank_problem_cause` (new tool, 161 → 162)
+ADR 060. `get_outage_clusters` finds correlated incidents but the
+knowledge died inside the MCP response — Zabbix and every other consumer
+still saw N independent problems. The new write tool marks events as
+**symptoms of a cause** using Zabbix 6.4+ native event ranking
+(`event.acknowledge` bit 256 + `cause_eventid`; `unrank=True` ranks back
+via bit 128), so the correlation is written into Zabbix itself: the UI
+nests the symptoms, and one incident replaces the cluster everywhere.
+Registered in `WRITE_TOOLS` (disabled under `ZABBIX_READ_ONLY`). New pure
+helper `_build_rank_action`; +3 tests (585 → 588).
+
 ## [1.13.4] - 2026-06-12
 
 ### Added — native problem snooze (the suppress write path)

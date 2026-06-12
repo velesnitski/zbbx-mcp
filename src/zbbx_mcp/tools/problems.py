@@ -48,6 +48,19 @@ def _build_ack_action(
     return action
 
 
+def _build_rank_action(*, unrank: bool = False, message: str = "") -> int:
+    """Compute the event.acknowledge bitmask for cause/symptom ranking.
+
+    Bits (Zabbix 6.4+): 256 = change rank to symptom (requires
+    ``cause_eventid``), 128 = change rank back to cause (independent),
+    4 = add message. Pure helper (ADR 060).
+    """
+    action = 128 if unrank else 256
+    if message:
+        action |= 4
+    return action
+
+
 def _suppress_until_from_hours(suppress_hours: float, now: int) -> int | None:
     """Translate the tool-level ``suppress_hours`` into ``suppress_until``.
 
@@ -521,5 +534,62 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 if message:
                     parts.append(f"Message: {message}")
                 return " ".join(parts)
+            except (httpx.HTTPError, ValueError) as e:
+                return f"Error querying Zabbix: {e}"
+
+    if "rank_problem_cause" not in skip:
+
+        @mcp.tool()
+        async def rank_problem_cause(
+            symptom_event_ids: str,
+            cause_event_id: str = "",
+            unrank: bool = False,
+            message: str = "",
+            instance: str = "",
+        ) -> str:
+            """Mark problems as symptoms of a cause event (or rank them back).
+
+            Writes the correlation into Zabbix itself (6.4+): the UI nests
+            the symptoms under the cause, and every consumer sees one
+            incident instead of N. The natural follow-up to
+            get_outage_clusters — paste the cluster's event IDs here to
+            collapse it at the source.
+
+            Args:
+                symptom_event_ids: Comma- or space-separated event IDs to rank
+                cause_event_id: The cause event the symptoms belong to
+                    (required unless unrank=True)
+                unrank: Rank the listed events back to independent causes
+                message: Optional note recorded with the rank change
+                instance: Zabbix instance name (optional)
+            """
+            ids = [
+                e.strip() for e in symptom_event_ids.replace(",", " ").split()
+                if e.strip()
+            ]
+            if not ids:
+                return "No symptom event IDs provided."
+            if not unrank and not cause_event_id:
+                return "cause_event_id is required (or set unrank=True)."
+            if unrank and cause_event_id:
+                return "unrank does not take a cause_event_id."
+            try:
+                client = resolver.resolve(instance)
+                payload: dict = {
+                    "eventids": ids,
+                    "action": _build_rank_action(unrank=unrank, message=message),
+                }
+                if message:
+                    payload["message"] = message
+                if not unrank:
+                    payload["cause_eventid"] = cause_event_id
+                await client.call("event.acknowledge", payload)
+
+                if unrank:
+                    return f"Ranked {len(ids)} event(s) back to independent cause."
+                return (
+                    f"Ranked {len(ids)} event(s) as symptoms of "
+                    f"cause {cause_event_id}."
+                )
             except (httpx.HTTPError, ValueError) as e:
                 return f"Error querying Zabbix: {e}"
