@@ -56,6 +56,35 @@ def _feature_matrix(major: int, minor: int) -> list[tuple[str, bool]]:
     ]
 
 
+def summarize_token_expiry(
+    tokens: list[dict],
+    now: int,
+    warn_days: int = 30,
+) -> list[tuple[str, int]]:
+    """Return (token_name, days_left) for enabled tokens expiring soon.
+
+    ``expires_at == "0"`` means never-expiring (skipped); ``status == "1"``
+    means disabled (skipped). ``days_left`` is negative when the token has
+    already expired. Sorted soonest-first. Pure helper (ADR 057).
+    """
+    out: list[tuple[str, int]] = []
+    horizon = warn_days * 86400
+    for t in tokens:
+        if t.get("status") == "1":
+            continue
+        try:
+            exp = int(t.get("expires_at", 0))
+        except (ValueError, TypeError):
+            continue
+        if exp <= 0:
+            continue
+        remaining = exp - now
+        if remaining <= horizon:
+            out.append((t.get("name", "?"), remaining // 86400))
+    out.sort(key=lambda x: x[1])
+    return out
+
+
 def _bucket_problems_by_age(
     problems: list[dict],
     now: int,
@@ -94,13 +123,39 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
         async def check_connection(instance: str = "") -> str:
             """Check connectivity to a Zabbix server and return its version.
 
+            Also warns when any enabled API token expires within 30 days —
+            an expired token kills every authenticated tool at once, so this
+            is the cheapest place to catch it early.
+
             Args:
                 instance: Zabbix instance name (optional, for multi-instance setups)
             """
             try:
                 client = resolver.resolve(instance)
                 version = await client.call("apiinfo.version", {})
-                return f"Connected. Zabbix version: {version}"
+                msg = f"Connected. Zabbix version: {version}"
+
+                # Token-expiry early warning (ADR 057). token.get needs 5.4+
+                # and visibility on the token's owner; degrade silently when
+                # the server or the token's role can't answer.
+                try:
+                    tokens = await client.call("token.get", {
+                        "output": ["name", "expires_at", "status"],
+                    })
+                    expiring = summarize_token_expiry(
+                        tokens if isinstance(tokens, list) else [],
+                        int(_time.time()),
+                    )
+                    if expiring:
+                        lines = [f"\n\n⚠ {len(expiring)} API token(s) expire within 30 days:"]
+                        for name, days in expiring[:5]:
+                            when = f"in {days}d" if days >= 0 else f"EXPIRED {-days}d ago"
+                            lines.append(f"- {name}: {when}")
+                        msg += "\n".join(lines)
+                except (httpx.HTTPError, ValueError):
+                    pass  # no token API / no permission — connection is still fine
+
+                return msg
             except (httpx.HTTPError, ValueError) as e:
                 return f"Connection failed: {e}"
 

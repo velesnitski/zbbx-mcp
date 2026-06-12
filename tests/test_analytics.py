@@ -3646,6 +3646,41 @@ class TestDiagnoseSuppressThreading:
         assert [p["name"] for p in facts["problems"]] == ["live"]
 
 
+class TestSummarizeTokenExpiry:
+    """Pure-helper tests for summarize_token_expiry (ADR 057)."""
+
+    NOW = 1_000_000_000
+
+    def test_expiring_token_flagged_sorted_soonest_first(self):
+        from zbbx_mcp.tools.health import summarize_token_expiry
+        tokens = [
+            {"name": "b", "expires_at": str(self.NOW + 20 * 86400), "status": "0"},
+            {"name": "a", "expires_at": str(self.NOW + 5 * 86400), "status": "0"},
+        ]
+        out = summarize_token_expiry(tokens, self.NOW)
+        assert [n for n, _ in out] == ["a", "b"]
+        assert out[0][1] == 5
+
+    def test_never_expiring_and_disabled_skipped(self):
+        from zbbx_mcp.tools.health import summarize_token_expiry
+        tokens = [
+            {"name": "never", "expires_at": "0", "status": "0"},
+            {"name": "disabled", "expires_at": str(self.NOW + 86400), "status": "1"},
+        ]
+        assert summarize_token_expiry(tokens, self.NOW) == []
+
+    def test_far_future_not_flagged(self):
+        from zbbx_mcp.tools.health import summarize_token_expiry
+        tokens = [{"name": "ok", "expires_at": str(self.NOW + 90 * 86400), "status": "0"}]
+        assert summarize_token_expiry(tokens, self.NOW) == []
+
+    def test_already_expired_negative_days(self):
+        from zbbx_mcp.tools.health import summarize_token_expiry
+        tokens = [{"name": "dead", "expires_at": str(self.NOW - 2 * 86400), "status": "0"}]
+        out = summarize_token_expiry(tokens, self.NOW)
+        assert out and out[0][1] < 0
+
+
 class TestFormatProxyCompat:
     """Pure-helper tests for format_proxy_compat (ADR 056)."""
 
