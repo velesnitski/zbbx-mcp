@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.13.1] - 2026-06-12
+
+### Fixed — `get_proxies` never called a real API method
+ADR 056. The tool called `relay.get` with a `relayid` output field —
+neither exists in any Zabbix version (an over-eager find/replace
+artifact), so the tool errored on every invocation since it was written.
+Rewritten against the real `proxy.get` with the Zabbix 7.0 proxy object
+(`name`, `operating_mode`), and now also surfaces `version` +
+`compatibility` — proxies running outdated (⚠) or unsupported (✗)
+versions relative to the server are flagged, which is exactly the check
+an operator wants after a server upgrade. +4 pure-helper tests
+(`TestFormatProxyCompat`); 566 → 570.
+
 ## [1.13.0] - 2026-06-12
 
 ### Fixed — Zabbix 7.2+ API compatibility
