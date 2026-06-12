@@ -101,6 +101,7 @@ fixed headings (`## Problem`, `## Decision`, `## Test approach`,
 | [052](052-complete-suppress-coverage.md) | Complete maintenance-suppress coverage | Wires `filter_suppressed` (ADR 044) into the last three problem-consuming tools — `diagnose_host`/`bulk_diagnose`/`diagnose_subnet`, `get_recent_changes`, `send_slack_report` — each gains `include_suppressed=False`; planned downtime no longer reads as live problems |
 | [053](053-loss-drift-degraded-baseline.md) | Suppress false RTT drift vs degraded baseline | `compute_loss_drift` skips the RTT-drift branch when baseline loss ≥ 20% (`_BASELINE_LOSS_MAX`) — an outage baseline has unreliable RTT, so a recovered host (47% loss → 0%) no longer reads as `rtt-up`; mirrors zabbix-reports `_classify_loss_drift` |
 | [054](054-starlette-cve-2026-48710.md) | Bump starlette to clear CVE-2026-48710 | Transitive `starlette 1.0.0 → 1.2.1` via `uv lock --upgrade-package` — clears the Dependabot-flagged Host-header request-smuggling CVE (CVSS 6.5); lockfile-only, 561 tests green |
+| [055](055-zabbix-7-api-compat.md) | Zabbix 7.2+ API compatibility | Instance upgraded 6.4 → 7.4.9. Client now sends `Authorization: Bearer` (the 7.2-removed `auth` body property is gone) and translates `host.get`/`trigger.get` `selectGroups`↔`selectHostGroups` / `groups`↔`hostgroups` — one client boundary, no call-site churn; spans 6.2–7.x. +5 wire-format tests |
 
 ## Writing a new ADR
 

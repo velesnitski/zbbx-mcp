@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.13.0] - 2026-06-12
+
+### Fixed — Zabbix 7.2+ API compatibility
+ADR 055. The monitored instance was upgraded 6.4 → 7.4.9, which broke the
+server on two backward-incompatible JSON-RPC changes from 7.2: (1) the
+`auth` request-body property was removed — every authenticated call failed
+with `unexpected parameter "auth"` (only `apiinfo.version` kept working);
+(2) `host.get`/`trigger.get` dropped `selectGroups` (returned `groups` →
+`hostgroups`), which the tool layer uses in ~76/~82 places for host-group
+classification. Both are fixed at the client boundary: authentication now
+uses the `Authorization: Bearer` header, and the client transparently
+translates `selectGroups` ↔ `selectHostGroups` and aliases `hostgroups`
+back to `groups`. No call-site or tool-signature changes; the client now
+spans Zabbix 6.2–7.x. Other 7.0/7.2/7.4 removals were checked and are
+unused here. +5 wire-format tests (`test_client.py`); 561 → 566.
+
 ## [1.12.7] - 2026-06-09
 
 ### Security — clear CVE-2026-48710 (starlette)
