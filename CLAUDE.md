@@ -121,3 +121,11 @@ uv run pytest -k "test_name"               # single test by name
 - `dev` — active development branch
 - `main` — stable, always fast-forward merged from `dev`
 - Always confirm before `git push`
+
+## `/mcp` version label
+
+The `/mcp` dialog labels servers by their **config key** in
+`~/.claude.json`, not by `serverInfo.name`. After a version bump, run
+`python3 scripts/sync-mcp-label.py` to re-key the entry to
+`zabbix v<version>`, then reconnect `/mcp`. Check the running build any
+time with `uv run zbbx-mcp --version`. See ADR 061.

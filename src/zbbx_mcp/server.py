@@ -270,7 +270,15 @@ def create_server() -> tuple[FastMCP, dict[str, ZabbixClient]]:
 def main():
     import argparse
 
+    from zbbx_mcp import __version__
+
     parser = argparse.ArgumentParser(description="Zabbix MCP server")
+    parser.add_argument(
+        "--version",
+        action="version",
+        version=__version__,
+        help="Print the version and exit",
+    )
     parser.add_argument(
         "--transport",
         choices=["stdio", "sse", "streamable-http"],
