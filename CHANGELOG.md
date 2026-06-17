@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.15.0] - 2026-06-16
+
+### Added — version visible in the `/mcp` dialog
+ADR 061. ADR 038 put the version in `serverInfo.name`, but Claude Code's
+`/mcp` dialog labels servers by their config *key*, not the reported
+name — so the running version was invisible exactly where operators
+check it (this fleet ran v1.13.0 while v1.14.0 was on `main`). Two parts,
+reusing the slk-mcp ADR 024 pattern: (1) a `--version` flag
+(`uv run zbbx-mcp --version`); (2) `scripts/sync-mcp-label.py`, which
+finds the entry by command/args fragment, asks the wired invocation its
+version (pyproject fallback), and renames the config key to
+`zabbix v<version>` — idempotent, atomic, `.bak` backup, across all
+`mcpServers` containers. Run after a release bump, then reconnect `/mcp`.
++18 tests (`test_sync_label.py`); 588 → 606.
+
 ## [1.14.0] - 2026-06-12
 
 ### Added — `rank_problem_cause` (new tool, 161 → 162)

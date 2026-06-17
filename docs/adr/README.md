@@ -107,6 +107,7 @@ fixed headings (`## Problem`, `## Decision`, `## Test approach`,
 | [058](058-why-unclassified-audit.md) | Why-unclassified breakdown in `get_product_audit` | Auditing `product="Unknown"` now appends each unmapped group name with its Unknown-host count (`unmapped_group_counts`) — the exact `ZABBIX_PRODUCT_MAP` entries to add, prioritised by impact; skip-mappings respected |
 | [059](059-native-problem-snooze.md) | Native problem snooze (suppress write path) | `acknowledge_problem`/`bulk_acknowledge` gain `suppress_hours` (-1 = until resolve) and `unsuppress` via ack bits 32/64 + `suppress_until` — activates the ADR 052 read path: snoozed noise drops out of every suppress-aware view, in Zabbix itself and all 7 tools here |
 | [060](060-rank-problem-cause.md) | `rank_problem_cause` — durable cluster correlation | New write tool: mark events as symptoms of a cause (`event.acknowledge` bit 256 + `cause_eventid`; `unrank` via 128) — the `get_outage_clusters` follow-up that collapses an incident at the source, so the Zabbix UI and every consumer see 1 incident instead of N. Tool count 161 → 162 |
+| [061](061-mcp-version-label.md) | Version in the `/mcp` dialog (`--version` + label sync) | `/mcp` labels by config key, not `serverInfo.name`, so the version was invisible. Adds a `--version` flag and `scripts/sync-mcp-label.py` (matches by command/args fragment, asks the wired invocation, renames the key to `zabbix v<version>`) — parity with slk-mcp ADR 024. +18 tests |
 
 ## Writing a new ADR
 
