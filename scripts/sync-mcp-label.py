@@ -127,6 +127,17 @@ def rename_in(container, get_version=query_version):
     return changed
 
 
+def sync_config(cfg, get_version=query_version):
+    """Rename matching entries across ALL containers. Returns True if any changed.
+
+    The list comprehension is load-bearing: `any(rename_in(c) for c in ...)`
+    over a generator short-circuits after the first container that changes,
+    leaving the zabbix entry stale in every other container (the config
+    carries one per project). Build the full list first, then reduce.
+    """
+    return any([rename_in(c, get_version) for c in mcp_containers(cfg)])
+
+
 def main():
     if not os.path.exists(CLAUDE):
         print(f"no config at {CLAUDE} — nothing to do")
@@ -134,7 +145,7 @@ def main():
     with open(CLAUDE) as f:
         cfg = json.load(f)
 
-    if not any(rename_in(c) for c in mcp_containers(cfg)):
+    if not sync_config(cfg):
         print("nothing to update (zbbx-mcp entry not found or label already current)")
         return 0
 

@@ -110,3 +110,26 @@ class TestRenameIn:
         c = self._container()
         assert mod.rename_in(c, get_version=lambda cmd, args: "") is False
         assert "zabbix" in c  # unchanged
+
+
+class TestSyncConfig:
+    """sync_config must update EVERY container, not short-circuit (ADR 062)."""
+
+    def test_renames_across_all_containers(self, mod):
+        zbbx = {"command": "uv", "args": ["run", "--directory", "/x/zbbx-mcp", "zbbx-mcp"]}
+        cfg = {
+            "projects": {
+                "/p1": {"mcpServers": {"zabbix": dict(zbbx)}},
+                "/p2": {"mcpServers": {"zabbix": dict(zbbx)}},
+            }
+        }
+        changed = mod.sync_config(cfg, get_version=lambda cmd, args: "1.15.1")
+        assert changed is True
+        # Both project containers must be re-keyed — the short-circuit bug
+        # left the second as plain "zabbix".
+        keys = [list(p["mcpServers"].keys())[0] for p in cfg["projects"].values()]
+        assert keys == ["zabbix v1.15.1", "zabbix v1.15.1"]
+
+    def test_returns_false_when_nothing_matches(self, mod):
+        cfg = {"mcpServers": {"youtrack": {"command": "uv", "args": ["run", "yt-mcp"]}}}
+        assert mod.sync_config(cfg, get_version=lambda cmd, args: "1.15.1") is False
