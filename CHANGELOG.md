@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.15.1] - 2026-06-16
+
+### Fixed — label sync now updates every container
+ADR 062. `scripts/sync-mcp-label.py` re-keyed only the first `mcpServers`
+container: `any(rename_in(c) for c in …)` over a generator short-circuits
+once the first container changes, so with one zabbix entry per project
+the rest stayed plain `zabbix`. Caught on first real use (2 containers,
+1 renamed). Extracted `sync_config` that maps `rename_in` over a list
+before reducing, so all containers are visited; verified live. +2 tests
+(606 → 608).
+
 ## [1.15.0] - 2026-06-16
 
 ### Added — version visible in the `/mcp` dialog
