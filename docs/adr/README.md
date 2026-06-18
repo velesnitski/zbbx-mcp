@@ -110,6 +110,7 @@ fixed headings (`## Problem`, `## Decision`, `## Test approach`,
 | [061](061-mcp-version-label.md) | Version in the `/mcp` dialog (`--version` + label sync) | `/mcp` labels by config key, not `serverInfo.name`, so the version was invisible. Adds a `--version` flag and `scripts/sync-mcp-label.py` (matches by command/args fragment, asks the wired invocation, renames the key to `zabbix v<version>`) — parity with slk-mcp ADR 024. +18 tests |
 | [062](062-sync-label-all-containers.md) | `sync-mcp-label` updates every container | Fix: `any(rename_in(c) for c in …)` over a generator short-circuited, re-keying only the first `mcpServers` block and leaving the rest stale. Extracted `sync_config` mapping over a list so all containers are visited. +2 tests |
 | [063](063-readme-accuracy-sync.md) | README accuracy sync | The README's hand-maintained counts had drifted and disagreed with each other (badge 161 / tier-table 156 / prose 154 vs the real 162). Synced to computed `ALL_TOOLS` / tier sizes, refreshed the `serverInfo`/`--version`/Zabbix-version examples; flagged auto-counting as the fix for the root cause |
+| [064](064-python-multipart-cve-2026-53539.md) | Bump python-multipart to clear CVE-2026-53539 | Transitive `python-multipart 0.0.29 → 0.0.32` via `uv lock --upgrade-package` — clears the Dependabot-flagged High-severity quadratic-querystring CPU DoS (fixed in 0.0.30); lockfile-only, 608 tests green |
 
 ## Writing a new ADR
 
