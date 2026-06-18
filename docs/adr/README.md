@@ -109,6 +109,7 @@ fixed headings (`## Problem`, `## Decision`, `## Test approach`,
 | [060](060-rank-problem-cause.md) | `rank_problem_cause` — durable cluster correlation | New write tool: mark events as symptoms of a cause (`event.acknowledge` bit 256 + `cause_eventid`; `unrank` via 128) — the `get_outage_clusters` follow-up that collapses an incident at the source, so the Zabbix UI and every consumer see 1 incident instead of N. Tool count 161 → 162 |
 | [061](061-mcp-version-label.md) | Version in the `/mcp` dialog (`--version` + label sync) | `/mcp` labels by config key, not `serverInfo.name`, so the version was invisible. Adds a `--version` flag and `scripts/sync-mcp-label.py` (matches by command/args fragment, asks the wired invocation, renames the key to `zabbix v<version>`) — parity with slk-mcp ADR 024. +18 tests |
 | [062](062-sync-label-all-containers.md) | `sync-mcp-label` updates every container | Fix: `any(rename_in(c) for c in …)` over a generator short-circuited, re-keying only the first `mcpServers` block and leaving the rest stale. Extracted `sync_config` mapping over a list so all containers are visited. +2 tests |
+| [063](063-readme-accuracy-sync.md) | README accuracy sync | The README's hand-maintained counts had drifted and disagreed with each other (badge 161 / tier-table 156 / prose 154 vs the real 162). Synced to computed `ALL_TOOLS` / tier sizes, refreshed the `serverInfo`/`--version`/Zabbix-version examples; flagged auto-counting as the fix for the root cause |
 
 ## Writing a new ADR
 

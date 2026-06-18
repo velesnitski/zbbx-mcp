@@ -3,7 +3,7 @@
 [![Tests](https://github.com/velesnitski/zbbx-mcp/actions/workflows/test.yml/badge.svg)](https://github.com/velesnitski/zbbx-mcp/actions/workflows/test.yml)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-yellow.svg)](LICENSE)
-[![Tools: 161](https://img.shields.io/badge/tools-161-brightgreen.svg)](#what-it-does)
+[![Tools: 162](https://img.shields.io/badge/tools-162-brightgreen.svg)](#what-it-does)
 [![Latest release](https://img.shields.io/github/v/release/velesnitski/zbbx-mcp.svg)](https://github.com/velesnitski/zbbx-mcp/releases)
 
 Zabbix MCP server for [Claude Code](https://claude.com/claude-code), [GitHub Copilot](https://github.com/features/copilot), [Codex CLI](https://github.com/openai/codex), [n8n](https://n8n.io), and any MCP-compatible client. Talk to your Zabbix monitoring in natural language.
@@ -66,12 +66,12 @@ You should see `zabbix` listed when Claude starts. Try asking: *"Show current pr
 
 ## What it does
 
-**161 tools** across 55 modules:
+**162 tools**:
 
 | Category | Tools |
 |----------|-------|
 | **Hosts** | `search_hosts`, `get_host`, `create_host`, `update_host`, `delete_host`, `get_server_clusters`, `search_hosts_by_location`, `search_hosts_by_ip` |
-| **Problems** | `get_problems`, `get_problem_detail`, `acknowledge_problem`, `bulk_acknowledge` |
+| **Problems** | `get_problems`, `get_problem_detail`, `get_problem_age_buckets`, `acknowledge_problem`, `bulk_acknowledge`, `rank_problem_cause` |
 | **Host Groups** | `get_hostgroups`, `create_hostgroup`, `delete_hostgroup` |
 | **Triggers** | `get_triggers`, `create_trigger`, `update_trigger`, `delete_trigger`, `get_trigger_timeline` |
 | **Templates** | `get_templates`, `link_template`, `unlink_template` |
@@ -129,17 +129,17 @@ get_traffic_report(country="us")
 
 ## Choosing a tier
 
-The full 154-tool catalog costs ~30k tokens at every session start (the
+The full 162-tool catalog costs ~30k tokens at every session start (the
 LLM has to load every tool's schema). For most sessions you only use a
 subset. `ZABBIX_TIER` ships preset bundles that cut this:
 
 | Tier | Tools | Handshake (~tokens) | Use when |
 |------|------:|--------------------:|----------|
-| `core` | 25 | ~4k | Read-only Zabbix querying — search, get, problems, dashboards |
-| `ops` | 52 | ~9k | Incident response — `core` + correlation, disruption detection, risk scoring, IP history, extended health |
-| `finance` | 47 | ~7k | Cost / billing — `core` + cost imports, audits, provider analysis |
-| `reports` | 63 | ~10k | Executive reporting — `core` + report generators, executive analytics, geo, inventory |
-| `full` | 156 | ~25k | Default — everything (no restriction) |
+| `core` | 27 | ~4k | Read-only Zabbix querying — search, get, problems, dashboards |
+| `ops` | 57 | ~9k | Incident response — `core` + correlation, disruption detection, risk scoring, IP history, extended health |
+| `finance` | 49 | ~7k | Cost / billing — `core` + cost imports, audits, provider analysis |
+| `reports` | 65 | ~10k | Executive reporting — `core` + report generators, executive analytics, geo, inventory |
+| `full` | 162 | ~25k | Default — everything (no restriction) |
 
 `ZABBIX_TIER=ops` saves ~18k tokens per session compared to the default.
 Switch tiers by changing the env var; the server picks it up on restart.
@@ -248,7 +248,7 @@ echo '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{},
 A successful response looks like:
 
 ```json
-{"jsonrpc":"2.0","id":1,"result":{"serverInfo":{"name":"zabbix"},"capabilities":{"tools":{}},...}}
+{"jsonrpc":"2.0","id":1,"result":{"serverInfo":{"name":"zabbix v1.15.1"},"capabilities":{"tools":{}},...}}
 ```
 
 If you see `command not found: uvx`, install `uv` first (see above).
@@ -437,6 +437,7 @@ The server will be available at `http://localhost:8000/mcp`.
 
 | Flag | Default | Description |
 |------|---------|-------------|
+| `--version` | — | Print the version and exit (e.g. `uvx --from … zbbx-mcp --version`) |
 | `--transport` | `stdio` | Transport protocol: `stdio`, `sse`, or `streamable-http` |
 | `--host` | `0.0.0.0` | Host to bind to |
 | `--port` | `8000` | Port to bind to |
@@ -585,9 +586,11 @@ If not installed:
 
 If you prefer not to use `uv`, see [Alternative installation](#alternative-installation) for `pip`-based setup.
 
-### Zabbix 6.0+
+### Zabbix 6.2+
 
-Requires Zabbix 6.0 or later with JSON-RPC API enabled. Tested on Zabbix 6.4.
+Requires Zabbix 6.2 or later with JSON-RPC API enabled (Bearer-token auth
+and the `selectHostGroups` selector). Spans 6.2 through 7.x; tested on
+Zabbix 7.4.
 
 ## License
 
