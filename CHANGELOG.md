@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.15.2] - 2026-06-18
+
+### Docs — README accuracy sync
+ADR 063. The README's hand-maintained counts had drifted and even
+disagreed with each other (tool badge 161, tier-table `full` 156, prose
+154 — real total 162). Synced everything to **computed** values
+(`ALL_TOOLS` / `resolve_tier_disabled`): tool count 162; tiers core 27 /
+ops 57 / finance 49 / reports 65 / full 162; added `get_problem_age_buckets`
+and `rank_problem_cause` to the Problems row; refreshed the `initialize`
+example to `serverInfo.name = "zabbix v1.15.1"`; added the `--version`
+flag to the CLI table; requirements → Zabbix 6.2+ (tested on 7.4).
+Docs-only; no code change.
+
 ## [1.15.1] - 2026-06-16
 
 ### Fixed — label sync now updates every container
