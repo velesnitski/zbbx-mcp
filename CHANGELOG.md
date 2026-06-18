@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.15.3] - 2026-06-18
+
+### Security — clear CVE-2026-53539 (python-multipart)
+ADR 064. Dependabot flagged the transitive `python-multipart == 0.0.29`
+pin against CVE-2026-53539 (High) — a CPU denial-of-service: its
+`QuerystringParser` locates form-field boundaries with an O(B²) scan
+(whole-buffer search for `&`, then re-scan for `;`), so a body of
+semicolons pins a CPU (affected `< 0.0.30`, fixed in `0.0.30`; the line
+also covers the sibling CVE-2026-53538). Re-resolved via
+`uv lock --upgrade-package python-multipart`, moving it `0.0.29 → 0.0.32`
+(transitive via `mcp`; no direct dependency added). Only reachable under
+the SSE / streamable-http transports — stdio never parses form bodies —
+but cleared regardless. Lockfile-only; no source change. 608 tests green.
+
 ## [1.15.2] - 2026-06-18
 
 ### Docs — README accuracy sync
