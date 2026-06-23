@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.15.5] - 2026-06-23
+
+### Security — clear four Dependabot CVEs (cryptography, starlette, pydantic-settings)
+ADR 066. Four alerts landed at once, all transitive via `mcp`, cleared in
+one `uv lock` re-resolve (lockfile-only):
+- **cryptography 46.0.7 → 49.0.0** — GHSA-537c-gmf6-5ccf (High): vulnerable
+  OpenSSL statically bundled in the project's PyPI wheels (fixed 48.0.1).
+- **starlette 1.2.1 → 1.3.1** — CVE-2026-54283 (High): oversized urlencoded
+  body → DoS (fixed 1.3.1); CVE-2026-54282 (Low): unvalidated path poisons
+  `request.url.hostname` (fixed 1.3.0).
+- **pydantic-settings 2.13.1 → 2.14.2** — GHSA-4xgf-cpjx-pc3j (Moderate):
+  `NestedSecretsSettingsSource` follows symlinks out of `secrets_dir` (fixed
+  2.14.2).
+Reachability as before: starlette only under SSE/streamable-http;
+pydantic-settings only with the `secrets_dir` loader (zbbx-mcp uses env
+vars); none in the default stdio setup. No source change. 608 tests green.
+
 ## [1.15.4] - 2026-06-23
 
 ### Security — clear CVE-2026-48526 (PyJWT)

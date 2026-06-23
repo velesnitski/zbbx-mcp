@@ -112,6 +112,7 @@ fixed headings (`## Problem`, `## Decision`, `## Test approach`,
 | [063](063-readme-accuracy-sync.md) | README accuracy sync | The README's hand-maintained counts had drifted and disagreed with each other (badge 161 / tier-table 156 / prose 154 vs the real 162). Synced to computed `ALL_TOOLS` / tier sizes, refreshed the `serverInfo`/`--version`/Zabbix-version examples; flagged auto-counting as the fix for the root cause |
 | [064](064-python-multipart-cve-2026-53539.md) | Bump python-multipart to clear CVE-2026-53539 | Transitive `python-multipart 0.0.29 → 0.0.32` via `uv lock --upgrade-package` — clears the Dependabot-flagged High-severity quadratic-querystring CPU DoS (fixed in 0.0.30); lockfile-only, 608 tests green |
 | [065](065-pyjwt-cve-2026-48526.md) | Bump PyJWT to clear CVE-2026-48526 | Transitive `pyjwt[crypto] 2.12.1 → 2.13.0` via `uv lock --upgrade-package` — clears the Dependabot-flagged High JWT algorithm-confusion (public JWK accepted as HMAC secret → forged HS256; fixed in 2.13.0); lockfile-only, 608 tests green |
+| [066](066-dep-cves-2026-06-23.md) | Clear four Dependabot CVEs (batched) | Transitive `cryptography 46.0.7 → 49.0.0` (bundled-OpenSSL, High), `starlette 1.2.1 → 1.3.1` (urlencoded-body DoS + url.hostname poisoning), `pydantic-settings 2.13.1 → 2.14.2` (secrets_dir symlink traversal) — one `uv lock` re-resolve; lockfile-only, 608 tests green |
 
 ## Writing a new ADR
 
