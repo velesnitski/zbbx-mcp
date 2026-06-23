@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.15.4] - 2026-06-23
+
+### Security — clear CVE-2026-48526 (PyJWT)
+ADR 065. Dependabot flagged the transitive `pyjwt[crypto] == 2.12.1` pin
+against CVE-2026-48526 (High) — a JWT algorithm-confusion flaw: a verifier
+supporting both asymmetric and HMAC algorithms fails to reject a JSON Web
+Key used as the HMAC secret, so a forged HS256 token signed with the
+issuer's *public* JWK passes verification (affected `< 2.13.0`, fixed in
+`2.13.0`). Re-resolved via `uv lock --upgrade-package pyjwt`, moving it
+`2.12.1 → 2.13.0` (transitive via `mcp`'s OAuth support; no direct
+dependency added). Only reachable under the SSE / streamable-http
+transports' OAuth path — the default stdio deployment never verifies JWTs
+— and High-complexity besides, but cleared regardless. Lockfile-only; no
+source change. 608 tests green.
+
 ## [1.15.3] - 2026-06-18
 
 ### Security — clear CVE-2026-53539 (python-multipart)
