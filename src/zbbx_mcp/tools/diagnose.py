@@ -196,6 +196,26 @@ def _freshest_agent_ping(items: list[dict]) -> dict | None:
     return max(pings, key=lambda it: int(it.get("lastclock", "0") or 0))
 
 
+def _keep_active_or_recent(problems, now, problem_hours):
+    """Keep every UNRESOLVED problem (any age) plus resolved ones in the window.
+
+    The bug this fixes (ADR 069): a still-active problem is dropped when its
+    *start* clock is older than ``problem_hours``, so a host with unresolved
+    Disasters that began days ago read ``healthy`` / 0 problems. A days-long
+    unresolved problem is more severe, not less — it must never be aged out.
+    Only recently-resolved entries (``r_eventid`` set, present because
+    ``problem.get`` is called with ``recent=True``) are subject to the
+    look-back window. Pure helper.
+    """
+    cutoff = now - problem_hours * 3600
+    out = []
+    for p in problems:
+        resolved = (p.get("r_eventid") or "0") not in ("0", "")
+        if not resolved or int(p.get("clock", 0) or 0) >= cutoff:
+            out.append(p)
+    return out
+
+
 async def _collect_diagnosis_inner(
     client,
     host_record: dict,
@@ -233,15 +253,17 @@ async def _collect_diagnosis_inner(
     problem_hostids = group_hostids or [hid]
     problems = await client.call("problem.get", {
         "hostids": problem_hostids,
-        "output": ["eventid", "name", "severity", "clock", "suppressed"],
+        "output": ["eventid", "name", "severity", "clock", "suppressed",
+                   "r_eventid"],
         "sortfield": "eventid",
         "sortorder": "DESC",
         "limit": 30,
         "recent": True,
     })
     problems = filter_suppressed(problems, include_suppressed)
-    problem_cutoff = now - problem_hours * 3600
-    problems = [p for p in problems if int(p.get("clock", 0)) >= problem_cutoff]
+    # Never age out an UNRESOLVED problem by its start time — only resolved
+    # entries are windowed (ADR 069).
+    problems = _keep_active_or_recent(problems, now, problem_hours)
 
     # Server-mode-only data
     traffic_baseline = traffic_recent = None
@@ -422,7 +444,7 @@ def _render_full_report(
         lines.append("")
 
     probs = facts["problems"]
-    lines.append(f"### Active problems ({len(probs)} in last {problem_hours}h)")
+    lines.append(f"### Active problems ({len(probs)})")
     if not probs:
         lines.append("- None")
     else:
@@ -645,7 +667,8 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
             Args:
                 host: Exact hostname (required)
                 traffic_hours: Recent-window for traffic comparison (default: 6)
-                problem_hours: Look-back for active problems (default: 24)
+                problem_hours: Look-back window for recently-resolved problems
+                    (default: 24); active problems are reported regardless of age
                 rotation_days: Look-back for IP-rotation history (default: 14)
                 include_suppressed: Count maintenance-suppressed problems in the
                     verdict (default: False — a maintenance host won't read degraded)
@@ -729,7 +752,8 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 group: Host-group name filter
                 country: Country filter (ISO-2 / ISO-3 / English name)
                 traffic_hours: Recent-window for traffic comparison (default: 6)
-                problem_hours: Look-back for active problems (default: 24)
+                problem_hours: Look-back window for recently-resolved problems
+                    (default: 24); active problems are reported regardless of age
                 max_hosts: Safety cap on fan-out (default: 20, max: 50)
                 include_suppressed: Count maintenance-suppressed problems
                     (default: False)
@@ -786,7 +810,8 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
             Args:
                 subnet: CIDR or dotted prefix (required)
                 traffic_hours: Recent-window for traffic comparison (default: 6)
-                problem_hours: Look-back for active problems (default: 24)
+                problem_hours: Look-back window for recently-resolved problems
+                    (default: 24); active problems are reported regardless of age
                 max_hosts: Safety cap on fan-out (default: 20, max: 50)
                 include_suppressed: Count maintenance-suppressed problems
                     (default: False)
