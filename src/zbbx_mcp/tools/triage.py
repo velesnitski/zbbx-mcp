@@ -90,11 +90,13 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 by_host: dict[str, list] = {}
                 dep_map: dict[str, set] = {}
                 if hostids:
+                    # problem.get does NOT support selectHosts (Zabbix rejects it
+                    # with -32602); problems carry only objectid (the trigger).
+                    # We map problem→host through trigger.get below, which DOES.
                     problems = await client.call("problem.get", {
                         "hostids": hostids,
                         "output": ["eventid", "name", "severity", "clock",
                                    "objectid", "suppressed"],
-                        "selectHosts": ["hostid"],
                         "recent": True,
                         "limit": 200,
                     })
@@ -102,10 +104,12 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     trig_ids = sorted({
                         p["objectid"] for p in problems if p.get("objectid")
                     })
+                    trig_hosts: dict[str, list] = {}
                     if trig_ids:
                         trigs = await client.call("trigger.get", {
                             "triggerids": trig_ids,
                             "selectDependencies": ["triggerid"],
+                            "selectHosts": ["hostid"],
                             "output": ["triggerid"],
                         })
                         dep_map = {
@@ -114,9 +118,18 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                             }
                             for t in trigs
                         }
+                        trig_hosts = {
+                            t["triggerid"]: [h["hostid"] for h in t.get("hosts", [])]
+                            for t in trigs
+                        }
+                    # Attribute each problem to the resolved host(s) its trigger
+                    # fires on — intersected with what we actually resolved, since
+                    # a multi-host trigger can name hosts we didn't ask about.
+                    resolved_ids = set(hostids)
                     for p in problems:
-                        for h in p.get("hosts", []):
-                            by_host.setdefault(h["hostid"], []).append(p)
+                        for hid in trig_hosts.get(p.get("objectid"), []):
+                            if hid in resolved_ids:
+                                by_host.setdefault(hid, []).append(p)
 
                 # 3) Classify + render.
                 lines = [f"**Triage** — {parsed['trigger'][:140]}"]

@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.16.1] - 2026-06-25
+
+### Fixed — `triage_slack_alert` crashed on every live call (`selectHosts`)
+ADR 068. The tool's ground-truth step called `problem.get` with
+`selectHosts`, which Zabbix 7.x rejects (`-32602: unexpected parameter
+selectHosts` — only `event.get`/`trigger.get` support it). Every real
+invocation failed; v1.16.0's 25 tests missed it because they only covered
+the pure core, never the `client.call` wire path. Fix: drop `selectHosts`
+from `problem.get` and map problem → host through the `trigger.get` call
+already made for dependency collapse (now `selectHosts: ["hostid"]`), no
+extra round-trips. Added `TestTriageWireContract` (recording fake client)
+so the wire contract is covered. 633 → 636 tests.
+
 ## [1.16.0] - 2026-06-25
 
 ### Added — `triage_slack_alert` (new tool, 162 → 163)
