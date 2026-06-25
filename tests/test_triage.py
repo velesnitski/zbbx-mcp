@@ -127,3 +127,88 @@ class TestTopSeverityLabel:
 
     def test_empty(self):
         assert top_severity_label([]) == "Not classified"
+
+
+# --- Wire-contract tests for the orchestration (tools/triage.py) ---------
+# The pure helpers above never touch Zabbix; these exercise the actual
+# client.call sequence — the layer where the live -32602 "unexpected
+# parameter selectHosts" bug lived (problem.get rejects selectHosts).
+
+import asyncio  # noqa: E402
+
+from zbbx_mcp.tools import triage as triage_mod  # noqa: E402
+
+
+class _RecordingClient:
+    """Records every (method, params) and returns canned wire results."""
+
+    def __init__(self, problems, trigs, hosts):
+        self.calls = []
+        self._problems, self._trigs, self._hosts = problems, trigs, hosts
+
+    async def call(self, method, params):
+        self.calls.append((method, params))
+        if method == "host.get":
+            return self._hosts
+        if method == "problem.get":
+            return self._problems
+        if method == "trigger.get":
+            return self._trigs
+        return []
+
+
+class _CaptureMCP:
+    def __init__(self):
+        self.fn = None
+
+    def tool(self):
+        def deco(f):
+            self.fn = f
+            return f
+        return deco
+
+
+class _StubResolver:
+    def __init__(self, client):
+        self._client = client
+
+    def resolve(self, instance):
+        return self._client
+
+
+def _run_triage(client, text):
+    mcp = _CaptureMCP()
+    triage_mod.register(mcp, _StubResolver(client))
+    return asyncio.run(mcp.fn(text))
+
+
+class TestTriageWireContract:
+    def _client(self):
+        return _RecordingClient(
+            problems=[{"eventid": "9", "name": "Service Down", "severity": "5",
+                       "clock": "1", "objectid": "77", "suppressed": "0"}],
+            trigs=[{"triggerid": "77", "hosts": [{"hostid": "1"}],
+                    "dependencies": []}],
+            hosts=[{"hostid": "1", "host": "node-eu-a1", "name": "node-eu-a1"}],
+        )
+
+    def test_problem_get_omits_selecthosts(self):
+        # The bug: problem.get must NOT carry selectHosts (Zabbix rejects it).
+        client = self._client()
+        _run_triage(client, "🔴 Disaster: Service Down on node-eu-a1")
+        pget = next(p for m, p in client.calls if m == "problem.get")
+        assert "selectHosts" not in pget
+
+    def test_trigger_get_carries_selecthosts(self):
+        # The fix maps problem→host through trigger.get (which DOES support it).
+        client = self._client()
+        _run_triage(client, "🔴 Disaster: Service Down on node-eu-a1")
+        tget = next(p for m, p in client.calls if m == "trigger.get")
+        assert tget.get("selectHosts") == ["hostid"]
+
+    def test_problem_attributed_to_host_via_trigger(self):
+        # A live problem on the resolved host's trigger → real_now (not the
+        # old empty-by_host → spurious "recovered").
+        out = _run_triage(self._client(),
+                          "✅ RESOLVED: Service Down on node-eu-a1")
+        assert "real_now" in out  # feed claimed RESOLVED; re-query says otherwise
