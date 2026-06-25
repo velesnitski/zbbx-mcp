@@ -34,6 +34,7 @@ EXPECTED_TOOLS = {
     "acknowledge_problem",
     "bulk_acknowledge",
     "rank_problem_cause",
+    "triage_slack_alert",
     # hostgroups.py
     "get_hostgroups",
     "create_hostgroup",

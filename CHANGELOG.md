@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.16.0] - 2026-06-25
+
+### Added — `triage_slack_alert` (new tool, 162 → 163)
+ADR 067 (tasks 164/165). A read-only tool that turns one AI/Slack alert
+line into an authoritative Zabbix verdict, born from dogfooding the
+feed-to-MCP loop by hand. It parses the line, **resolves the named host**
+to its Zabbix object (EXACT / FUZZY / AMBIGUOUS / NOT_FOUND — never
+guesses, since alert names embed protocol/probe prefixes and domains live
+in a Web-Check group), then **re-queries live problems** (the feed's
+state is never trusted — it lags Zabbix in both directions) and
+classifies per host: `real_now` / `recovered` / `symptom_of_cluster`,
+with the host's current problems listed and a recommended action. Does
+not acknowledge, suppress, rank, or remediate — not in `WRITE_TOOLS`.
+Pure core extracted to `alert_triage.py`; +24 tests (`test_triage.py`).
+608 → 632.
+
 ## [1.15.5] - 2026-06-23
 
 ### Security — clear four Dependabot CVEs (cryptography, starlette, pydantic-settings)

@@ -52,6 +52,7 @@ from zbbx_mcp.tools import (
     traffic,
     trends_compare,
     trends_health,
+    triage,
     triggers,
     users,
     web_scenarios,
@@ -265,6 +266,7 @@ ALL_TOOLS: frozenset[str] = frozenset({
     "set_bulk_cost",
     "set_bulk_macro",
     "set_host_macro",
+    "triage_slack_alert",
     "unlink_template",
     "update_host",
     "update_item",
@@ -296,7 +298,7 @@ def register_all(
         trends_compare, trends_health,
         html_report, geo_traffic, geo_health, executive, ceo_report, service_brief, analysis,
         web_scenarios, correlation, ip_history, loss_drift, disruption, risk, floods,
-        telemetry, diagnose,
+        telemetry, diagnose, triage,
     ]
     for module in modules:
         module.register(mcp, resolver, skip=skip)
