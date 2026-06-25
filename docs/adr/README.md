@@ -113,6 +113,7 @@ fixed headings (`## Problem`, `## Decision`, `## Test approach`,
 | [064](064-python-multipart-cve-2026-53539.md) | Bump python-multipart to clear CVE-2026-53539 | Transitive `python-multipart 0.0.29 → 0.0.32` via `uv lock --upgrade-package` — clears the Dependabot-flagged High-severity quadratic-querystring CPU DoS (fixed in 0.0.30); lockfile-only, 608 tests green |
 | [065](065-pyjwt-cve-2026-48526.md) | Bump PyJWT to clear CVE-2026-48526 | Transitive `pyjwt[crypto] 2.12.1 → 2.13.0` via `uv lock --upgrade-package` — clears the Dependabot-flagged High JWT algorithm-confusion (public JWK accepted as HMAC secret → forged HS256; fixed in 2.13.0); lockfile-only, 608 tests green |
 | [066](066-dep-cves-2026-06-23.md) | Clear four Dependabot CVEs (batched) | Transitive `cryptography 46.0.7 → 49.0.0` (bundled-OpenSSL, High), `starlette 1.2.1 → 1.3.1` (urlencoded-body DoS + url.hostname poisoning), `pydantic-settings 2.13.1 → 2.14.2` (secrets_dir symlink traversal) — one `uv lock` re-resolve; lockfile-only, 608 tests green |
+| [067](067-triage-slack-alert.md) | `triage_slack_alert` — authoritative alert verdict | New read-only tool: parse an AI/Slack alert line, resolve its host (EXACT/FUZZY/AMBIGUOUS/NOT_FOUND, never guesses), re-query live Zabbix (feed state never trusted), classify real_now/recovered/symptom. Pure core `alert_triage.py`; tool count 162 → 163, +24 tests |
 
 ## Writing a new ADR
 
