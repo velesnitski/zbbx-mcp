@@ -3701,6 +3701,50 @@ class TestDiagnoseSuppressThreading:
         assert [p["name"] for p in facts["problems"]] == ["live"]
 
 
+class TestKeepActiveOrRecent:
+    """ADR 069 — diagnose_host must not age out still-active problems."""
+
+    NOW = 1_000_000
+
+    def test_active_old_problem_kept(self):
+        from zbbx_mcp.tools.diagnose import _keep_active_or_recent
+        # Unresolved (no r_eventid), started 72h ago — must survive the window.
+        probs = [{"eventid": "1", "clock": str(self.NOW - 72 * 3600)}]
+        assert _keep_active_or_recent(probs, self.NOW, 24) == probs
+
+    def test_active_old_problem_with_zero_r_eventid_kept(self):
+        from zbbx_mcp.tools.diagnose import _keep_active_or_recent
+        probs = [{"eventid": "1", "clock": str(self.NOW - 72 * 3600), "r_eventid": "0"}]
+        assert len(_keep_active_or_recent(probs, self.NOW, 24)) == 1
+
+    def test_resolved_old_problem_dropped(self):
+        from zbbx_mcp.tools.diagnose import _keep_active_or_recent
+        probs = [{"eventid": "1", "clock": str(self.NOW - 72 * 3600), "r_eventid": "9"}]
+        assert _keep_active_or_recent(probs, self.NOW, 24) == []
+
+    def test_resolved_recent_problem_kept(self):
+        from zbbx_mcp.tools.diagnose import _keep_active_or_recent
+        probs = [{"eventid": "1", "clock": str(self.NOW - 60), "r_eventid": "9"}]
+        assert len(_keep_active_or_recent(probs, self.NOW, 24)) == 1
+
+    async def test_days_old_active_problem_keeps_host_non_healthy(self):
+        """The reported bug: a host with an unresolved Disaster from 3 days
+        ago must NOT read healthy."""
+        from zbbx_mcp.tools.diagnose import _collect_diagnosis_inner
+
+        now = 1_000_000
+        problems = [
+            {"eventid": "1", "name": "Service down", "severity": "5",
+             "clock": str(now - 72 * 3600), "suppressed": "0", "r_eventid": "0"},
+        ]
+        client = _ProblemOnlyClient(problems)
+        facts = await _collect_diagnosis_inner(
+            client, {"hostid": "10", "host": "h"}, [], now=now,
+        )
+        assert [p["name"] for p in facts["problems"]] == ["Service down"]
+        assert facts["verdict"] != "healthy"
+
+
 class TestUnmappedGroupCounts:
     """Pure-helper tests for unmapped_group_counts (ADR 058)."""
 

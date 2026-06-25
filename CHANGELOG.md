@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.16.2] - 2026-06-25
+
+### Fixed — diagnose_host false `healthy` for long-running outages
+ADR 069 (task 166). `_collect_diagnosis_inner` dropped any problem whose
+*start* `clock` was older than `problem_hours` (24h default) — including
+ones still **unresolved** — so a host with eight active Disasters, the
+oldest ~3 days old, read `healthy` / 0 problems (found dogfooding against
+`triage_slack_alert` + `get_active_problems` on the same host, same
+instant). A days-long unresolved problem is more severe, not less. Fix:
+new pure helper `_keep_active_or_recent` never ages out unresolved
+problems, windowing only recently-resolved ones (distinguished by the now-
+requested `r_eventid`); shared by `diagnose_host` / `bulk_diagnose` /
+`diagnose_subnet`. `problem_hours` now bounds the recently-resolved set
+(docstrings updated). Verdict change. +8 tests (incl. a wire-level
+72h-old-Disaster regression); 633 → 641.
+
 ## [1.16.1] - 2026-06-25
 
 ### Fixed — `triage_slack_alert` crashed on every live call (`selectHosts`)
