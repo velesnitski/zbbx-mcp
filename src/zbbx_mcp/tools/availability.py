@@ -118,12 +118,15 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 client = resolver.resolve(instance)
                 time_from = str(int(time.time()) - hours * 3600)
 
-                # Fetch in parallel: current problems, recent events, recently resolved
+                # Fetch in parallel: current problems, recent events, recently resolved.
+                # problem.get does NOT support selectHosts (Zabbix rejects it with
+                # -32602); problems are mapped to hosts via trigger.get below,
+                # which does (ADR 070, same fix as triage's ADR 068). event.get
+                # supports selectHosts natively.
                 current_problems, recent_events = await asyncio.gather(
                     client.call("problem.get", {
                         "output": ["eventid", "name", "severity", "clock",
-                                   "acknowledged", "suppressed"],
-                        "selectHosts": ["host"],
+                                   "acknowledged", "suppressed", "objectid"],
                         "time_from": time_from,
                         "sortfield": "eventid",
                         "sortorder": "DESC",
@@ -145,6 +148,22 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     current_problems, include_suppressed
                 )
 
+                # Map each problem to a host name through its trigger.
+                trig_host: dict[str, str] = {}
+                trig_ids = sorted({
+                    p["objectid"] for p in current_problems if p.get("objectid")
+                })
+                if trig_ids:
+                    trigs = await client.call("trigger.get", {
+                        "triggerids": trig_ids,
+                        "output": ["triggerid"],
+                        "selectHosts": ["host"],
+                    })
+                    trig_host = {
+                        t["triggerid"]: (t.get("hosts") or [{}])[0].get("host", "?")
+                        for t in trigs
+                    }
+
                 def _fmt_time(ts: str) -> str:
                     return datetime.fromtimestamp(int(ts), tz=timezone.utc).strftime("%m-%d %H:%M")
 
@@ -161,7 +180,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     lines.append("| Time | Severity | Host | Problem | Ack |")
                     lines.append("|------|----------|------|---------|-----|")
                     for p in current_problems[:limit]:
-                        host = p.get("hosts", [{}])[0].get("host", "?") if p.get("hosts") else "?"
+                        host = trig_host.get(p.get("objectid", ""), "?")
                         sev = _SEV.get(p.get("severity", "0"), "?")
                         ack = "Yes" if p.get("acknowledged") == "1" else "No"
                         lines.append(f"| {_fmt_time(p['clock'])} | {sev} | {host} | {p.get('name', '?')[:60]} | {ack} |")

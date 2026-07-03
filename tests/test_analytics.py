@@ -3701,6 +3701,75 @@ class TestDiagnoseSuppressThreading:
         assert [p["name"] for p in facts["problems"]] == ["live"]
 
 
+class TestRecentChangesWireContract:
+    """ADR 070 — get_recent_changes must not send selectHosts to problem.get.
+
+    Same -32602 class as triage's ADR 068; found live when the tool errored
+    during a feed-vs-Zabbix analysis. Drives the real tool function through a
+    recording fake client and asserts the wire contract.
+    """
+
+    class _Client:
+        def __init__(self):
+            self.calls = []
+
+        async def call(self, method, params):
+            self.calls.append((method, params))
+            if method == "problem.get":
+                return [{"eventid": "9", "name": "Service Down", "severity": "5",
+                         "clock": "1000", "acknowledged": "0", "suppressed": "0",
+                         "objectid": "77"}]
+            if method == "trigger.get":
+                return [{"triggerid": "77", "hosts": [{"host": "node-eu-a1"}]}]
+            return []  # event.get → no resolved events
+
+    def _run(self):
+        import asyncio
+
+        from zbbx_mcp.tools import availability as availability_mod
+
+        class _MCP:
+            def __init__(self):
+                self.fns = {}
+
+            def tool(self):
+                def deco(f):
+                    self.fns[f.__name__] = f
+                    return f
+                return deco
+
+        class _Resolver:
+            def __init__(self, client):
+                self._client = client
+
+            def resolve(self, instance):
+                return self._client
+
+        client = self._Client()
+        mcp = _MCP()
+        availability_mod.register(mcp, _Resolver(client))
+        out = asyncio.run(mcp.fns["get_recent_changes"]())
+        return client, out
+
+    def test_problem_get_omits_selecthosts(self):
+        client, _ = self._run()
+        pget = next(p for m, p in client.calls if m == "problem.get")
+        assert "selectHosts" not in pget
+        assert "objectid" in pget["output"]
+
+    def test_event_get_keeps_selecthosts(self):
+        # event.get DOES support selectHosts — the resolved branch is untouched.
+        client, _ = self._run()
+        eget = next(p for m, p in client.calls if m == "event.get")
+        assert eget.get("selectHosts") == ["host"]
+
+    def test_host_rendered_via_trigger_map(self):
+        client, out = self._run()
+        tget = next(p for m, p in client.calls if m == "trigger.get")
+        assert tget.get("selectHosts") == ["host"]
+        assert "node-eu-a1" in out  # host name reached the rendered table
+
+
 class TestKeepActiveOrRecent:
     """ADR 069 — diagnose_host must not age out still-active problems."""
 

@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.16.3] - 2026-07-03
+
+### Fixed — `get_recent_changes` crashed on every call (same `selectHosts` class as v1.16.1)
+ADR 070. Found live during a feed-vs-Zabbix cross-validation: the tool's
+`problem.get` carried `selectHosts`, which `problem.get` rejects
+(`-32602`) — and its host column read a field `problem.get` never
+returns. Same fix as ADR 068: drop `selectHosts`, add `objectid`, map
+problem → host via one scoped `trigger.get`; the resolved-events
+`event.get` branch (which supports `selectHosts`) is untouched. A
+full-repo sweep of all 30+ `selectHosts` call sites confirms this was
+the **last** `problem.get` carrier. +3 wire-contract tests
+(`TestRecentChangesWireContract`); 641 → 644.
+
 ## [1.16.2] - 2026-06-25
 
 ### Fixed — diagnose_host false `healthy` for long-running outages
