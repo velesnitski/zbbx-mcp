@@ -56,6 +56,45 @@ def _feature_matrix(major: int, minor: int) -> list[tuple[str, bool]]:
     ]
 
 
+def source_tree_version(package_file: str) -> str:
+    """Version in the source tree's ``pyproject.toml``, or "" when unavailable.
+
+    For an editable / ``uv run --directory`` install, ``package_file``
+    (``zbbx_mcp.__file__``) sits at ``<root>/src/zbbx_mcp/__init__.py`` —
+    walk up to ``<root>``. A wheel install has no ``pyproject.toml`` there;
+    return "" and the caller degrades silently. Pure given its argument.
+    """
+    import re as _re
+    from pathlib import Path as _Path
+
+    try:
+        root = _Path(package_file).resolve().parents[2]
+        text = (root / "pyproject.toml").read_text()
+    except (OSError, IndexError):
+        return ""
+    m = _re.search(r'(?m)^version\s*=\s*"([^"]+)"', text)
+    return m.group(1) if m else ""
+
+
+def stale_build_warning(running: str, source: str) -> str:
+    """Warn when the loaded build lags the source tree (ADR 073).
+
+    The server imports ``__version__`` once at startup; after a release
+    bump the running process silently serves the old build until the MCP
+    client reconnects — a recurring source of "why isn't the fix live"
+    confusion. Suppressed when either side is unknown (wheel installs,
+    missing dist metadata). Pure helper.
+    """
+    if not running or not source or running.startswith("0.0.0"):
+        return ""
+    if running == source:
+        return ""
+    return (
+        f"\n\n⚠ Running build v{running}, but the source tree is v{source} — "
+        "reconnect /mcp to load the new build."
+    )
+
+
 def summarize_token_expiry(
     tokens: list[dict],
     now: int,
@@ -134,6 +173,14 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 client = resolver.resolve(instance)
                 version = await client.call("apiinfo.version", {})
                 msg = f"Connected. Zabbix version: {version}"
+
+                # Stale-build detection (ADR 073): the process imported
+                # __version__ at startup; compare against the source tree.
+                import zbbx_mcp as _pkg
+
+                msg += stale_build_warning(
+                    _pkg.__version__, source_tree_version(_pkg.__file__)
+                )
 
                 # Token-expiry early warning (ADR 057). token.get needs 5.4+
                 # and visibility on the token's owner; degrade silently when

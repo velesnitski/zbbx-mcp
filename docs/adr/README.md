@@ -119,6 +119,7 @@ fixed headings (`## Problem`, `## Decision`, `## Test approach`,
 | [070](070-recent-changes-selecthosts-fix.md) | `get_recent_changes` — same `selectHosts` bug as ADR 068 | Second live -32602: its `problem.get` carried `selectHosts` too. Same fix (map problem→host via `trigger.get`); full-repo sweep of all 30+ `selectHosts` sites confirms this was the last `problem.get` carrier. Wire-contract test; 641 → 644 |
 | [071](071-problem-detail-rank-snooze.md) | `get_problem_detail` surfaces rank + snooze | Closes task 162: `suppress_until` requested and rendered (`_format_snooze_status` — maintenance window / until-resolve / remaining time / lapsed), and non-zero `cause_eventid` renders "symptom of cause event N". Read paths for ADR 059/060; +10 tests, 644 → 654 |
 | [072](072-architecture-guards.md) | Architecture guards | The quarter's two recurring failure classes become tests: AST contract-guard (deny-listed params like `selectHosts` on `problem.get`, the twice-shipped -32602) + doc-count guard (README badge/headline/tier table + CLAUDE.md pinned to computed registry). Shared `tests/wiretest.py` replaces 3 copy-pasted scaffolds; 3 stale CLAUDE.md rows fixed. Tests+docs only; 654 → 659 |
+| [073](073-runtime-self-awareness.md) | Runtime self-awareness | `check_connection` warns when the running build lags the source tree (the recurring "why isn't the fix live" class — process imports `__version__` once, reconnect loads it); `get_telemetry_summary` gains a Σ-tokens footer so token-effectiveness is one call. +10 tests, 659 → 669 |
 
 ## Writing a new ADR
 

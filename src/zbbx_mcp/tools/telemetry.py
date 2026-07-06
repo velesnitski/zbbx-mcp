@@ -99,9 +99,32 @@ def _summarise_records(
             "avg_ms": round(slot["duration_total"] / calls, 1) if calls else 0,
             "max_ms": slot["duration_max"],
             "avg_response_chars": round(slot["response_size_total"] / calls) if calls else 0,
+            "response_chars_total": slot["response_size_total"],
         })
     rows.sort(key=lambda r: -r["calls"])
     return rows
+
+
+_CHARS_PER_TOKEN = 4  # conventional rough estimate for English/markdown
+
+
+def _token_footer(rows: list[dict]) -> str:
+    """One-line token-cost estimate across all summarised tools (ADR 073).
+
+    Turns the accumulated response sizes into the answer to "are we
+    token-effective" — total chars, estimated tokens (~4 chars/token),
+    and the per-call average. Returns "" when there is nothing to count.
+    """
+    total_chars = sum(r.get("response_chars_total", 0) for r in rows)
+    total_calls = sum(r.get("calls", 0) for r in rows)
+    if not total_chars or not total_calls:
+        return ""
+    est_tokens = round(total_chars / _CHARS_PER_TOKEN)
+    return (
+        f"Σ responses: {total_chars:,} chars ≈ {est_tokens:,} tokens "
+        f"(~{round(est_tokens / total_calls)} tokens/call, est. "
+        f"{_CHARS_PER_TOKEN} chars/token)"
+    )
 
 
 def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> None:
@@ -178,6 +201,9 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 )
             if len(summary) > top:
                 lines.append(f"\n*{len(summary) - top} more tools omitted*")
+            footer = _token_footer(summary)
+            if footer:
+                lines.append(f"\n{footer}")
             if parse_errors:
                 lines.append(f"\n*{parse_errors} malformed line(s) skipped*")
             return "\n".join(lines)

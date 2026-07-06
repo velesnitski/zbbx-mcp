@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.16.6] - 2026-07-03
+
+### Added — runtime self-awareness (stale-build warning + token accounting)
+ADR 073. Two things the server knew and never said: (1) after a release
+bump the running process silently serves the old build until the MCP
+client reconnects — `check_connection` now compares its in-memory
+`__version__` against the source tree's `pyproject.toml` and warns
+"Running build vX, but the source tree is vY — reconnect /mcp"
+(suppressed for wheel installs / unknown versions, so no false
+positives); (2) `get_telemetry_summary` now ends with
+`Σ responses: N chars ≈ M tokens (~K tokens/call)`, making
+token-effectiveness a one-call answer instead of manual math. +10 tests
+via the shared wiretest scaffolding; 659 → 669.
+
 ## [1.16.5] - 2026-07-03
 
 ### Added — architecture guards (tests + docs only, no runtime change)

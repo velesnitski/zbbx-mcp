@@ -3701,6 +3701,98 @@ class TestDiagnoseSuppressThreading:
         assert [p["name"] for p in facts["problems"]] == ["live"]
 
 
+class TestStaleBuildWarning:
+    """Pure-helper tests for stale-build detection (ADR 073)."""
+
+    def test_mismatch_warns(self):
+        from zbbx_mcp.tools.health import stale_build_warning
+        out = stale_build_warning("1.16.2", "1.16.5")
+        assert "v1.16.2" in out and "v1.16.5" in out and "reconnect" in out
+
+    def test_match_silent(self):
+        from zbbx_mcp.tools.health import stale_build_warning
+        assert stale_build_warning("1.16.5", "1.16.5") == ""
+
+    def test_unknown_sides_silent(self):
+        from zbbx_mcp.tools.health import stale_build_warning
+        assert stale_build_warning("1.16.5", "") == ""          # wheel install
+        assert stale_build_warning("", "1.16.5") == ""
+        assert stale_build_warning("0.0.0+unknown", "1.16.5") == ""
+
+    def test_source_tree_version_reads_checkout(self, tmp_path):
+        from zbbx_mcp.tools.health import source_tree_version
+        (tmp_path / "pyproject.toml").write_text(
+            '[project]\nname = "x"\nversion = "9.9.9"\n')
+        pkg = tmp_path / "src" / "zbbx_mcp"
+        pkg.mkdir(parents=True)
+        init = pkg / "__init__.py"
+        init.write_text("")
+        assert source_tree_version(str(init)) == "9.9.9"
+
+    def test_source_tree_version_absent(self, tmp_path):
+        from zbbx_mcp.tools.health import source_tree_version
+        pkg = tmp_path / "src" / "zbbx_mcp"
+        pkg.mkdir(parents=True)
+        init = pkg / "__init__.py"
+        init.write_text("")
+        assert source_tree_version(str(init)) == ""  # no pyproject → wheel-like
+
+    def test_check_connection_carries_warning_on_mismatch(self, monkeypatch):
+        import zbbx_mcp
+        from tests.wiretest import RecordingClient, run_tool
+        from zbbx_mcp.tools import health as health_mod
+
+        monkeypatch.setattr(health_mod, "source_tree_version", lambda _: "9.9.9")
+        monkeypatch.setattr(zbbx_mcp, "__version__", "1.0.0")
+        out = run_tool(health_mod, "check_connection",
+                       RecordingClient({"apiinfo.version": "7.4.9"}))
+        assert "Connected. Zabbix version: 7.4.9" in out
+        assert "Running build v1.0.0" in out and "v9.9.9" in out
+
+
+class TestTelemetryTokenFooter:
+    """Pure-helper tests for the telemetry token estimate (ADR 073)."""
+
+    def test_footer_math(self):
+        from zbbx_mcp.tools.telemetry import _token_footer
+        rows = [
+            {"calls": 3, "response_chars_total": 1200},
+            {"calls": 1, "response_chars_total": 800},
+        ]
+        out = _token_footer(rows)
+        # 2000 chars ≈ 500 tokens across 4 calls → 125 tokens/call
+        assert "2,000 chars" in out and "500 tokens" in out and "125 tokens/call" in out
+
+    def test_footer_empty_when_no_sizes(self):
+        from zbbx_mcp.tools.telemetry import _token_footer
+        assert _token_footer([]) == ""
+        assert _token_footer([{"calls": 2, "response_chars_total": 0}]) == ""
+
+    def test_summarise_exposes_totals(self):
+        from zbbx_mcp.tools.telemetry import _summarise_records
+        rows = _summarise_records([
+            {"tool": "a", "status": "ok", "duration_ms": 5, "response_size": 100},
+            {"tool": "a", "status": "ok", "duration_ms": 5, "response_size": 300},
+        ])
+        assert rows[0]["response_chars_total"] == 400
+
+    def test_tool_renders_footer(self, tmp_path):
+        import json as _json
+
+        from tests.wiretest import RecordingClient, run_tool
+        from zbbx_mcp.tools import telemetry as telemetry_mod
+
+        log = tmp_path / "analytics.log"
+        log.write_text("\n".join(
+            _json.dumps({"tool": "a", "status": "ok", "duration_ms": 5,
+                         "response_size": 400})
+            for _ in range(2)
+        ))
+        out = run_tool(telemetry_mod, "get_telemetry_summary",
+                       RecordingClient(), log_path=str(log))
+        assert "Σ responses: 800 chars ≈ 200 tokens" in out
+
+
 class TestFormatSnoozeStatus:
     """Pure-helper tests for _format_snooze_status (ADR 071)."""
 
