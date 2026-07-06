@@ -61,12 +61,12 @@ uv run pytest -k "test_name"               # single test by name
 | `slack.py` | 2 | `send_slack_message`, `send_slack_report` |
 | `costs.py` | 4 | `import_server_costs`, `set_bulk_cost`, `import_costs_by_ip`, `get_cost_summary` |
 | `traffic.py` | 5 | `detect_traffic_anomalies`, `detect_traffic_drops`, `get_traffic_report`, `detect_regional_anomalies`, `get_traffic_drop_timeline` |
-| `trends_health.py` | 5 | `get_trends_batch`, `get_server_dashboard`, `get_health_assessment`, `get_shutdown_candidates`, `get_capacity_planning` |
-| `trends_compare.py` | 3 | `compare_servers`, `get_stale_servers`, `get_recent_changes` |
+| `trends_health.py` | 3 | `get_health_assessment`, `get_shutdown_candidates`, `get_capacity_planning` |
+| `trends_compare.py` | 3 | `get_trends_batch`, `get_server_dashboard`, `compare_servers` |
 | `geo_traffic.py` | 4 | `detect_geo_blocks`, `get_geo_traffic_trends`, `get_expansion_report`, `get_regional_density_map` |
 | `geo_health.py` | 6 | `get_service_uptime_report`, `get_service_health_matrix`, `get_latency_estimate`, `get_servers_by_ping` |
 | `health.py` | 4 | `check_connection`, `get_active_problems`, `get_agent_unreachable`, `get_error_rate` |
-| `availability.py` | 2 | `get_host_availability`, `get_low_memory_servers` |
+| `availability.py` | 2 | `get_host_availability`, `get_recent_changes` |
 | `analysis.py` | 4 | `get_predictive_alerts`, `get_incident_report`, `correlate_logs`, `analyze_server_roles` |
 | `audit.py` | 1 | `get_audit_log` |
 | `domains.py` | 3 | `get_domain_list`, `get_domain_status`, `get_ssl_expiry` |
@@ -104,7 +104,13 @@ uv run pytest -k "test_name"               # single test by name
 3. If the tool mutates data, add it to `WRITE_TOOLS` in `tools/__init__.py`
 4. Add the tool name to `EXPECTED_TOOLS` in `tests/test_registration.py`
 5. Update the tool count assertion in `tests/test_server.py`
-6. Run `uv run pytest` — all tests must pass
+6. Update the README counts (badge, headline, tier table) and the CLAUDE.md
+   header — `tests/test_guards.py` pins them to the computed registry
+7. If the tool calls the Zabbix API, prefer a wire-contract test using
+   `tests/wiretest.py` (`RecordingClient` + `run_tool`) — pure-core tests
+   alone shipped two live -32602 bugs (ADR 068/070); `test_guards.py`
+   also AST-checks known-invalid params (e.g. `selectHosts` on `problem.get`)
+8. Run `uv run pytest` — all tests must pass
 
 ## Rules
 

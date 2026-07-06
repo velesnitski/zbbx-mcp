@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.16.5] - 2026-07-03
+
+### Added — architecture guards (tests + docs only, no runtime change)
+ADR 072. An architecture review found the design sound but two recurring
+failure classes unguarded: (1) invalid Zabbix API params reaching the
+wire — `problem.get`+`selectHosts` shipped twice (ADR 068/070), each
+crashing a tool live with -32602; (2) hand-maintained doc counts
+drifting (ADR 063: three different totals in one README). New
+`tests/test_guards.py`: an AST contract-guard scanning every
+`client.call(...)` dict literal against a deny-map, and a doc-count
+guard pinning the README badge/headline/tier table and CLAUDE.md header
+to the computed registry. The thrice-copy-pasted wire-test scaffolding
+is extracted to `tests/wiretest.py` (behaviour-identical refactor);
+three factually stale CLAUDE.md module rows fixed and the new-tool
+checklist extended. 654 → 659 tests.
+
 ## [1.16.4] - 2026-07-03
 
 ### Added — `get_problem_detail` surfaces symptom rank and snooze state
