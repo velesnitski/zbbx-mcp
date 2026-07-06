@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.16.4] - 2026-07-03
+
+### Added — `get_problem_detail` surfaces symptom rank and snooze state
+ADR 071 (task 162). The ADR 059/060 write paths (snooze, cause/symptom
+ranking) had no read path — deferred "once snooze/rank see real use",
+which a live feed validation has now demonstrated. `get_problem_detail`
+requests `suppress_until` and renders a `Suppression:` line (maintenance
+window / snoozed-until-resolve / remaining time / lapsed) via the new
+pure helper `_format_snooze_status`, and renders `Rank: symptom of cause
+event N` when `cause_eventid` is non-zero (arrives free via
+`output: "extend"`; absent on pre-6.4 servers → simply not rendered).
++10 tests (6 pure + 4 wire-contract); 644 → 654.
+
 ## [1.16.3] - 2026-07-03
 
 ### Fixed — `get_recent_changes` crashed on every call (same `selectHosts` class as v1.16.1)

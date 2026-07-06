@@ -61,6 +61,38 @@ def _build_rank_action(*, unrank: bool = False, message: str = "") -> int:
     return action
 
 
+def _format_snooze_status(suppression_data, now: int) -> str:
+    """Render a problem's suppression entries as one human-readable line.
+
+    A manual snooze (ADR 059) carries ``maintenanceid`` "0"/absent:
+    ``suppress_until == 0`` means "until the problem resolves", otherwise a
+    timestamp — shown with the remaining time. A non-zero ``maintenanceid``
+    is a maintenance window. Returns "" when nothing is suppressing.
+    Pure helper (ADR 071).
+    """
+    lines = []
+    for s in suppression_data or []:
+        mid = str(s.get("maintenanceid") or "0")
+        if mid not in ("0", ""):
+            lines.append(f"maintenance window (id {mid})")
+            continue
+        try:
+            until = int(s.get("suppress_until") or 0)
+        except (TypeError, ValueError):
+            continue
+        if until == 0:
+            lines.append("snoozed until the problem resolves")
+        elif until > now:
+            rem = until - now
+            lines.append(
+                f"snoozed for {rem // 3600}h {(rem % 3600) // 60:02d}m more "
+                f"(until {_ts(str(until))})"
+            )
+        else:
+            lines.append("snooze lapsed (pending unsuppression)")
+    return "; ".join(lines)
+
+
 def _suppress_until_from_hours(suppress_hours: float, now: int) -> int | None:
     """Translate the tool-level ``suppress_hours`` into ``suppress_until``.
 
@@ -345,7 +377,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     "output": "extend",
                     "selectAcknowledges": ["userid", "alias", "message", "clock", "action"],
                     "selectTags": ["tag", "value"],
-                    "selectSuppressionData": ["maintenanceid"],
+                    "selectSuppressionData": ["maintenanceid", "suppress_until"],
                 })
 
                 if not data:
@@ -362,6 +394,21 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     f"**Acknowledged:** {'Yes' if p.get('acknowledged') == '1' else 'No'}",
                     f"**Suppressed:** {'Yes' if p.get('suppressed') == '1' else 'No'}",
                 ]
+
+                # Snooze detail (ADR 059 write path → ADR 071 read path).
+                snooze = _format_snooze_status(
+                    p.get("suppression_data"), int(time.time())
+                )
+                if snooze:
+                    parts.append(f"**Suppression:** {snooze}")
+
+                # Cause/symptom rank (ADR 060 write path → ADR 071 read path).
+                cause = str(p.get("cause_eventid") or "0")
+                if cause not in ("0", ""):
+                    parts.append(
+                        f"**Rank:** symptom of cause event {cause} — "
+                        "triage the cause, not this event"
+                    )
 
                 tags = p.get("tags", [])
                 if tags:
