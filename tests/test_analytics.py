@@ -3701,6 +3701,117 @@ class TestDiagnoseSuppressThreading:
         assert [p["name"] for p in facts["problems"]] == ["live"]
 
 
+class TestFormatSnoozeStatus:
+    """Pure-helper tests for _format_snooze_status (ADR 071)."""
+
+    NOW = 1_000_000
+
+    def test_empty_and_none(self):
+        from zbbx_mcp.tools.problems import _format_snooze_status
+        assert _format_snooze_status([], self.NOW) == ""
+        assert _format_snooze_status(None, self.NOW) == ""
+
+    def test_maintenance_window(self):
+        from zbbx_mcp.tools.problems import _format_snooze_status
+        out = _format_snooze_status([{"maintenanceid": "42"}], self.NOW)
+        assert "maintenance window (id 42)" in out
+
+    def test_manual_snooze_until_resolve(self):
+        from zbbx_mcp.tools.problems import _format_snooze_status
+        out = _format_snooze_status(
+            [{"maintenanceid": "0", "suppress_until": "0"}], self.NOW)
+        assert out == "snoozed until the problem resolves"
+
+    def test_manual_snooze_remaining_time(self):
+        from zbbx_mcp.tools.problems import _format_snooze_status
+        until = self.NOW + 2 * 3600 + 300  # 2h05m
+        out = _format_snooze_status(
+            [{"maintenanceid": "0", "suppress_until": str(until)}], self.NOW)
+        assert "snoozed for 2h 05m more" in out
+
+    def test_lapsed_snooze(self):
+        from zbbx_mcp.tools.problems import _format_snooze_status
+        out = _format_snooze_status(
+            [{"maintenanceid": "0", "suppress_until": str(self.NOW - 60)}], self.NOW)
+        assert "lapsed" in out
+
+    def test_multiple_entries_joined(self):
+        from zbbx_mcp.tools.problems import _format_snooze_status
+        out = _format_snooze_status(
+            [{"maintenanceid": "7"},
+             {"maintenanceid": "0", "suppress_until": "0"}], self.NOW)
+        assert ";" in out and "maintenance" in out and "resolves" in out
+
+
+class TestProblemDetailWireContract:
+    """ADR 071 — get_problem_detail requests suppress_until and renders
+    rank + snooze. Wire-level per the ADR 068/070 lesson."""
+
+    class _Client:
+        def __init__(self, problem):
+            self.calls = []
+            self._problem = problem
+
+        async def call(self, method, params):
+            self.calls.append((method, params))
+            if method == "problem.get":
+                return [self._problem]
+            return []
+
+    def _run(self, problem):
+        import asyncio
+
+        from zbbx_mcp.tools import problems as problems_mod
+
+        class _MCP:
+            def __init__(self):
+                self.fns = {}
+
+            def tool(self):
+                def deco(f):
+                    self.fns[f.__name__] = f
+                    return f
+                return deco
+
+        class _Resolver:
+            def __init__(self, client):
+                self._client = client
+
+            def resolve(self, instance):
+                return self._client
+
+        client = self._Client(problem)
+        mcp = _MCP()
+        problems_mod.register(mcp, _Resolver(client))
+        out = asyncio.run(mcp.fns["get_problem_detail"](problem_id="9"))
+        return client, out
+
+    def _problem(self, **extra):
+        base = {"eventid": "9", "name": "Service Down", "severity": "4",
+                "clock": "1000", "acknowledged": "0", "suppressed": "0"}
+        base.update(extra)
+        return base
+
+    def test_suppress_until_requested(self):
+        client, _ = self._run(self._problem())
+        pget = next(p for m, p in client.calls if m == "problem.get")
+        assert pget.get("selectSuppressionData") == ["maintenanceid", "suppress_until"]
+
+    def test_symptom_rank_rendered(self):
+        _, out = self._run(self._problem(cause_eventid="777"))
+        assert "symptom of cause event 777" in out
+
+    def test_cause_event_renders_no_rank_line(self):
+        _, out = self._run(self._problem(cause_eventid="0"))
+        assert "symptom of cause" not in out
+
+    def test_snooze_rendered(self):
+        _, out = self._run(self._problem(
+            suppressed="1",
+            suppression_data=[{"maintenanceid": "0", "suppress_until": "0"}]))
+        assert "snoozed until the problem resolves" in out
+
+
 class TestRecentChangesWireContract:
     """ADR 070 — get_recent_changes must not send selectHosts to problem.get.
 
