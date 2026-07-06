@@ -3747,43 +3747,12 @@ class TestProblemDetailWireContract:
     """ADR 071 — get_problem_detail requests suppress_until and renders
     rank + snooze. Wire-level per the ADR 068/070 lesson."""
 
-    class _Client:
-        def __init__(self, problem):
-            self.calls = []
-            self._problem = problem
-
-        async def call(self, method, params):
-            self.calls.append((method, params))
-            if method == "problem.get":
-                return [self._problem]
-            return []
-
     def _run(self, problem):
-        import asyncio
-
+        from tests.wiretest import RecordingClient, run_tool
         from zbbx_mcp.tools import problems as problems_mod
 
-        class _MCP:
-            def __init__(self):
-                self.fns = {}
-
-            def tool(self):
-                def deco(f):
-                    self.fns[f.__name__] = f
-                    return f
-                return deco
-
-        class _Resolver:
-            def __init__(self, client):
-                self._client = client
-
-            def resolve(self, instance):
-                return self._client
-
-        client = self._Client(problem)
-        mcp = _MCP()
-        problems_mod.register(mcp, _Resolver(client))
-        out = asyncio.run(mcp.fns["get_problem_detail"](problem_id="9"))
+        client = RecordingClient({"problem.get": [problem]})
+        out = run_tool(problems_mod, "get_problem_detail", client, problem_id="9")
         return client, out
 
     def _problem(self, **extra):
@@ -3820,46 +3789,19 @@ class TestRecentChangesWireContract:
     recording fake client and asserts the wire contract.
     """
 
-    class _Client:
-        def __init__(self):
-            self.calls = []
-
-        async def call(self, method, params):
-            self.calls.append((method, params))
-            if method == "problem.get":
-                return [{"eventid": "9", "name": "Service Down", "severity": "5",
-                         "clock": "1000", "acknowledged": "0", "suppressed": "0",
-                         "objectid": "77"}]
-            if method == "trigger.get":
-                return [{"triggerid": "77", "hosts": [{"host": "node-eu-a1"}]}]
-            return []  # event.get → no resolved events
-
     def _run(self):
-        import asyncio
-
+        from tests.wiretest import RecordingClient, run_tool
         from zbbx_mcp.tools import availability as availability_mod
 
-        class _MCP:
-            def __init__(self):
-                self.fns = {}
-
-            def tool(self):
-                def deco(f):
-                    self.fns[f.__name__] = f
-                    return f
-                return deco
-
-        class _Resolver:
-            def __init__(self, client):
-                self._client = client
-
-            def resolve(self, instance):
-                return self._client
-
-        client = self._Client()
-        mcp = _MCP()
-        availability_mod.register(mcp, _Resolver(client))
-        out = asyncio.run(mcp.fns["get_recent_changes"]())
+        client = RecordingClient({
+            "problem.get": [{"eventid": "9", "name": "Service Down",
+                             "severity": "5", "clock": "1000",
+                             "acknowledged": "0", "suppressed": "0",
+                             "objectid": "77"}],
+            "trigger.get": [{"triggerid": "77",
+                             "hosts": [{"host": "node-eu-a1"}]}],
+        })  # event.get → no resolved events (default [])
+        out = run_tool(availability_mod, "get_recent_changes", client)
         return client, out
 
     def test_problem_get_omits_selecthosts(self):
