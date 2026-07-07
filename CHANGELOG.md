@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.16.7] - 2026-07-07
+
+### Changed — file-length budgets (tests + docs only, zero runtime change)
+ADR 074. Answering "prevent very long files, or fine for AI?" with
+evidence: structured big modules are fine (navigable per tool-gate);
+the real cost was the accumulation sink — `test_analytics.py` at 4,104
+lines / 67 classes across ~10 domains, where every new test defaulted.
+Split mechanically (AST, classes moved whole) into 9 domain files
+(277–742 lines); verification invariant: identical collected count
+(669 → 669), all green. New `TestFileLengthGuard`: src ≤ 1,100 / tests
+≤ 1,000 lines, **no grandfathered exceptions** — the whole repo fits at
+adoption. CLAUDE.md rule added. 669 → 671 tests.
+
 ## [1.16.6] - 2026-07-03
 
 ### Added — runtime self-awareness (stale-build warning + token accounting)

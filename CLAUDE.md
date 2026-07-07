@@ -122,6 +122,9 @@ uv run pytest -k "test_name"               # single test by name
 - **Error handling** — catch `(httpx.HTTPError, ValueError)`, return user-friendly string
 - **Token budget** — responses truncated by `ZABBIX_RESPONSE_BUDGET`. Design output to fit
 - **Imports** — `classify.py` must not import from `tools/` (circular import risk)
+- **File budgets** — src ≤ 1100 lines, tests ≤ 1000 lines (enforced by
+  `tests/test_guards.py`). When a file approaches the budget, start a new
+  domain module instead of appending — no grandfathered exceptions
 
 ## Branching
 
