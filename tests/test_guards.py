@@ -78,6 +78,43 @@ class TestApiContractGuard:
         assert methods.count("trigger.get") >= 3
 
 
+class TestFileLengthGuard:
+    """ADR 074 — prevent unbounded files (the test_analytics.py sink pattern).
+
+    Length itself is cheap for both humans and AI agents when navigation is
+    targeted; what hurts is the *accumulation sink* — one file every change
+    appends to (edit-anchor collisions, misleading names, "where does this
+    test go" defaulting to the biggest file). test_analytics.py reached
+    4,104 lines / 67 classes across ~10 domains before being split.
+
+    Budgets are deliberately generous — well-structured modules like
+    executive.py (~1,050, one gated block per tool) fit comfortably. The
+    guard exists to force "start a new module" over "append to the
+    biggest", not to trigger refactor churn. No grandfathered exceptions:
+    if this fails, split by domain (see ADR 074 for the method).
+    """
+
+    SRC_BUDGET = 1_100
+    TEST_BUDGET = 1_000
+
+    @staticmethod
+    def _oversized(root, budget):
+        out = []
+        for path in sorted(root.rglob("*.py")):
+            n = sum(1 for _ in path.open())
+            if n > budget:
+                out.append(f"{path.relative_to(ROOT)}: {n} lines (budget {budget})")
+        return out
+
+    def test_src_files_within_budget(self):
+        over = self._oversized(SRC, self.SRC_BUDGET)
+        assert not over, "Split by domain instead of growing:\n" + "\n".join(over)
+
+    def test_test_files_within_budget(self):
+        over = self._oversized(ROOT / "tests", self.TEST_BUDGET)
+        assert not over, "Start a new test_<domain>.py instead:\n" + "\n".join(over)
+
+
 class TestDocCountGuard:
     N = len(ALL_TOOLS)
 
