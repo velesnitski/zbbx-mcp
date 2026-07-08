@@ -25,6 +25,7 @@ from zbbx_mcp.data import (
     host_ip,
 )
 from zbbx_mcp.resolver import InstanceResolver
+from zbbx_mcp.uptime import retention_too_short
 from zbbx_mcp.utils import safe_output_path
 
 
@@ -178,11 +179,29 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 a = _agg(rows_a, recent=False)
                 b = _agg(rows_a, recent=True)
 
+                # Retention guard (ADR 075): with limited trend housekeeping the
+                # prior period [now-2d, now-d] can be empty, making the delta a
+                # comparison against a void. Detect via the earliest daily sample.
+                _yr = datetime.now(timezone.utc).year
+                min_ts = None
+                for r in rows_a:
+                    for day_str in (r.daily or {}):
+                        try:
+                            ts = datetime.strptime(day_str, "%b %d").replace(
+                                year=_yr, tzinfo=timezone.utc).timestamp()
+                        except ValueError:
+                            continue
+                        min_ts = ts if min_ts is None else min(min_ts, ts)
+                short_history = retention_too_short(
+                    min_ts, _time.time(), days * 86400)
+
                 # CPU from current snapshot (no trend needed)
                 cpu_map = await fetch_cpu_map(client, all_ids)
                 avg_cpu = round(sum(cpu_map.values()) / len(cpu_map), 1) if cpu_map else 0
 
                 def _delta(va, vb):
+                    if short_history:
+                        return "n/a"
                     if va == 0:
                         return "–"
                     pct = (vb - va) / abs(va) * 100
@@ -197,6 +216,13 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     f"| Countries | {a['countries']} | {b['countries']} | {_delta(a['countries'], b['countries'])} |",
                     f"| Servers | {len(hosts)} | {len(hosts)} | – |",
                 ]
+                if short_history:
+                    lines.append(
+                        f"\n⚠ Trend retention shorter than {2 * days}d — the "
+                        f"prior {days}d period has little or no data, so deltas "
+                        "are unreliable and shown as n/a. Compare a shorter "
+                        "window, or raise Zabbix trend housekeeping."
+                    )
                 return "\n".join(lines)
             except (httpx.HTTPError, ValueError) as e:
                 return f"Error: {e}"
@@ -378,7 +404,13 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 rows.sort(key=lambda x: x["uptime"])
                 shown = rows[:max_results]
 
-                lines = [f"**SLA Dashboard ({period})**\n"]
+                # Point-in-time snapshot (lastvalue + traffic validation), NOT a
+                # period integral — label it honestly so the period arg does not
+                # imply a historical average it never computed (ADR 075, task 170).
+                lines = [
+                    "**SLA Dashboard — current snapshot** "
+                    "(live up/down + traffic validation, not a period average)\n"
+                ]
                 lines.append("| Product | Country | Uptime% | Servers | Down | Traffic Gbps |")
                 lines.append("|---------|---------|---------|---------|------|-------------|")
                 for r in shown:

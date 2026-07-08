@@ -27,6 +27,7 @@ from zbbx_mcp.data import (
     host_ip,
 )
 from zbbx_mcp.resolver import InstanceResolver
+from zbbx_mcp.uptime import compute_host_uptime, coverage_note
 
 
 def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> None:
@@ -98,21 +99,25 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 if not service_items:
                     return "No service check items found."
 
-                # Drop stale/unsupported check items — they pollute uptime math.
-                from zbbx_mcp.data import is_service_check_stale
+                # ADR 075: do NOT drop stale/unsupported items — that hid
+                # the worst hosts (a chronically dead check dropped the host
+                # from the report entirely). Keep every enabled item; the
+                # time-honest denominator + traffic gate below handle both
+                # dead hosts and deprecated-but-live checks correctly.
                 _now = int(_time.time())
-                service_items = [it for it in service_items if not is_service_check_stale(it, _now)]
-                if not service_items:
-                    return "No fresh service check items (all are stale or unsupported)."
 
-                # Fetch trends for service items
+                # Fetch trends (with clock, for hourly bucketing) + per-host
+                # traffic for the deprecated-check false-down guard (task 169).
                 item_ids = [i["itemid"] for i in service_items]
-                trends = await client.call("trend.get", {
-                    "itemids": item_ids,
-                    "time_from": time_from,
-                    "output": ["itemid", "value_avg", "num"],
-                    "limit": len(item_ids) * 24 * 31,
-                })
+                trends, traffic_map = await asyncio.gather(
+                    client.call("trend.get", {
+                        "itemids": item_ids,
+                        "time_from": time_from,
+                        "output": ["itemid", "clock", "value_avg"],
+                        "limit": len(item_ids) * 24 * 31,
+                    }),
+                    fetch_traffic_map(client, hostids),
+                )
 
                 # Map itemid -> (hostid, protocol)
                 item_info: dict[str, tuple[str, str]] = {}
@@ -120,20 +125,36 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     proto = "service1" if KEY_service_PRIMARY and KEY_service_PRIMARY in i["key_"] else "service2"
                     item_info[i["itemid"]] = (i["hostid"], proto)
 
-                # Calculate uptime per host per protocol
-                host_uptime: dict[str, dict[str, dict]] = {}  # hostid -> proto -> {up, total}
+                # Bucket raw trend rows per (host, proto); track earliest clock
+                # for the retention-coverage note (task 170).
+                rows_by: dict[str, dict[str, list]] = {}
+                min_clock = None
                 for t in trends:
                     info = item_info.get(t["itemid"])
                     if not info:
                         continue
                     hid, proto = info
-                    entry = host_uptime.setdefault(hid, {}).setdefault(proto, {"up": 0, "total": 0})
-                    entry["total"] += 1
+                    clk = t.get("clock")
+                    rows_by.setdefault(hid, {}).setdefault(proto, []).append(
+                        (clk, t.get("value_avg"))
+                    )
                     try:
-                        if float(t["value_avg"]) >= 0.5:
-                            entry["up"] += 1
+                        c = int(clk)
+                        min_clock = c if min_clock is None else min(min_clock, c)
                     except (ValueError, TypeError):
                         pass
+
+                # Time-honest uptime per host per protocol (ADR 075).
+                host_uptime: dict[str, dict[str, dict]] = {}
+                for hid, protos in rows_by.items():
+                    has_traffic = traffic_map.get(hid, 0) >= 1.0
+                    for proto, rows in protos.items():
+                        up, total = compute_host_uptime(
+                            rows, _now, time_from, has_traffic
+                        )
+                        host_uptime.setdefault(hid, {})[proto] = {
+                            "up": up, "total": total,
+                        }
 
                 host_map = {h["hostid"]: h["host"] for h in filtered}
 
@@ -208,7 +229,8 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                         down = sum(1 for r in cs if r["overall"] == "DOWN")
                         parts.append(f"| {ctry} | {len(cs)} | {avg_x} | {down} |")
 
-                return "\n".join(parts)
+                parts.append(coverage_note(min_clock, _now, now - time_from))
+                return "\n".join(p for p in parts if p)
             except (httpx.HTTPError, ValueError) as e:
                 return f"Error: {e}"
 
