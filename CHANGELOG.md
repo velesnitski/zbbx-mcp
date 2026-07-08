@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.16.8] - 2026-07-08
+
+### Fixed — time-honest uptime + trend-retention honesty
+ADR 075 (tasks 168-170). `get_service_uptime_report` used *observed*
+trend rows as the denominator, so a host that wrote one sample then died
+read 100%, and chronically-dead hosts were dropped from the report
+entirely (the worst offenders became invisible — live proof: 3 premium
+hosts at 0.00% in the reports SLA showed absent/healthy here). New shared
+pure `uptime.py`: the denominator now spans every hour from a host's
+first observed sample to now (a missing hour is DOWN), with a per-host
+traffic gate that rescues deprecated-check false-downs (an hour with real
+traffic counts up when the check is silent). Added a trend-retention
+coverage note, and a `get_month_over_month` guard that renders `n/a` +
+warning instead of a fabricated delta when history can't fill the prior
+period. `get_sla_dashboard` relabelled a current snapshot (it never was a
+period average). +14 tests; 671 → 685. Gated tasks 163/171 unchanged.
+
 ## [1.16.7] - 2026-07-07
 
 ### Changed — file-length budgets (tests + docs only, zero runtime change)
