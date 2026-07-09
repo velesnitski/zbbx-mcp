@@ -7,11 +7,11 @@ imports of private symbols.
 
 import asyncio
 import csv as _csv
-import os
 import re
 import statistics
 
 from zbbx_mcp.data import host_ip
+from zbbx_mcp.utils import confined_input_path
 
 _IP_RE = re.compile(r"\b(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})\b")
 
@@ -223,7 +223,7 @@ def _load_billing_csv(path: str) -> list[dict]:
     Skips invalid/reserved IPs and zero/negative prices.
     """
     rows: list[dict] = []
-    with open(os.path.expanduser(path)) as f:
+    with open(confined_input_path(path)) as f:
         reader = _csv.DictReader(f)
         for raw in reader:
             # Normalize headers

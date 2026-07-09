@@ -147,7 +147,14 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 top: Max rows to render (default: 30)
                 log_path: Override the log file path (default: use env)
             """
-            path = Path(log_path) if log_path else _default_log_path()
+            if log_path:
+                from zbbx_mcp.utils import confined_input_path
+                try:
+                    path = Path(confined_input_path(log_path))
+                except ValueError as e:
+                    return f"Invalid log_path: {e}"
+            else:
+                path = _default_log_path()
             if not path.exists():
                 return (
                     f"No analytics log at {path}. The log is written automatically "

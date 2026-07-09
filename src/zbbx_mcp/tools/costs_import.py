@@ -30,7 +30,7 @@ from zbbx_mcp.tools.costs_common import (
     _provider_medians,
     _sanity_warnings,
 )
-from zbbx_mcp.utils import resolve_group_ids
+from zbbx_mcp.utils import confined_input_path, confined_output_path, resolve_group_ids
 
 
 def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> None:
@@ -256,13 +256,13 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
             # Load data
             try:
                 if file_path:
-                    with open(os.path.expanduser(file_path)) as f:
+                    with open(confined_input_path(file_path)) as f:
                         raw = json.load(f)
                 elif costs_json:
                     raw = json.loads(costs_json)
                 else:
                     return "Provide file_path or costs_json."
-            except (json.JSONDecodeError, FileNotFoundError, OSError) as e:
+            except (json.JSONDecodeError, FileNotFoundError, OSError, ValueError) as e:
                 return f"Failed to load: {e}"
 
             if isinstance(raw, dict) and ("by_ip" in raw or "by_name" in raw):
@@ -503,7 +503,10 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
 
                 # Export unmatched
                 if export_unmatched and unmatched_names:
-                    path = os.path.expanduser(export_unmatched)
+                    try:
+                        path = confined_output_path(export_unmatched)
+                    except (OSError, ValueError) as e:
+                        return f"Failed to write export file: {e}"
                     with open(path, "w") as f:
                         json.dump(unmatched_names, f, indent=2, ensure_ascii=False)
 
@@ -635,7 +638,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
 
                 # Parse input
                 if file_path:
-                    with open(os.path.expanduser(file_path)) as f:
+                    with open(confined_input_path(file_path)) as f:
                         data = json.load(f)
                 elif fees_json:
                     data = json.loads(fees_json)
@@ -778,9 +781,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 return "openpyxl not installed. Run: uv pip install openpyxl"
 
             try:
-                path = os.path.expanduser(file_path)
-                if not os.path.isfile(path):
-                    return f"File not found: {path}"
+                path = confined_input_path(file_path)
                 wb = openpyxl.load_workbook(path, data_only=True)
             except (OSError, ValueError) as e:
                 return f"Failed to open XLSX: {e}"
@@ -882,7 +883,10 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     continue
                 by_ip[r["ip"]] = r
 
-            out_path = os.path.expanduser(output_csv)
+            try:
+                out_path = confined_output_path(output_csv)
+            except (OSError, ValueError) as e:
+                return f"Failed to write output CSV: {e}"
             with open(out_path, "w", newline="") as f:
                 w = _csv.writer(f)
                 w.writerow(["ip", "billing_name", "price_monthly"])

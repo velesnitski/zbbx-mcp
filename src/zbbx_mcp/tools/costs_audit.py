@@ -18,6 +18,7 @@ from zbbx_mcp.tools.costs_common import (
     _load_billing_csv,
     _provider_medians,
 )
+from zbbx_mcp.utils import confined_input_path, confined_output_path, safe_output_path
 
 
 def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> None:
@@ -71,7 +72,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
             if source_xlsx:
                 try:
                     import openpyxl
-                    source_abs_path = os.path.expanduser(source_xlsx)
+                    source_abs_path = confined_input_path(source_xlsx)
                     wb_src = openpyxl.load_workbook(source_abs_path, data_only=True)
                     ip_re_local = _IP_RE
                     for sheet_name in wb_src.sheetnames:
@@ -200,7 +201,10 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
             for col, w in zip(cols, widths, strict=True):
                 ws.column_dimensions[col].width = w
 
-            out = os.path.expanduser(output_xlsx)
+            try:
+                out = confined_output_path(output_xlsx)
+            except (OSError, ValueError) as e:
+                return f"Failed to write XLSX: {e}"
             wb.save(out)
             total = sum(r["cost"] for r in rows)
             lines = [
@@ -327,9 +331,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
             from zbbx_mcp.classify import detect_provider
 
             try:
-                path = os.path.expanduser(file_path)
-                if not os.path.isfile(path):
-                    return f"File not found: {path}"
+                path = confined_input_path(file_path)
                 with open(path) as f:
                     raw = json.load(f)
 
@@ -453,8 +455,8 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     by_tier[r["tier"]]["cost"] += r["price_monthly"]
 
                 downloads = os.path.expanduser("~/Downloads")
-                out_json = os.path.expanduser(output_json) if output_json else os.path.join(downloads, "cost_import_analysis.json")
-                out_csv = os.path.expanduser(output_csv) if output_csv else os.path.join(downloads, "cost_import_analysis.csv")
+                out_json = confined_output_path(output_json) if output_json else os.path.join(downloads, "cost_import_analysis.json")
+                out_csv = confined_output_path(output_csv) if output_csv else os.path.join(downloads, "cost_import_analysis.csv")
 
                 with open(out_json, "w") as f:
                     json.dump(results, f, indent=2)
@@ -506,7 +508,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
             """
             try:
                 rows = _load_billing_csv(file_path)
-            except (FileNotFoundError, OSError) as e:
+            except (FileNotFoundError, OSError, ValueError) as e:
                 return f"Failed to read CSV: {e}"
             if not rows:
                 return "No valid billing rows found."
@@ -577,16 +579,19 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 output_dir = os.path.dirname(os.path.expanduser(file_path)) or os.getcwd()
             base = os.path.splitext(os.path.basename(file_path))[0]
             written = []
-            for bucket, items in buckets.items():
-                if not items:
-                    continue
-                out = os.path.join(output_dir, f"{base}__{bucket}.csv")
-                cols = sorted({k for it in items for k in it})
-                with open(out, "w", newline="") as f:
-                    w = _csv.DictWriter(f, fieldnames=cols)
-                    w.writeheader()
-                    w.writerows(items)
-                written.append(out)
+            try:
+                for bucket, items in buckets.items():
+                    if not items:
+                        continue
+                    out = safe_output_path(output_dir, f"{base}__{bucket}.csv")
+                    cols = sorted({k for it in items for k in it})
+                    with open(out, "w", newline="") as f:
+                        w = _csv.DictWriter(f, fieldnames=cols)
+                        w.writeheader()
+                        w.writerows(items)
+                    written.append(out)
+            except (OSError, ValueError) as e:
+                return f"Failed to write bucket CSVs: {e}"
 
             actions = {
                 "importable": "Safe to import (IP match, no cost)",
@@ -623,7 +628,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
             """
             try:
                 rows = _load_billing_csv(file_path)
-            except (FileNotFoundError, OSError) as e:
+            except (FileNotFoundError, OSError, ValueError) as e:
                 return f"Failed to read CSV: {e}"
             if not rows:
                 return "No valid billing rows."

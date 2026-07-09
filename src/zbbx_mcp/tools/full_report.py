@@ -30,6 +30,7 @@ from zbbx_mcp.excel import (
     write_headers,
 )
 from zbbx_mcp.resolver import InstanceResolver
+from zbbx_mcp.utils import safe_output_path
 
 # Column layout for the main sheet
 MAIN_HEADERS = [
@@ -442,7 +443,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 if not output_dir:
                     output_dir = os.path.expanduser("~/Downloads")
                 ts = datetime.now().strftime("%Y%m%d_%H%M")
-                filepath = os.path.join(output_dir, f"zabbix_full_report_{ts}.xlsx")
+                filepath = safe_output_path(output_dir, f"zabbix_full_report_{ts}.xlsx")
                 wb.save(filepath)
 
                 # Recalculate stats for filtered rows

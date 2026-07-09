@@ -428,17 +428,14 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
             """
             import asyncio as _aio
             import csv as _csv
-            import os as _os
             import socket
 
             # --- Parse input ---
             ips_with_meta: list[dict] = []
             try:
                 if file_path:
-                    path = _os.path.expanduser(file_path)
-                    if not _os.path.isfile(path):
-                        return f"File not found: {path}"
-                    with open(path) as f:
+                    from zbbx_mcp.utils import confined_input_path
+                    with open(confined_input_path(file_path)) as f:
                         text = f.read()
                 else:
                     text = input_data
@@ -483,7 +480,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                         ip = part.strip()
                         if ip:
                             ips_with_meta.append({"ip": ip, "price": 0, "name": ""})
-            except (json.JSONDecodeError, OSError) as e:
+            except (json.JSONDecodeError, OSError, ValueError) as e:
                 return f"Failed to parse input: {e}"
 
             # Validate IPs
