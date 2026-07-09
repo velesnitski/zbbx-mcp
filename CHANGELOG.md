@@ -5,6 +5,26 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.16.9] - 2026-07-09
+
+### Security — filesystem confinement for caller-supplied paths
+ADR 076. Validated the repo against advisory GHSA-99mq-fjjc-6v9j
+(CWE-22/CWE-73 path traversal in a sibling MCP). The same root cause was
+present in a weaker form: tools taking a caller `file_path`/`source_xlsx`/
+`log_path` (`audit_external_ips`, the cost/billing importers,
+`export_cost_audit`, `get_telemetry_summary`) read it with only an
+existence check, so a prompt-injected caller could read `~/.ssh`,
+`~/.claude.json`, `/etc/*`, etc. Added a shared confinement layer in
+`utils.py` — `realpath` (symlink-safe) + `commonpath` (sibling-prefix-safe)
+against an allowlist of roots (`~/Downloads`, `~/Documents`, `~/Desktop`,
+temp; extend with `ZBBX_FILE_ROOTS`), a read size cap, and a filename
+guard. Every caller read/write path is routed through it. Also fixed a
+`safe_output_path` prefix bug (`startswith` let `<root>-evil` pass) and the
+report/export writers that bypassed confinement with a raw `os.path.join`.
+No single tool both reads a caller file and egresses it (our Slack tools
+generate from live Zabbix data), so the headline 7.5 does not apply. Tool
+count unchanged (163). +19 tests, 685 → 704.
+
 ## [1.16.8] - 2026-07-08
 
 ### Fixed — time-honest uptime + trend-retention honesty

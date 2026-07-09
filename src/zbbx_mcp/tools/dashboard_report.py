@@ -11,6 +11,7 @@ from zbbx_mcp.classify import classify_host as _classify_host
 from zbbx_mcp.classify import detect_provider
 from zbbx_mcp.data import KEY_CONNECTIONS, host_ip
 from zbbx_mcp.resolver import InstanceResolver
+from zbbx_mcp.utils import safe_output_path
 
 
 def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> None:
@@ -318,7 +319,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 safe_name = dash_name.replace("/", "-").replace("\\", "-")[:40]
                 ts = datetime.now().strftime("%Y%m%d_%H%M")
                 filename = f"{safe_name}_{ts}.xlsx"
-                filepath = os.path.join(output_dir, filename)
+                filepath = safe_output_path(output_dir, filename)
                 wb.save(filepath)
 
                 # Text summary

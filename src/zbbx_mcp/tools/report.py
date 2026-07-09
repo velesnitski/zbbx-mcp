@@ -11,6 +11,7 @@ from zbbx_mcp.classify import classify_host as _classify_host
 from zbbx_mcp.classify import detect_provider
 from zbbx_mcp.data import extract_country
 from zbbx_mcp.resolver import InstanceResolver
+from zbbx_mcp.utils import safe_output_path
 
 
 def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> None:
@@ -297,7 +298,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     output_dir = os.path.expanduser("~/Downloads")
                 ts = datetime.now().strftime("%Y%m%d_%H%M")
                 filename = f"zabbix_server_report_{ts}.xlsx"
-                filepath = os.path.join(output_dir, filename)
+                filepath = safe_output_path(output_dir, filename)
                 wb.save(filepath)
 
                 # Build text summary
