@@ -1305,7 +1305,7 @@ wheels = [
 
 [[package]]
 name = "zbbx-mcp"
-version = "1.16.10"
+version = "1.16.11"
 source = { editable = "." }
 dependencies = [
     { name = "cryptography" },

@@ -1,5 +1,106 @@
 """diagnose_host / bulk_diagnose helper and threading tests (split from test_analytics, ADR 074)."""
 
+HOUR = 3600
+NOW = 1_000_000 * HOUR
+
+
+class TestTrafficWindows:
+    """ADR 078 — the baseline used to start at a hardcoded now-24h while ending
+    at now-traffic_hours, so any traffic_hours >= 24 emptied (or inverted) the
+    range: baseline came back None, the tool printed "No traffic items", and the
+    `traffic_lost` verdict became unreachable. Widening the window silently
+    disabled the check."""
+
+    def _w(self, hours):
+        from zbbx_mcp.tools.diagnose import _traffic_windows
+        return _traffic_windows(NOW, hours)
+
+    def test_never_inverts_at_any_width(self):
+        for hours in (1, 6, 12, 23, 24, 25, 168, 720):
+            b_from, b_till, r_from = self._w(hours)
+            assert b_from < b_till, f"baseline inverted/empty at {hours}h"
+            assert b_till <= r_from < NOW
+
+    def test_the_regression_24h_and_168h(self):
+        # These are the exact widths that produced "No traffic items" live.
+        for hours in (24, 168):
+            b_from, b_till, _ = self._w(hours)
+            assert b_till - b_from == 24 * HOUR
+
+    def test_baseline_abuts_recent_window(self):
+        b_from, b_till, r_from = self._w(6)
+        assert b_till == r_from                 # no gap, no overlap
+        assert r_from == NOW - 6 * HOUR
+        assert b_from == NOW - 30 * HOUR        # 6h recent + 24h baseline
+
+    def test_zero_or_negative_hours_clamped(self):
+        for hours in (0, -5):
+            b_from, b_till, r_from = self._w(hours)
+            assert b_from < b_till <= r_from < NOW
+
+
+class TestCarrierTrafficMbps:
+    """ADR 078 — a flat mean across every NIC's trend rows halved a real
+    carrier sitting beside an idle NIC (live: bond0 ~60 Mbps + idle eno4 → the
+    tool reported 30.1 Mbps)."""
+
+    def _rows(self, itemid, bps, n=3):
+        return [{"itemid": itemid, "value_avg": bps} for _ in range(n)]
+
+    def test_idle_nic_does_not_dilute_the_carrier(self):
+        from zbbx_mcp.tools.diagnose import _carrier_traffic_mbps
+
+        base = self._rows("bond0", 60e6) + self._rows("eno4", 0)
+        recent = self._rows("bond0", 55e6) + self._rows("eno4", 0)
+        b, r = _carrier_traffic_mbps(base, recent)
+        assert round(b) == 60 and round(r) == 55   # not 30 / 27.5
+
+    def test_recent_measured_on_the_same_carrier(self):
+        # A collapse on the carrier must not be masked by a busy peer.
+        from zbbx_mcp.tools.diagnose import _carrier_traffic_mbps
+
+        base = self._rows("bond0", 80e6) + self._rows("eth1", 1e6)
+        recent = self._rows("bond0", 0) + self._rows("eth1", 1e6)
+        b, r = _carrier_traffic_mbps(base, recent)
+        assert round(b) == 80 and r == 0.0         # carrier collapsed → visible
+
+    def test_no_trends_is_no_data(self):
+        from zbbx_mcp.tools.diagnose import _carrier_traffic_mbps
+
+        assert _carrier_traffic_mbps([], []) == (None, None)
+
+    def test_bad_values_skipped(self):
+        from zbbx_mcp.tools.diagnose import _carrier_traffic_mbps
+
+        base = [{"itemid": "a", "value_avg": "x"}, {"itemid": "a", "value_avg": 10e6}]
+        b, _ = _carrier_traffic_mbps(base, [])
+        assert round(b) == 10
+
+
+class TestIsPhysicalTrafficInKey:
+    """ADR 078 — diagnose matched an exact hardcoded key list while
+    fetch_traffic_map globbed + prefix-filtered; the two disagreed on which
+    NICs counted. One shared predicate now."""
+
+    def test_physical_nics_match(self):
+        from zbbx_mcp.fetch import is_physical_traffic_in_key
+
+        for iface in ("bond0", "eth1", "ens3", "eno4", "enp2s0", "ppp0"):
+            assert is_physical_traffic_in_key(f"net.if.in[{iface}]"), iface
+
+    def test_virtual_and_tunnel_nics_excluded(self):
+        from zbbx_mcp.fetch import is_physical_traffic_in_key
+
+        for iface in ("docker0", "tun0", "veth1", "virbr0", "svc_tun1"):
+            assert not is_physical_traffic_in_key(f"net.if.in[{iface}]"), iface
+
+    def test_non_traffic_keys_excluded(self):
+        from zbbx_mcp.fetch import is_physical_traffic_in_key
+
+        assert not is_physical_traffic_in_key("agent.ping")
+        assert not is_physical_traffic_in_key("net.if.out[eth0]")
+        assert not is_physical_traffic_in_key("")
+
 
 
 class TestDiagnoseHostHelpers:
