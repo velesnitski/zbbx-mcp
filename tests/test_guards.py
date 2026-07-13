@@ -12,6 +12,14 @@ recurrence a CI failure instead of a live incident:
   it, but every call site in this codebase (and both shipped bugs) used
   inline dict literals.
 
+- **Select-field guard** (ADR 077) — the deny-map above only checked param
+  *names*, so a *valid* param carrying an *invalid field* slipped through:
+  ``selectAcknowledges`` asked for ``alias`` (a pre-5.4 user field that has
+  never existed on an acknowledge object), and Zabbix rejected the whole
+  call with -32602 — get_problem_detail was dead on every problem. This
+  guard checks the string literals *inside* known ``select*`` lists against
+  the field sets Zabbix actually accepts.
+
 - **Doc-count guard** — hand-maintained tool counts drifted three ways
   (ADR 063: badge 161 / tier table 156 / prose 154 against a real 162).
   The guard pins every documented count to the computed registry, so a
@@ -36,6 +44,21 @@ DENIED_PARAMS = {
     "problem.get": {"selectHosts", "selectGroups", "selectHostGroups"},
 }
 
+# (method, select-param) -> the field names Zabbix actually accepts inside it.
+# A *valid* param carrying an *invalid* field is still a -32602 (ADR 077:
+# selectAcknowledges asked for "alias", which killed get_problem_detail).
+# Sourced from the Zabbix 7.x error text, which enumerates the legal values.
+ALLOWED_SELECT_FIELDS = {
+    ("problem.get", "selectAcknowledges"): {
+        "acknowledgeid", "userid", "clock", "message", "action",
+        "old_severity", "new_severity", "suppress_until", "taskid",
+    },
+    ("problem.get", "selectTags"): {"tag", "value"},
+    ("problem.get", "selectSuppressionData"): {
+        "maintenanceid", "suppress_until", "userid",
+    },
+}
+
 
 def iter_call_dict_keys():
     """Yield (path, lineno, api_method, param_keys) for every
@@ -58,6 +81,60 @@ def iter_call_dict_keys():
                     if isinstance(k, ast.Constant) and isinstance(k.value, str)
                 }
                 yield path, node.lineno, node.args[0].value, keys
+
+
+def iter_call_select_fields():
+    """Yield (path, lineno, method, param, fields) for every ``select*`` param
+    whose value is a list literal of string constants."""
+    for path in sorted(SRC.rglob("*.py")):
+        tree = ast.parse(path.read_text(), filename=str(path))
+        for node in ast.walk(tree):
+            if not (
+                isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Attribute)
+                and node.func.attr == "call"
+                and node.args
+                and isinstance(node.args[0], ast.Constant)
+                and isinstance(node.args[0].value, str)
+            ):
+                continue
+            if len(node.args) < 2 or not isinstance(node.args[1], ast.Dict):
+                continue
+            method = node.args[0].value
+            for k, v in zip(node.args[1].keys, node.args[1].values, strict=False):
+                if not (isinstance(k, ast.Constant) and isinstance(k.value, str)):
+                    continue
+                if not isinstance(v, ast.List):
+                    continue
+                fields = [
+                    e.value for e in v.elts
+                    if isinstance(e, ast.Constant) and isinstance(e.value, str)
+                ]
+                if fields:
+                    yield path, node.lineno, method, k.value, fields
+
+
+class TestSelectFieldGuard:
+    def test_select_fields_are_legal(self):
+        violations = []
+        for path, lineno, method, param, fields in iter_call_select_fields():
+            allowed = ALLOWED_SELECT_FIELDS.get((method, param))
+            if not allowed:
+                continue
+            bad = sorted(set(fields) - allowed)
+            if bad:
+                violations.append(
+                    f"{path.relative_to(ROOT)}:{lineno} — {method} {param} carries "
+                    f"{bad} (Zabbix rejects the whole call with -32602; allowed: "
+                    f"{sorted(allowed)}). See ADR 077"
+                )
+        assert not violations, "\n".join(violations)
+
+    def test_select_scanner_not_vacuous(self):
+        # Worthless unless it actually sees the call sites it is meant to guard.
+        seen = {(m, p) for _, _, m, p, _ in iter_call_select_fields()}
+        assert ("problem.get", "selectAcknowledges") in seen
+        assert ("problem.get", "selectSuppressionData") in seen
 
 
 class TestApiContractGuard:
