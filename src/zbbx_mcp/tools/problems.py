@@ -93,6 +93,33 @@ def _format_snooze_status(suppression_data, now: int) -> str:
     return "; ".join(lines)
 
 
+async def _resolve_usernames(client, userids) -> dict[str, str]:
+    """Map userid → username for acknowledgement authors (ADR 077).
+
+    An acknowledge object carries only ``userid`` — it has no name field.
+    ``alias`` was the pre-5.4 *user* field (renamed ``username``); asking for
+    it inside ``selectAcknowledges`` makes Zabbix reject the whole call with
+    -32602, which killed ``get_problem_detail`` outright.
+
+    Best-effort: a token without ``user.get`` rights yields an empty map and
+    the caller falls back to the raw id rather than failing the tool.
+    """
+    ids = sorted({str(u) for u in userids if u})
+    if not ids:
+        return {}
+    try:
+        users = await client.call("user.get", {
+            "output": ["userid", "username"],
+            "userids": ids,
+        })
+    except (httpx.HTTPError, ValueError):
+        return {}
+    return {
+        str(u["userid"]): (u.get("username") or str(u["userid"]))
+        for u in users if u.get("userid")
+    }
+
+
 def _suppress_until_from_hours(suppress_hours: float, now: int) -> int | None:
     """Translate the tool-level ``suppress_hours`` into ``suppress_until``.
 
@@ -375,7 +402,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 data = await client.call("problem.get", {
                     "eventids": [eid],
                     "output": "extend",
-                    "selectAcknowledges": ["userid", "alias", "message", "clock", "action"],
+                    "selectAcknowledges": ["userid", "clock", "message", "action"],
                     "selectTags": ["tag", "value"],
                     "selectSuppressionData": ["maintenanceid", "suppress_until"],
                 })
@@ -419,11 +446,16 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
 
                 acks = p.get("acknowledges", [])
                 if acks:
+                    names = await _resolve_usernames(
+                        client, [a.get("userid") for a in acks]
+                    )
                     parts.append("")
                     parts.append(f"## Acknowledgements ({len(acks)})")
                     for a in acks:
+                        uid = str(a.get("userid") or "")
+                        who = names.get(uid) or (f"user {uid}" if uid else "?")
                         parts.append(
-                            f"- **{a.get('alias', '?')}** ({_ts(a.get('clock', '0'))}): "
+                            f"- **{who}** ({_ts(a.get('clock', '0'))}): "
                             f"{a.get('message', '')}"
                         )
 

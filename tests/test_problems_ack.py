@@ -254,11 +254,14 @@ class TestProblemDetailWireContract:
     """ADR 071 — get_problem_detail requests suppress_until and renders
     rank + snooze. Wire-level per the ADR 068/070 lesson."""
 
-    def _run(self, problem):
+    def _run(self, problem, users=None):
         from tests.wiretest import RecordingClient, run_tool
         from zbbx_mcp.tools import problems as problems_mod
 
-        client = RecordingClient({"problem.get": [problem]})
+        responses = {"problem.get": [problem]}
+        if users is not None:
+            responses["user.get"] = users
+        client = RecordingClient(responses)
         out = run_tool(problems_mod, "get_problem_detail", client, problem_id="9")
         return client, out
 
@@ -286,6 +289,60 @@ class TestProblemDetailWireContract:
             suppressed="1",
             suppression_data=[{"maintenanceid": "0", "suppress_until": "0"}]))
         assert "snoozed until the problem resolves" in out
+
+
+class TestProblemDetailAckAuthor:
+    """ADR 077 — selectAcknowledges asked for "alias", a field that has never
+    existed on an acknowledge object. Zabbix rejected the whole call with
+    -32602, so get_problem_detail was dead on *every* problem."""
+
+    LEGAL = {"acknowledgeid", "userid", "clock", "message", "action",
+             "old_severity", "new_severity", "suppress_until", "taskid"}
+
+    def _run(self, problem, users=None):
+        from tests.wiretest import RecordingClient, run_tool
+        from zbbx_mcp.tools import problems as problems_mod
+
+        responses = {"problem.get": [problem]}
+        if users is not None:
+            responses["user.get"] = users
+        client = RecordingClient(responses)
+        out = run_tool(problems_mod, "get_problem_detail", client, problem_id="9")
+        return client, out
+
+    def _problem(self, **extra):
+        base = {"eventid": "9", "name": "Service Down", "severity": "4",
+                "clock": "1000", "acknowledged": "0", "suppressed": "0"}
+        base.update(extra)
+        return base
+
+    def _ack(self):
+        return [{"userid": "42", "clock": "1000", "message": "on it"}]
+
+    def test_selectacknowledges_carries_only_legal_fields(self):
+        client, _ = self._run(self._problem())
+        sent = client.sent("problem.get")["selectAcknowledges"]
+        assert "alias" not in sent           # the -32602 carrier
+        assert set(sent) <= self.LEGAL
+
+    def test_ack_author_resolved_to_username(self):
+        client, out = self._run(
+            self._problem(acknowledges=self._ack()),
+            users=[{"userid": "42", "username": "ops-oncall"}],
+        )
+        assert client.sent("user.get")["userids"] == ["42"]
+        assert "**ops-oncall**" in out and "on it" in out
+
+    def test_ack_author_falls_back_to_userid(self):
+        # A token without user.get rights must degrade to the raw id, not crash
+        # and not render the old bare "?".
+        _, out = self._run(self._problem(acknowledges=self._ack()), users=[])
+        assert "**user 42**" in out
+        assert "**?**" not in out
+
+    def test_no_user_get_when_no_acks(self):
+        client, _ = self._run(self._problem())
+        assert not [m for m, _ in client.calls if m == "user.get"]
 
 class TestFilterSuppressed:
     """Pure-helper tests for filter_suppressed (#143, ADR 044)."""

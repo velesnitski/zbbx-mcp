@@ -5,6 +5,28 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.16.10] - 2026-07-13
+
+### Fixed — `get_problem_detail` was dead on every problem (-32602)
+ADR 077. `problem.get` asked for `selectAcknowledges: [..., "alias", ...]`,
+but `alias` is not a field of the acknowledge object — it was the pre-5.4
+*user* field (renamed `username`). Zabbix rejects the entire call with
+-32602, so the tool failed on every input, not just acknowledged problems.
+Found live while triaging a real problem. A second bug rode along: the
+renderer printed `a.get('alias', '?')`, so the acknowledgement author would
+have shown as `?` forever even if the API had accepted the request.
+
+Fixed the requested fields, and restored the author via a best-effort
+`user.get` lookup (`userid` → `username`); a token without `user.get` rights
+falls back to `user <id>` instead of crashing, and no lookup fires when a
+problem has no acknowledgements.
+
+The ADR 072 guard missed this because it checked parameter *names*, not the
+field *values* inside them. Added a **select-field guard** that AST-scans the
+literals inside known `select*` lists against the sets Zabbix accepts, plus a
+not-vacuous test so it cannot pass by failing to look. Both -32602 shapes are
+now CI failures. Tool count unchanged (163). +6 tests, 704 → 710.
+
 ## [1.16.9] - 2026-07-09
 
 ### Security — filesystem confinement for caller-supplied paths
