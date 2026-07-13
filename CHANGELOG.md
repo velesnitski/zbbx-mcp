@@ -5,6 +5,33 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.16.11] - 2026-07-13
+
+### Fixed — diagnose traffic: collapsed baseline window + carrier dilution
+ADR 078. Found while cross-checking a support report: `diagnose_host` printed
+"No traffic items / trend data available" for hosts visibly moving tens of
+Mbps, which `detect_traffic_drops` analysed fine. Three defects:
+
+1. The baseline window **collapsed** whenever `traffic_hours >= 24`
+   (`baseline_from` was pinned to `now-24h` while `baseline_till` was
+   `now-traffic_hours`, so the range went empty at 24h and inverted at 168h).
+   The baseline came back `None` and the **`traffic_lost` verdict became
+   unreachable** — widening the window silently degraded a dead host to
+   `healthy`. The default of 6h happened to work, which is why it survived.
+2. **Carrier dilution:** traffic was a flat mean across *every* NIC's trend
+   rows, so a busy carrier beside idle NICs read low by the idle count (live:
+   `bond0` ~60 Mbps + idle `eno4` → reported 30.1 Mbps).
+3. `diagnose` and `fetch_traffic_map` used **two different definitions** of
+   "traffic item" (exact hardcoded key list vs glob + physical-NIC prefix), so
+   the two tools disagreed on which NICs counted.
+
+Fixed with three pure helpers: `_traffic_windows` (baseline always abuts the
+recent window, never collapses at any width), `_carrier_traffic_mbps` (per-NIC
+means; the busiest baseline interface is the carrier and *both* windows are
+measured on it, so an idle peer neither dilutes the figure nor masks a
+collapse), and a shared `is_physical_traffic_in_key` now used by both paths.
+Tool count unchanged (163). +11 tests, 710 → 721.
+
 ## [1.16.10] - 2026-07-13
 
 ### Fixed — `get_problem_detail` was dead on every problem (-32602)

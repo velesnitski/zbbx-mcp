@@ -93,6 +93,29 @@ async def fetch_enabled_hosts(
     return result
 
 
+# Physical NIC prefixes. This is an allow-list: virtual, tunnel and
+# service-specific interfaces (docker0, tun*, veth*, per-daemon virtual NICs)
+# match nothing here and are therefore excluded — they do not carry the host's
+# inbound traffic and must not dilute it.
+PHYSICAL_IFACE_PREFIXES = ("eth", "eno", "enp", "ens", "bond", "ppp")
+
+
+def is_physical_traffic_in_key(key: str) -> bool:
+    """True if ``key`` is a ``net.if.in[...]`` item on a physical NIC.
+
+    The single definition of "this item carries the host's inbound traffic"
+    (ADR 078). It exists because two definitions had drifted apart: this path
+    globbed ``net.if.in[`` and filtered by prefix, while ``diagnose`` matched
+    an *exact* hardcoded key list — so the two disagreed about which NICs
+    counted, and `detect_traffic_drops` saw traffic that `diagnose_host` did
+    not. Pure.
+    """
+    if not key.startswith("net.if.in["):
+        return False
+    iface = key.split("[", 1)[1].rstrip("]")
+    return iface.startswith(PHYSICAL_IFACE_PREFIXES)
+
+
 async def fetch_traffic_map(client: ZabbixClient, hostids: list[str]) -> dict[str, float]:
     """Fetch max inbound traffic (Mbps) per host. Returns {hostid: mbps}.
 
@@ -123,16 +146,11 @@ async def fetch_traffic_map(client: ZabbixClient, hostids: list[str]) -> dict[st
             "filter": {"key_": TRAFFIC_IN_KEYS},
         })
 
-    # Filter out virtual/tunnel interfaces — keep only physical NICs (eth, eno, enp, ens, bond, ppp)
-    _PHYSICAL = ("eth", "eno", "enp", "ens", "bond", "ppp")
-
     result: dict[str, float] = {}
     for it in items:
         try:
-            key = it.get("key_", "")
-            # Extract interface name from net.if.in[iface]
-            iface = key.split("[")[1].rstrip("]") if "[" in key else ""
-            if not any(iface.startswith(p) for p in _PHYSICAL):
+            # Virtual/tunnel interfaces are filtered out by the shared predicate.
+            if not is_physical_traffic_in_key(it.get("key_", "")):
                 continue
             mbps = float(it.get("lastvalue", 0)) / _TRAFFIC_DIVISOR
             hid = it["hostid"]

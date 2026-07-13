@@ -26,15 +26,80 @@ import httpx
 from zbbx_mcp.country import resolve_country
 from zbbx_mcp.data import (
     STATUS_ENABLED,
-    TRAFFIC_IN_KEYS,
     canonical_host_name,
     filter_suppressed,
     host_ip,
 )
+from zbbx_mcp.fetch import is_physical_traffic_in_key
 from zbbx_mcp.formatters import format_age, format_severity
 from zbbx_mcp.resolver import InstanceResolver
 from zbbx_mcp.tools.correlation import subnet24
 from zbbx_mcp.tools.ip_history import parse_ip_changes
+
+# Width of the baseline window, in hours. It always sits immediately *before*
+# the recent window (ADR 078).
+_BASELINE_SPAN_HOURS = 24
+
+
+def _traffic_windows(now: int, traffic_hours: int) -> tuple[int, int, int]:
+    """Return ``(baseline_from, baseline_till, recent_from)``.
+
+    The baseline is the ``_BASELINE_SPAN_HOURS`` immediately preceding the
+    recent window, so it can never collapse however wide ``traffic_hours``
+    gets. The old code anchored ``baseline_from`` at a hardcoded ``now - 24h``
+    while ``baseline_till`` was ``now - traffic_hours``: any
+    ``traffic_hours >= 24`` made the range empty (or inverted), so the baseline
+    came back ``None``, the tool printed "No traffic items / trend data
+    available", and the ``traffic_lost`` verdict became *unreachable* — simply
+    widening the window silently disabled the check. Pure.
+    """
+    hours = max(int(traffic_hours), 1)
+    recent_from = now - hours * 3600
+    baseline_till = recent_from
+    baseline_from = baseline_till - _BASELINE_SPAN_HOURS * 3600
+    return baseline_from, baseline_till, recent_from
+
+
+def _mean_by_item(trends: list[dict]) -> dict[str, float]:
+    """Mean ``value_avg`` (bps) per itemid. Pure."""
+    acc: dict[str, list[float]] = {}
+    for t in trends:
+        iid = str(t.get("itemid", "") or "")
+        if not iid:
+            continue
+        try:
+            acc.setdefault(iid, []).append(float(t.get("value_avg", 0) or 0))
+        except (TypeError, ValueError):
+            continue
+    return {k: sum(v) / len(v) for k, v in acc.items() if v}
+
+
+def _carrier_traffic_mbps(
+    trends_base: list[dict], trends_recent: list[dict]
+) -> tuple[float | None, float | None]:
+    """``(baseline_mbps, recent_mbps)`` measured on the host's *carrier* NIC.
+
+    A box usually has several physical NICs where only one carries the load
+    (e.g. ``bond0`` at 60 Mbps beside an idle ``eno4`` at 0). Averaging every
+    trend row across every NIC — as this used to — halved the real figure and
+    skewed the baseline-to-recent ratio the verdict depends on. Instead: take
+    the busiest interface in the *baseline* as the carrier and measure both
+    windows on that same item, so the comparison is like-for-like and a
+    collapse on the carrier cannot be masked by an idle peer. Pure.
+    """
+    base = _mean_by_item(trends_base)
+    recent = _mean_by_item(trends_recent)
+    if base:
+        carrier = max(base, key=lambda k: base[k])
+    elif recent:
+        carrier = max(recent, key=lambda k: recent[k])
+    else:
+        return None, None
+    b, r = base.get(carrier), recent.get(carrier)
+    return (
+        b / 1e6 if b is not None else None,
+        r / 1e6 if r is not None else None,
+    )
 
 
 def _ip_matches_subnet(ip: str, subnet: str) -> bool:
@@ -272,34 +337,34 @@ async def _collect_diagnosis_inner(
     rotations: list[dict] = []
 
     if mode == "server":
-        iids = [it["itemid"] for it in items if it.get("key_") in TRAFFIC_IN_KEYS]
+        # One shared definition of "traffic item" with fetch_traffic_map — an
+        # exact-match against a hardcoded key list used to disagree with it.
+        iids = [
+            it["itemid"] for it in items
+            if is_physical_traffic_in_key(it.get("key_", ""))
+        ]
         if iids:
-            baseline_from = now - 24 * 3600
-            baseline_till = now - traffic_hours * 3600
-            recent_from = now - traffic_hours * 3600
-            trends_base = await client.call("trend.get", {
-                "itemids": iids,
-                "time_from": baseline_from,
-                "time_till": baseline_till,
-                "output": ["itemid", "value_avg"],
-                "limit": len(iids) * 24,
-            })
-            trends_recent = await client.call("trend.get", {
-                "itemids": iids,
-                "time_from": recent_from,
-                "output": ["itemid", "value_avg"],
-                "limit": len(iids) * 24,
-            })
-            if trends_base:
-                traffic_baseline = (
-                    sum(float(t.get("value_avg", 0) or 0) for t in trends_base)
-                    / len(trends_base) / 1e6
-                )
-            if trends_recent:
-                traffic_recent = (
-                    sum(float(t.get("value_avg", 0) or 0) for t in trends_recent)
-                    / len(trends_recent) / 1e6
-                )
+            baseline_from, baseline_till, recent_from = _traffic_windows(
+                now, traffic_hours
+            )
+            trends_base, trends_recent = await asyncio.gather(
+                client.call("trend.get", {
+                    "itemids": iids,
+                    "time_from": baseline_from,
+                    "time_till": baseline_till,
+                    "output": ["itemid", "value_avg"],
+                    "limit": len(iids) * _BASELINE_SPAN_HOURS,
+                }),
+                client.call("trend.get", {
+                    "itemids": iids,
+                    "time_from": recent_from,
+                    "output": ["itemid", "value_avg"],
+                    "limit": len(iids) * max(int(traffic_hours), 1),
+                }),
+            )
+            traffic_baseline, traffic_recent = _carrier_traffic_mbps(
+                trends_base, trends_recent
+            )
 
         # Agent ping across the whole box: items may span several VIP records
         # (ADR 049), so pick the freshest reading — a stale sub-host record
