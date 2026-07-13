@@ -114,6 +114,96 @@ def iter_call_select_fields():
                     yield path, node.lineno, method, k.value, fields
 
 
+class TestFleetDataGuard:
+    """ADR 079 — public docs must not carry deployment magnitudes.
+
+    This repo is public; the systems it is operated against are not. Prose can
+    drift into quoting a live estate's scale (host counts, subnet spreads,
+    regional footprints). The pre-push sensitive scan is a *string* deny-list,
+    so numbers and ISO country codes are invisible to it by construction; this
+    guard covers the class the scan cannot see.
+
+    Deliberately scoped to *observed* magnitudes. Configured thresholds and
+    caps ("capped at 50 hosts per call", "fires when >=5 hosts on >=3 distinct
+    /24s") are design facts about this codebase, not descriptions of anyone's
+    estate, and must keep passing.
+    """
+
+    DOCS = [ROOT / "CHANGELOG.md", ROOT / "README.md", ROOT / "CLAUDE.md"]
+
+    def _docs(self):
+        return self.DOCS + sorted((ROOT / "docs" / "adr").glob("*.md"))
+
+    def _iso2(self):
+        from zbbx_mcp.country import CAPITAL_COORDS
+        return {c for c in CAPITAL_COORDS if len(c) == 2}
+
+    PATTERNS = [
+        (re.compile(r"fleet of \d+", re.I), "a real fleet size"),
+        (re.compile(
+            r"\b(returned|ranked|showed|found|reported|analys(?:ed|es)|analyz(?:ed|es))"
+            r"\s+(?:all\s+|one\s+)?\d+\s+(hosts?|servers?|nodes?|clusters?)\b", re.I),
+         "an observed host/server/cluster count"),
+        (re.compile(r"\b\d{3,}\s+(hosts?|servers?|nodes?)\b", re.I),
+         "a fleet-scale host count"),
+        (re.compile(r"\b\d+\s*/24s\b"), "a real subnet-spread count"),
+    ]
+
+    def test_no_real_fleet_magnitudes(self):
+        violations = []
+        for path in self._docs():
+            if not path.exists():
+                continue
+            for n, line in enumerate(path.read_text().splitlines(), 1):
+                for rx, why in self.PATTERNS:
+                    m = rx.search(line)
+                    if m:
+                        violations.append(
+                            f"{path.relative_to(ROOT)}:{n} — {m.group(0)!r} looks like "
+                            f"{why}; keep real fleet magnitudes out of the public repo"
+                        )
+        assert not violations, "\n".join(violations)
+
+    def test_no_country_footprint_lists(self):
+        # Two or more ISO-2 codes in a row ("XX / YY") describes where an estate
+        # actually runs. A lone code is fine — it appears as a parameter.
+        iso2 = self._iso2()
+        seq = re.compile(r"\b([A-Z]{2})\b\s*[/,]\s*\b([A-Z]{2})\b")
+        violations = []
+        for path in self._docs():
+            if not path.exists():
+                continue
+            for n, line in enumerate(path.read_text().splitlines(), 1):
+                for m in seq.finditer(line):
+                    if m.group(1) in iso2 and m.group(2) in iso2:
+                        violations.append(
+                            f"{path.relative_to(ROOT)}:{n} — {m.group(0)!r} discloses "
+                            "the fleet's country footprint"
+                        )
+        assert not violations, "\n".join(violations)
+
+    def test_guard_is_not_vacuous(self):
+        # The guard must actually fire on each banned *shape* (ADR 079). Fixtures
+        # are synthetic by construction: a test that hardcoded real magnitudes
+        # would put into the repo exactly what this guard exists to keep out.
+        shapes = [
+            "`get_at_risk_hosts` ranked all 123 hosts at the same score",
+            "A fleet of 456 servers might quietly",
+            'returned one "wave" of 789 hosts',
+            "12 hosts across 7 /24s, 62% average drop",
+        ]
+        for line in shapes:
+            assert any(rx.search(line) for rx, _ in self.PATTERNS), line
+
+        # Two real ISO-2 codes, taken from the dataset rather than hardcoded —
+        # so the fixture cannot itself disclose a footprint.
+        iso2 = self._iso2()
+        a, b = sorted(iso2)[:2]
+        seq = re.compile(r"\b([A-Z]{2})\b\s*[/,]\s*\b([A-Z]{2})\b")
+        m = seq.search(f"hosts spanning {a} / {b}")
+        assert m and m.group(1) in iso2 and m.group(2) in iso2
+
+
 class TestSelectFieldGuard:
     def test_select_fields_are_legal(self):
         violations = []

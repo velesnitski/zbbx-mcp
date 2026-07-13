@@ -5,6 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.16.12] - 2026-07-13
+
+### Added — docs guard: no deployment magnitudes in public docs
+ADR 079. This repo is public; the systems it is operated against are not.
+Documentation prose can drift into quoting a live estate's operational
+magnitudes (host counts, subnet spreads, regional footprints), and the
+pre-push sensitive scan cannot catch that — it is a *string* deny-list, so
+numbers and ISO country codes are invisible to it by construction.
+
+Added a guard over `docs/adr/*.md`, `CHANGELOG.md`, `README.md` and
+`CLAUDE.md` covering `fleet of <n>`, observed host/server/cluster counts,
+deployment-scale (3+ digit) counts, subnet-spread counts, and regional
+footprints (two or more ISO-2 codes in a row, validated against the repo's own
+ISO-3166 dataset). Configured thresholds and caps are design facts about this
+codebase and keep passing. Documentation now describes scale qualitatively;
+the reasoning in an ADR is what carries its value, and magnitudes were only
+ever illustration. +3 tests, 721 -> 724.
+
 ## [1.16.11] - 2026-07-13
 
 ### Fixed — diagnose traffic: collapsed baseline window + carrier dilution

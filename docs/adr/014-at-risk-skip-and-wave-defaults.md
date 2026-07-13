@@ -8,16 +8,17 @@
 A smoke test of the disruption-detection tools shipped in ADR 013
 surfaced two follow-on issues in their default behaviour:
 
-- **#125** — `get_at_risk_hosts` ranked all hosts in the fleet at the same
-  score `2.26`. Both peer_count and drift were inert in the test
+- **#125** — `get_at_risk_hosts` ranked *every host in the fleet* at an
+  identical score. Both peer_count and drift were inert in the test
   environment (no audit-log rotations, no ping items configured),
   leaving only the age component to fire. Since age caps at 90d for
   every never-rotated host, the rank degenerated to a constant.
-- **#126** — `detect_disruption_wave` returned one "wave" of most of the fleet
-  across most of its /24s at 100% avg drop. That was the fleet-wide overnight
-  ramp-down being misread as a disruption. The defaults (`window_hours=6`,
-  `recent_hours=1`, `drop_pct=30`, no baseline floor) were too tight
-  for any fleet with a normal diurnal cycle.
+- **#126** — `detect_disruption_wave` returned a single "wave" that swept
+  essentially the whole fleet, spread across most of its /24s, at ~100%
+  avg drop. That was the fleet-wide overnight ramp-down being misread as
+  a disruption. The defaults (`window_hours=6`, `recent_hours=1`,
+  `drop_pct=30`, no baseline floor) were too tight for any fleet with a
+  normal diurnal cycle.
 
 Both fixes were pre-validated in the zabbix-reports port; this commit
 keeps the MCP behaviour in sync.

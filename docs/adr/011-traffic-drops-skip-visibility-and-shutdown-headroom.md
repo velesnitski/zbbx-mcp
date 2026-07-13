@@ -11,10 +11,11 @@ turned out to be load-bearing once we started recommending shutdowns:
 1. **`detect_traffic_drops` silently dropped the long tail.** Three skip
    conditions — no trend data, no records older than 24h, baseline
    below a hard-coded `1 Mbps` floor — removed servers from analysis
-   without telling the operator. A large fleet might quietly
-   become "Analyzed far fewer servers"; the skipped remainder were invisible. We
-   could not distinguish "looks healthy across the board" from "we
-   never even checked half of these".
+   without telling the operator. A whole fleet could quietly report
+   "Analyzed N servers" for an N well below its real size, and the
+   skipped remainder was invisible. We could not distinguish "looks
+   healthy across the board" from "we never even checked half of
+   these".
 
 2. **`get_shutdown_candidates` did not tell you whether the shutdown
    was safe.** A server flagged DEAD/IDLE/ZOMBIE/BROKEN got the badge
