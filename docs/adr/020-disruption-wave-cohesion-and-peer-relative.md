@@ -5,12 +5,13 @@
 
 ## Problem
 
-A 2026-05-05 14:25 UTC smoke test of `detect_disruption_wave` fired
-on what looked like a real wave but was actually a diurnal artifact:
-a small cluster of hosts across nearly as many /24s, at a ~60% average drop, hosts spanning several unrelated regions. The fleet has hosts in many time zones, so the 12-hour
-baseline straddles regional peaks for some of them; mid-day UTC
-catches enough of those hosts ≥50% below their own baselines that
-the cluster meets the absolute thresholds.
+A smoke test of `detect_disruption_wave` fired on what looked like a
+real wave but was actually a diurnal artifact: a small cluster of hosts
+spread across nearly as many distinct /24s, at a ~60% average drop, with
+the hosts scattered over several unrelated regions. The fleet has hosts
+in many time zones, so the 12-hour baseline straddles regional peaks for
+some of them; mid-day UTC catches enough of those hosts ≥50% below their
+own baselines that the cluster meets the absolute thresholds.
 
 The `min_subnets` guard added in ADR 014 was meant to reject "all
 in one rack" false positives but actually *requires* the kind of

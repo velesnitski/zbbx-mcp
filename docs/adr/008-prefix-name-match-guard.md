@@ -26,15 +26,16 @@ against the authoritative spreadsheet, Pass 5 silently bound:
   prices). The `startswith` check is satisfied because `srv100` begins with
   `srv10`.
 - Zabbix `web1` → sheet `web14`. Same failure mode.
-- a whole host family — all Zabbix `<prefix>10X` names incorrectly
-  bound to sheet `<prefix>10X0` names. All priced a consistent amount apart because the
-  two series are distinct SKUs at the same provider.
+- A whole host family — every Zabbix `<prefix>10X` name incorrectly bound to
+  a sheet `<prefix>10X0` name. The two series are distinct SKUs at the same
+  provider, so each mis-bind also carried a consistent price error.
 
-A diff simulation before the write showed a change set, of which:
-- Most were this digit-extension false positive.
-- 7 would have overwritten hosts already correctly bound by IP in a prior
-  run (including three hosts fixed in the same session).
-- Only 1 was a legitimate reconciliation.
+A diff simulation before the write showed that the change set was dominated
+by this failure:
+- The large majority were the digit-extension false positive.
+- A further group would have overwritten hosts already correctly bound by IP
+  in a prior run (including hosts fixed in the same session).
+- Only a single change was a legitimate reconciliation.
 
 ## Decision
 

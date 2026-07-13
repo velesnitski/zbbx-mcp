@@ -8,11 +8,11 @@
 A 2026-05-05 smoke test surfaced that two of the active-incident tools
 returned ancient state mixed with current state:
 
-- ``get_outage_clusters`` returned a batch of clusters; only 2 were from the
-  current week. One cluster's earliest event was from 2025-11-13
-  — six months old.
-- ``get_host_floods`` returned a batch of hosts in flood state; one host had
-  ``earliest_clock`` from 2025-11-05.
+- ``get_outage_clusters`` returned a batch of clusters of which only a
+  couple were from the current week; the earliest event in one of them
+  was roughly six months old.
+- ``get_host_floods`` returned a batch of hosts in flood state, one of
+  them carrying an ``earliest_clock`` from months earlier.
 
 Both tools read Zabbix problems with ``recent: True``, which means
 "events that have not been resolved" — not "events that started
