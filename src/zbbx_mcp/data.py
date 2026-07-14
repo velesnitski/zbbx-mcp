@@ -30,6 +30,7 @@ __all__ = [
     "build_value_map", "build_max_map", "build_parent_map",
     "countries_for_region", "group_by_country", "host_ip", "is_hidden_product",
     "resolve_datacenter",
+    "partition_test_hosts", "excluded_test_note",
     "_parse_period", "_resolve",
     "HIDE_PRODUCTS", "TRAFFIC_IN_KEYS", "TRAFFIC_OUT_KEYS", "METRIC_KEYS", "GB_BYTES",
     "REGION_MAP", "CAPITAL_COORDS", "STATUS_ENABLED",
@@ -173,6 +174,45 @@ def collapse_dependent_problems(
             continue
         kept.append(p)
     return kept, collapsed
+
+
+def partition_test_hosts(hosts: list[dict]) -> tuple[list[dict], list[dict]]:
+    """Split ``hosts`` into ``(production, test)`` (ADR 080).
+
+    A test box left inside a production group silently corrupts every fleet
+    verdict it lands in — it drags down uptime, adds phantom service-check
+    failures, and pads "analysed N servers" counts. Splitting rather than
+    filtering is deliberate: the caller must be able to *report* what it
+    dropped (see ``excluded_test_note``). Pure.
+    """
+    from zbbx_mcp.classify import is_test_host
+
+    prod: list[dict] = []
+    test: list[dict] = []
+    for h in hosts:
+        (test if is_test_host(h) else prod).append(h)
+    return prod, test
+
+
+def excluded_test_note(test_hosts: list[dict], max_names: int = 5) -> str:
+    """One-line footer naming the test hosts that were excluded, or "".
+
+    Never drop hosts silently: a skip nobody can see is the exact class of bug
+    ADR 011 was written to kill.
+
+    (Named ``excluded_test_note`` rather than ``excluded_test_note``: pytest
+    collects any imported callable whose name starts with ``test_`` as a test
+    case, so a production helper must not carry that prefix.)
+    """
+    if not test_hosts:
+        return ""
+    names = sorted(str(h.get("host") or h.get("name") or "?") for h in test_hosts)
+    shown = ", ".join(names[:max_names])
+    more = f" (+{len(names) - max_names} more)" if len(names) > max_names else ""
+    return (
+        f"\n\n_{len(names)} test host(s) excluded: {shown}{more} — "
+        "pass `include_test=true` to keep them._"
+    )
 
 
 def filter_suppressed(problems: list[dict], include_suppressed: bool = False) -> list[dict]:
