@@ -48,10 +48,16 @@ kill. (The helper is named `excluded_test_note`, not `test_excluded_note`,
 because pytest collects any imported callable prefixed `test_` as a test case
 — a production helper must not carry that prefix.)
 
-Wired into the tools where a test box demonstrably changes a conclusion:
-`search_items` and `detect_traffic_drops`, each gaining `include_test: bool =
-False`. `search_items` additionally now requests `selectGroups`, without which
-half the signal is unavailable.
+Wired into every tool that renders a fleet-wide verdict: `search_items`,
+`detect_traffic_drops`, `get_service_uptime_report`,
+`get_service_health_matrix`, `get_at_risk_hosts` and `bulk_diagnose` — each
+gaining `include_test: bool = False`. Several now also request `selectGroups`,
+without which half the signal is unavailable.
+
+One exception, deliberately: `bulk_diagnose` drops test boxes only from a
+*scoped* sweep (`group`/`country`). A host named explicitly in `hosts` is
+always diagnosed — naming it *is* the request to look at it, and silently
+returning nothing would be the worst possible answer.
 
 ## Test approach
 
@@ -72,9 +78,6 @@ was dropped and truncates long lists. 724 → 747.
 
 ## Not included
 
-- **The remaining aggregate tools** (uptime/SLA, at-risk, bulk diagnosis).
-  The core is shared and pure, so wiring them is mechanical; this ADR ships the
-  two with a demonstrated distortion rather than a sprawling diff.
 - **Fixing the estate.** The right long-term answer is to put the boxes in the
   test groups (or tag them) rather than leave them in production groups. The
   group half of the rule starts working the day that happens; until then the

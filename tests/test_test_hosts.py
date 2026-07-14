@@ -120,3 +120,33 @@ class TestPartitionAndNote:
         many = [host(f"srv-test-{i}", PROD_GROUP) for i in range(9)]
         note = excluded_test_note(many, max_names=3)
         assert "9 test host(s) excluded" in note and "+6 more" in note
+
+
+class TestBulkDiagnoseHonoursExplicitNames:
+    """ADR 080 — a scoped sweep drops test boxes; an explicitly named host is
+    always diagnosed. Naming a host *is* the request to look at it, and
+    silently returning nothing would be the worst possible answer."""
+
+    def _run(self, **kwargs):
+        from tests.wiretest import RecordingClient, run_tool
+        from zbbx_mcp.tools import diagnose as diagnose_mod
+
+        rec = {"hostid": "1", "host": "edge-test-a1",
+               "groups": [{"name": PROD_GROUP}], "interfaces": []}
+        client = RecordingClient({"host.get": [rec], "hostgroup.get": [{"groupid": "9"}]})
+        out = run_tool(diagnose_mod, "bulk_diagnose", client, **kwargs)
+        return out
+
+    def test_explicit_test_host_is_kept(self):
+        out = self._run(hosts="edge-test-a1")
+        assert "edge-test-a1" in out
+        assert "excluded" not in out
+
+    def test_scoped_sweep_drops_and_reports_it(self):
+        out = self._run(group=PROD_GROUP)
+        assert "1 test host(s) excluded" in out
+        assert "edge-test-a1" in out          # named in the footer, not silent
+
+    def test_scoped_sweep_can_keep_them(self):
+        out = self._run(group=PROD_GROUP, include_test=True)
+        assert "excluded" not in out

@@ -24,8 +24,10 @@ from zbbx_mcp.data import (
     KEY_PING_LOSS,
     KEY_PING_RTT,
     STATUS_ENABLED,
+    excluded_test_note,
     extract_country,
     host_ip,
+    partition_test_hosts,
 )
 from zbbx_mcp.resolver import InstanceResolver
 from zbbx_mcp.tools.correlation import subnet24
@@ -144,6 +146,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
             window_days: int = 7,
             ping_window_days: int = 14,
             top: int = 30,
+            include_test: bool = False,
             instance: str = "",
         ) -> str:
             """Rank hosts by likelihood of disruption in the next 24h.
@@ -162,14 +165,18 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 client = resolver.resolve(instance)
                 hosts = await client.call("host.get", {
                     "output": ["hostid", "host"],
+                    "selectGroups": ["name"],   # half the test-host signal (ADR 080)
                     "selectInterfaces": ["ip"],
                     "filter": {"status": STATUS_ENABLED},
                 })
+                excluded: list[dict] = []
+                if not include_test:
+                    hosts, excluded = partition_test_hosts(hosts)
                 if country:
                     cc = country.upper()
                     hosts = [h for h in hosts if extract_country(h.get("host", "")) == cc]
                 if not hosts:
-                    return "No matching hosts."
+                    return "No matching hosts." + excluded_test_note(excluded)
 
                 hostids = [h["hostid"] for h in hosts]
                 host_map = {h["hostid"]: h for h in hosts}
@@ -299,7 +306,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     )
                 if len(rows) > top:
                     lines.append(f"\n*{len(rows) - top} more omitted*")
-                return "\n".join(lines)
+                return "\n".join(lines) + excluded_test_note(excluded)
             except (httpx.HTTPError, ValueError) as e:
                 return f"Error: {e}"
 
