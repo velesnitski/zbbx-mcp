@@ -18,6 +18,7 @@ from zbbx_mcp.data import (
     KEY_service_TERTIARY,
     build_value_map,
     canonical_host_name,
+    excluded_test_note,
     extract_country,
     fetch_cpu_map,
     fetch_enabled_hosts,
@@ -25,6 +26,7 @@ from zbbx_mcp.data import (
     fold_rows_by_canonical_host,
     group_by_country,
     host_ip,
+    partition_test_hosts,
 )
 from zbbx_mcp.resolver import InstanceResolver
 from zbbx_mcp.uptime import compute_host_uptime, coverage_note
@@ -42,6 +44,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
             only_problems: bool = True,
             max_results: int = 50,
             period: str = "30d",
+            include_test: bool = False,
             instance: str = "",
         ) -> str:
             """Service uptime per server — uptime % over a period.
@@ -53,6 +56,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 only_problems: Only DOWN/DEGRADED servers (default: True)
                 max_results: Max servers (default: 50)
                 period: Analysis period (default: 30d)
+                include_test: Keep test/staging hosts (default: False)
                 instance: Zabbix instance (optional)
             """
             try:
@@ -63,6 +67,9 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     "selectGroups": ["name"],
                     "filter": {"status": "0"},
                 })
+                excluded: list[dict] = []
+                if not include_test:
+                    hosts, excluded = partition_test_hosts(hosts)
 
                 exclude_set = {p.strip().lower() for p in exclude_product.split(",") if p.strip()} if exclude_product else set()
                 filtered = []
@@ -230,7 +237,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                         parts.append(f"| {ctry} | {len(cs)} | {avg_x} | {down} |")
 
                 parts.append(coverage_note(min_clock, _now, now - time_from))
-                return "\n".join(p for p in parts if p)
+                return "\n".join(p for p in parts if p) + excluded_test_note(excluded)
             except (httpx.HTTPError, ValueError) as e:
                 return f"Error: {e}"
 
@@ -239,6 +246,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
         @mcp.tool()
         async def get_service_health_matrix(
             min_servers: int = 2,
+            include_test: bool = False,
             instance: str = "",
         ) -> str:
             """Service health status matrix by country.
@@ -252,8 +260,12 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
 
                 hosts = await client.call("host.get", {
                     "output": ["hostid", "host"],
+                    "selectGroups": ["name"],   # half the test-host signal (ADR 080)
                     "filter": {"status": "0"},
                 })
+                excluded: list[dict] = []
+                if not include_test:
+                    hosts, excluded = partition_test_hosts(hosts)
 
                 countries: dict[str, list[dict]] = {}
                 for h in hosts:
@@ -389,7 +401,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
 
                     parts.append(f"| {ctry} | {total} | {x_s} | {k_s} | {o_s} | {rec} |")
 
-                return "\n".join(parts)
+                return "\n".join(parts) + excluded_test_note(excluded)
             except (httpx.HTTPError, ValueError) as e:
                 return f"Error: {e}"
 

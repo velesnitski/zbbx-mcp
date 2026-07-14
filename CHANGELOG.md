@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.16.14] - 2026-07-14
+
+### Added — test-host exclusion wired into the remaining fleet verdicts
+ADR 080 (completing v1.16.13). `get_service_uptime_report`,
+`get_service_health_matrix`, `get_at_risk_hosts` and `bulk_diagnose` now also
+exclude test/staging hosts by default, each gaining `include_test: bool =
+False`; several now request `selectGroups`, without which half the detection
+signal is unavailable. Every one of them names the hosts it dropped rather
+than dropping them in silence.
+
+One deliberate exception: `bulk_diagnose` drops test boxes only from a *scoped*
+sweep (`group`/`country`). A host named explicitly in `hosts` is always
+diagnosed -- naming it is the request to look at it, and silently returning
+nothing would be the worst possible answer. Tool count unchanged (163).
++3 tests, 747 -> 750.
+
 ## [1.16.13] - 2026-07-14
 
 ### Added — test/staging hosts excluded from fleet verdicts

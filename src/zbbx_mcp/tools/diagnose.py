@@ -27,8 +27,10 @@ from zbbx_mcp.country import resolve_country
 from zbbx_mcp.data import (
     STATUS_ENABLED,
     canonical_host_name,
+    excluded_test_note,
     filter_suppressed,
     host_ip,
+    partition_test_hosts,
 )
 from zbbx_mcp.fetch import is_physical_traffic_in_key
 from zbbx_mcp.formatters import format_age, format_severity
@@ -800,6 +802,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
             problem_hours: int = 24,
             max_hosts: int = 20,
             include_suppressed: bool = False,
+            include_test: bool = False,
             instance: str = "",
         ) -> str:
             """Run diagnose_host across a target set; return one row per host.
@@ -822,6 +825,10 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 max_hosts: Safety cap on fan-out (default: 20, max: 50)
                 include_suppressed: Count maintenance-suppressed problems
                     (default: False)
+                include_test: Keep test/staging hosts when the target set comes
+                    from `group`/`country` (default: False). Hosts named
+                    explicitly in `hosts` are never dropped — naming one is
+                    itself the request to diagnose it.
                 instance: Zabbix instance name (optional)
             """
             host_list = [
@@ -840,13 +847,20 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     group=group, country=country,
                     max_hosts=cap,
                 )
-                return await _run_bulk_diagnosis(
+                # Only a *scoped* sweep (group/country) drops test boxes. An
+                # explicitly named host is always diagnosed — asking for it by
+                # name is the request.
+                excluded: list[dict] = []
+                if not include_test and not host_list:
+                    records, excluded = partition_test_hosts(records)
+                out = await _run_bulk_diagnosis(
                     client, records,
                     traffic_hours=traffic_hours,
                     problem_hours=problem_hours,
                     rotation_days=0,  # skip auditlog for speed in bulk
                     include_suppressed=include_suppressed,
                 )
+                return out + excluded_test_note(excluded)
             except (httpx.HTTPError, ValueError) as e:
                 return f"Error: {e}"
 
