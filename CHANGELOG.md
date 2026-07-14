@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.16.15] - 2026-07-14
+
+### Fixed — per-hour traffic gate + test-pattern gaps
+ADR 081. (1) The uptime traffic gate (ADR 075) was a window-wide boolean, so
+a host that served for a week and then hard-died mid-window read ~100%
+instead of ~50% — the task-168 inflation through the side door.
+`compute_host_uptime` now takes a set of traffic hour buckets (built by the
+new `traffic_hours_from_trends` from physical-NIC trends over the same
+window); a missing check-hour is rescued only if THAT hour had traffic.
+(2) The ADR 080 test pattern missed dot separators (`a.test.b`) and numbered
+test boxes (`x-test2-y`) that the sibling pipeline excludes — default is now
+`(?:^|[-_.\s])test\d*(?:[-_.\s]|$)`. Tool count unchanged (163).
++9 tests, 750 -> 759.
+
 ## [1.16.14] - 2026-07-14
 
 ### Added — test-host exclusion wired into the remaining fleet verdicts
