@@ -8,9 +8,60 @@ from __future__ import annotations
 import ipaddress
 import json
 import os
+import re
 
-__all__ = ["classify_host", "detect_provider", "resolve_datacenter", "PROVIDER_CIDRS"]
+__all__ = [
+    "classify_host", "detect_provider", "resolve_datacenter", "PROVIDER_CIDRS",
+    "is_test_host",
+]
 
+
+# --- Test/staging host detection (ADR 080) -------------------------------
+# A fleet's non-production boxes are identifiable two ways, and BOTH must be
+# honoured because neither is reliable alone:
+#
+#   * the host name  (`<x>-test-<y>`, `test-<x>`, `<x>-test`)
+#   * a group name   (`prem_test`, `free_test`, `PROD test hosts`)
+#
+# Group membership alone is not enough: a test box is routinely left sitting in
+# a *production* group, so a group check would miss it entirely. Name alone is
+# not enough either: a box may be correctly grouped but blandly named. The rule
+# is therefore the union of the two, with the *same* pattern applied to each.
+#
+# Token-bounded on purpose — a bare "test" substring would also swallow
+# `latest`, `contest`, `fastest`, `attestation`. Separators include whitespace
+# because group names use spaces. Override with ZABBIX_TEST_NAME_RE.
+_TEST_RE_DEFAULT = r"(?:^|[-_\s])test(?:[-_\s]|$)"
+_TEST_RE: re.Pattern[str] | None = None
+
+
+def _test_re() -> re.Pattern[str]:
+    global _TEST_RE
+    if _TEST_RE is None:
+        raw = os.environ.get("ZABBIX_TEST_NAME_RE", "").strip() or _TEST_RE_DEFAULT
+        try:
+            _TEST_RE = re.compile(raw, re.IGNORECASE)
+        except re.error:
+            _TEST_RE = re.compile(_TEST_RE_DEFAULT, re.IGNORECASE)
+    return _TEST_RE
+
+
+def is_test_host(host: dict) -> bool:
+    """True if ``host`` is a test/staging box rather than production.
+
+    Checks the host name **and** every group name against the same pattern
+    (see above for why both are needed). ``host`` is a Zabbix host record;
+    groups may be ``[{"name": ...}]`` or plain strings. Pure.
+    """
+    rx = _test_re()
+    name = str(host.get("host") or host.get("name") or "")
+    if name and rx.search(name):
+        return True
+    for g in host.get("groups") or []:
+        gname = g.get("name", "") if isinstance(g, dict) else str(g)
+        if gname and rx.search(gname):
+            return True
+    return False
 
 
 _SKIP_GROUPS = {

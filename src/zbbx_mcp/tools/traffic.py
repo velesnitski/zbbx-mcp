@@ -461,6 +461,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
             recent_hours: int = 6,
             seasonal: bool = True,
             max_results: int = 50,
+            include_test: bool = False,
             instance: str = "",
         ) -> str:
             """Detect servers where traffic dropped, distinguishing real blocks
@@ -486,9 +487,14 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 seasonal: Judge against the same-hour-of-day band (default: True);
                     set False to fall back to plain baseline-ratio (lower confidence)
                 max_results: Max results (default: 50)
+                include_test: Keep test/staging hosts (default: False — a test
+                    box left in a production group otherwise pads the analysed
+                    count and can fake a drop)
                 instance: Zabbix instance (optional)
             """
             try:
+                from zbbx_mcp.data import excluded_test_note, partition_test_hosts
+
                 client = resolver.resolve(instance)
 
                 # Get hosts
@@ -498,6 +504,9 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     "selectInterfaces": ["ip"],
                     "filter": {"status": "0"},
                 })
+                excluded: list[dict] = []
+                if not include_test:
+                    hosts, excluded = partition_test_hosts(hosts)
                 host_map = {h["hostid"]: h for h in hosts}
 
                 # Filter
@@ -517,7 +526,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     filtered_ids.append(h["hostid"])
 
                 if not filtered_ids:
-                    return "No servers match the filter."
+                    return "No servers match the filter." + excluded_test_note(excluded)
 
                 # Get traffic interface items + current value. A host can have
                 # dozens of interfaces (primary + many idle svc/tun/ppp);
@@ -759,6 +768,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                         f"{skips['low_demand']} low-demand-not-blocked, "
                         f"{skips['below_floor'] + skips['no_baseline_window'] + skips['no_history']} "
                         "skipped for insufficient/low baseline)."
+                        + excluded_test_note(excluded)
                     )
 
                 acute = sum(1 for d in flagged if d["state"] == BLOCKED_ACUTE)
@@ -779,6 +789,6 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                         f"**{d['drop_pct']:.0f}%** | {d['reason']} |"
                     )
 
-                return "\n".join(parts)
+                return "\n".join(parts) + excluded_test_note(excluded)
             except (httpx.HTTPError, ValueError) as e:
                 return f"Error: {e}"

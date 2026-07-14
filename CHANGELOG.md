@@ -5,6 +5,30 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.16.13] - 2026-07-14
+
+### Added — test/staging hosts excluded from fleet verdicts
+ADR 080. Non-production boxes were monitored alongside production ones with
+nothing to tell them apart, so a test box landed in every fleet-wide verdict it
+was scoped into: padding "analysed N servers" counts, adding phantom failures
+to protocol sweeps, and dragging on uptime aggregates.
+
+Classifying by host group does not work here: the test boxes are full members
+of **production** groups while the instance's test groups go unused — a group
+check would miss exactly the hosts that cause the damage. A bare `"test" in
+name` substring is wrong too; it swallows `latest`, `contest`, `fastest`.
+
+New pure `is_test_host()` applies one **token-bounded** pattern to the host
+name **and** to every group name, taking the union — neither signal is reliable
+alone. The separator class includes whitespace (group names use spaces where
+host names use dashes). Overridable via `ZABBIX_TEST_NAME_RE`; an invalid regex
+falls back to the default rather than crashing.
+
+`partition_test_hosts()` splits rather than filters, and `excluded_test_note()`
+names what was dropped — an invisible skip is the class of bug ADR 011 exists
+to kill. Wired into `search_items` and `detect_traffic_drops`, both gaining
+`include_test: bool = False`. Tool count unchanged (163). +23 tests, 724 -> 747.
+
 ## [1.16.12] - 2026-07-13
 
 ### Added — docs guard: no deployment magnitudes in public docs

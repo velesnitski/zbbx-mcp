@@ -272,6 +272,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
             group: str = "",
             country: str = "",
             max_results: int = 30,
+            include_test: bool = False,
             instance: str = "",
         ) -> str:
             """Search items across ALL hosts by name or key pattern.
@@ -281,14 +282,26 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 group: Filter by host group name (optional)
                 country: Filter by country code (optional)
                 max_results: Maximum results (default: 30)
+                include_test: Keep test/staging hosts (default: False — they
+                    otherwise show up as phantom failures in fleet-wide sweeps)
                 instance: Zabbix instance name (optional)
             """
             try:
                 client = resolver.resolve(instance)
-                from zbbx_mcp.data import extract_country
+                from zbbx_mcp.data import (
+                    excluded_test_note,
+                    extract_country,
+                    partition_test_hosts,
+                )
 
-                # Build host filter
-                host_params: dict = {"output": ["hostid", "host"], "filter": {"status": "0"}}
+                # Build host filter. selectGroups is required for the test-host
+                # check: a test box is routinely left in a production group, so
+                # the group name is half the signal (ADR 080).
+                host_params: dict = {
+                    "output": ["hostid", "host"],
+                    "selectGroups": ["name"],
+                    "filter": {"status": "0"},
+                }
                 if group:
                     groups = await client.call("hostgroup.get", {
                         "output": ["groupid"], "filter": {"name": [group]},
@@ -302,8 +315,12 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 if country:
                     hosts = [h for h in hosts if extract_country(h["host"]).lower() == country.lower()]
 
+                excluded: list[dict] = []
+                if not include_test:
+                    hosts, excluded = partition_test_hosts(hosts)
+
                 if not hosts:
-                    return "No hosts match the filter."
+                    return "No hosts match the filter." + excluded_test_note(excluded)
 
                 hids = [h["hostid"] for h in hosts]
                 host_map = {h["hostid"]: h["host"] for h in hosts}
@@ -321,7 +338,10 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 })
 
                 if not items:
-                    return f"No items matching '{search}' found across {len(hosts)} hosts."
+                    return (
+                        f"No items matching '{search}' found across {len(hosts)} hosts."
+                        + excluded_test_note(excluded)
+                    )
 
                 lines = []
                 for item in items:
@@ -336,7 +356,10 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 if total >= max_results:
                     header += f" (limit {max_results})"
                 table = "| Host | Item | Key | Value |\n|------|------|-----|-------|\n"
-                return f"{header}\n\n{table}" + "\n".join(lines)
+                return (
+                    f"{header}\n\n{table}" + "\n".join(lines)
+                    + excluded_test_note(excluded)
+                )
             except (httpx.HTTPError, ValueError) as e:
                 return f"Error: {e}"
 
