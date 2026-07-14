@@ -150,3 +150,23 @@ class TestBulkDiagnoseHonoursExplicitNames:
     def test_scoped_sweep_can_keep_them(self):
         out = self._run(group=PROD_GROUP, include_test=True)
         assert "excluded" not in out
+
+
+class TestPatternGaps081:
+    """ADR 081: dot separators and numbered test boxes must match — the
+    sibling reporting pipeline already excluded both (determinism)."""
+
+    def test_numbered_test_segment_matches(self):
+        from zbbx_mcp.classify import is_test_host
+        assert is_test_host({"host": "alpha-test2-beta"})
+        assert is_test_host({"host": "test3-alpha"})
+
+    def test_dot_separated_matches(self):
+        from zbbx_mcp.classify import is_test_host
+        assert is_test_host({"host": "alpha.test.example"})
+
+    def test_lookalikes_still_pass(self):
+        from zbbx_mcp.classify import is_test_host
+        for name in ("alpha-latest", "contest-1", "attestation-svc",
+                     "testing-ground", "smartest-node"):
+            assert not is_test_host({"host": name}), name

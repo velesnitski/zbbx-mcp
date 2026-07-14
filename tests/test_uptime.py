@@ -80,3 +80,56 @@ class TestRetentionTooShort:
 
     def test_no_data_is_false(self):
         assert retention_too_short(None, NOW, WINDOW) is False
+
+
+class TestPerHourTrafficGate:
+    """Task 172 / ADR 081: the traffic gate is per hour, not window-wide."""
+
+    def test_served_then_died_reads_half_not_full(self):
+        # The task-172 pin: checks + traffic for week 1, NOTHING in week 2.
+        # The window-wide boolean read this ~100% (early traffic rescued the
+        # dead tail); the per-hour gate must read ~50%.
+        first = NOW - 14 * 24 * HOUR
+        rows = [(first + h * HOUR, "1") for h in range(0, 7 * 24)]
+        hours = {(first + h * HOUR) // HOUR for h in range(0, 7 * 24)}
+        up, total = compute_host_uptime(rows, NOW, START, host_has_traffic=hours)
+        assert total == 14 * 24 + 1
+        assert abs(up / total - 0.5) < 0.01
+        # regression contrast: legacy bool inflates the same host to 100%
+        up_b, total_b = compute_host_uptime(rows, NOW, START, host_has_traffic=True)
+        assert up_b == total_b
+
+    def test_rescues_only_hours_with_traffic(self):
+        # One old sample, silent since; traffic in exactly 3 later hours.
+        rows = [(NOW - 10 * HOUR, "1")]
+        hours = {(NOW - 5 * HOUR) // HOUR, (NOW - 4 * HOUR) // HOUR,
+                 (NOW - 3 * HOUR) // HOUR}
+        up, total = compute_host_uptime(rows, NOW, START, host_has_traffic=hours)
+        assert total == 11 and up == 1 + 3   # the sample + the 3 traffic hours
+
+    def test_empty_set_means_no_rescue(self):
+        rows = [(NOW - 10 * HOUR, "1")]
+        up, total = compute_host_uptime(rows, NOW, START, host_has_traffic=set())
+        assert total == 11 and up == 1
+
+    def test_traffic_hour_does_not_override_explicit_down(self):
+        rows = [(NOW - 1 * HOUR, "0"), (NOW, "0")]
+        hours = {(NOW - 1 * HOUR) // HOUR, NOW // HOUR}
+        up, total = compute_host_uptime(rows, NOW, START, host_has_traffic=hours)
+        assert up == 0 and total == 2
+
+
+class TestTrafficHoursFromTrends:
+    def test_threshold_and_bucketing(self):
+        from zbbx_mcp.uptime import traffic_hours_from_trends
+        rows = [(NOW - 2 * HOUR, "5000000"),   # 5 Mbps (bits divisor) -> counts
+                (NOW - 1 * HOUR, "200000"),    # 0.2 Mbps -> below the bar
+                (NOW, "1000000")]              # exactly 1 Mbps -> counts
+        hours = traffic_hours_from_trends(rows, 1_000_000)
+        assert hours == {(NOW - 2 * HOUR) // HOUR, NOW // HOUR}
+
+    def test_any_nic_clears_the_bar_and_bad_rows_skipped(self):
+        from zbbx_mcp.uptime import traffic_hours_from_trends
+        rows = [(NOW, "0"), (NOW, "9000000"),          # idle + busy NIC same hour
+                ("bad", "1"), (NOW - 1 * HOUR, None)]  # junk skipped
+        assert traffic_hours_from_trends(rows, 1_000_000) == {NOW // HOUR}

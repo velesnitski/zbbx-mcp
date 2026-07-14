@@ -30,8 +30,12 @@ __all__ = [
 #
 # Token-bounded on purpose — a bare "test" substring would also swallow
 # `latest`, `contest`, `fastest`, `attestation`. Separators include whitespace
-# because group names use spaces. Override with ZABBIX_TEST_NAME_RE.
-_TEST_RE_DEFAULT = r"(?:^|[-_\s])test(?:[-_\s]|$)"
+# (group names use spaces) and dots (FQDN-style names), and the token accepts
+# trailing digits: numbered test boxes (`x-test2-y`) are still test boxes.
+# Without those two, `x-test2-y` and `a.test.b` passed as production here
+# while the sibling reporting pipeline excluded them — a determinism split
+# (ADR 081). Override with ZABBIX_TEST_NAME_RE.
+_TEST_RE_DEFAULT = r"(?:^|[-_.\s])test\d*(?:[-_.\s]|$)"
 _TEST_RE: re.Pattern[str] | None = None
 
 

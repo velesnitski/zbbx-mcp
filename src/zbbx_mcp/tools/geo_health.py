@@ -28,8 +28,14 @@ from zbbx_mcp.data import (
     host_ip,
     partition_test_hosts,
 )
+from zbbx_mcp.fetch import TRAFFIC_DIVISOR, is_physical_traffic_in_key
 from zbbx_mcp.resolver import InstanceResolver
-from zbbx_mcp.uptime import compute_host_uptime, coverage_note
+from zbbx_mcp.uptime import compute_host_uptime, coverage_note, traffic_hours_from_trends
+
+
+async def _noop_list() -> list:
+    """Awaitable empty result for asyncio.gather branches with nothing to fetch."""
+    return []
 
 
 def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> None:
@@ -115,16 +121,48 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
 
                 # Fetch trends (with clock, for hourly bucketing) + per-host
                 # traffic for the deprecated-check false-down guard (task 169).
+                # The traffic gate is PER HOUR (task 172/ADR 081): NIC trends
+                # over the same window, not a window-wide boolean — a boolean
+                # rescued every silent hour, so a host that served for a week
+                # and then hard-died read ~100% instead of ~50%.
                 item_ids = [i["itemid"] for i in service_items]
-                trends, traffic_map = await asyncio.gather(
+                traffic_items = await client.call("item.get", {
+                    "hostids": hostids,
+                    "output": ["itemid", "hostid", "key_"],
+                    "search": {"key_": "net.if.in["},
+                    "searchWildcardsEnabled": True,
+                    "filter": {"status": "0"},
+                })
+                traffic_item_host = {
+                    i["itemid"]: i["hostid"] for i in traffic_items
+                    if is_physical_traffic_in_key(i.get("key_", ""))
+                }
+                trends, traffic_trends, traffic_map = await asyncio.gather(
                     client.call("trend.get", {
                         "itemids": item_ids,
                         "time_from": time_from,
                         "output": ["itemid", "clock", "value_avg"],
                         "limit": len(item_ids) * 24 * 31,
                     }),
+                    client.call("trend.get", {
+                        "itemids": list(traffic_item_host),
+                        "time_from": time_from,
+                        "output": ["itemid", "clock", "value_avg"],
+                        "limit": len(traffic_item_host) * 24 * 31,
+                    }) if traffic_item_host else _noop_list(),
                     fetch_traffic_map(client, hostids),
                 )
+                traffic_rows_by: dict[str, list] = {}
+                for t in traffic_trends:
+                    hid = traffic_item_host.get(t.get("itemid"))
+                    if hid:
+                        traffic_rows_by.setdefault(hid, []).append(
+                            (t.get("clock"), t.get("value_avg"))
+                        )
+                traffic_hours = {
+                    hid: traffic_hours_from_trends(rows, TRAFFIC_DIVISOR)
+                    for hid, rows in traffic_rows_by.items()
+                }
 
                 # Map itemid -> (hostid, protocol)
                 item_info: dict[str, tuple[str, str]] = {}
@@ -152,12 +190,17 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                         pass
 
                 # Time-honest uptime per host per protocol (ADR 075).
+                # Per-hour traffic gate when NIC trends exist for the host;
+                # legacy window-wide boolean only as fallback for hosts with
+                # no physical-NIC trend rows at all (ADR 081, task 172).
                 host_uptime: dict[str, dict[str, dict]] = {}
                 for hid, protos in rows_by.items():
-                    has_traffic = traffic_map.get(hid, 0) >= 1.0
+                    gate = traffic_hours.get(hid)
+                    if gate is None:
+                        gate = traffic_map.get(hid, 0) >= 1.0
                     for proto, rows in protos.items():
                         up, total = compute_host_uptime(
-                            rows, _now, time_from, has_traffic
+                            rows, _now, time_from, gate
                         )
                         host_uptime.setdefault(hid, {})[proto] = {
                             "up": up, "total": total,

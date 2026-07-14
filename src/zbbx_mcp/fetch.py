@@ -44,6 +44,9 @@ from zbbx_mcp.excel import BW_MAX, classify_bandwidth
 # Traffic unit: bits/sec (default) or bytes/sec — configurable per deployment
 _TRAFFIC_BYTES = os.environ.get("ZABBIX_TRAFFIC_UNIT", "").lower() == "bytes"
 _TRAFFIC_DIVISOR = 8_000_000 if _TRAFFIC_BYTES else 1_000_000  # raw → Mbps
+# Public alias — cross-module consumers (uptime traffic gate, ADR 081) must
+# share the same raw→Mbps convention rather than re-deriving it.
+TRAFFIC_DIVISOR = _TRAFFIC_DIVISOR
 
 
 async def fetch_enabled_hosts(
