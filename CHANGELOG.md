@@ -5,6 +5,26 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.16.16] - 2026-07-17
+
+### Security — bump `mcp` for CVE-2026-52869 (HTTP transport principal check)
+ADR 082. CVE-2026-52869 / GHSA-jpw9-pfvf-9f58 (High): the MCP Python SDK's HTTP
+transports (SSE, streamable-HTTP) served session requests without verifying the
+authenticated principal. Affected `mcp <= 1.27.1`, fixed in 1.27.2.
+
+The server defaults to stdio (not affected), but it also exposes
+`--transport sse` and `--transport streamable-http`, so any operator running an
+HTTP transport was exposed. Worse, our own pin `<1.26.0` (dating to v0.2.0) was
+actively blocking the patched release — an over-tight cap that had become a
+security liability.
+
+Raised the constraint to `mcp>=1.27.2,<1.28.0` and re-locked (1.25.0 -> 1.27.2).
+The bump crosses two minors and we depend on FastMCP internals (the
+compression/logging layer walks `_tool_manager._tools` and rebinds `tool.fn`),
+so the risk was compatibility: verified that surface still holds under 1.27.2,
+and the subprocess JSON-RPC handshake test exercises the real dispatch path.
+Tool count unchanged (163); suite unchanged at 759.
+
 ## [1.16.15] - 2026-07-14
 
 ### Fixed — per-hour traffic gate + test-pattern gaps
