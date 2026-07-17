@@ -5,6 +5,29 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.16.17] - 2026-07-17
+
+### Security — mcp 1.28.1 + click 8.4.2 (second CVE round), and a cap fix
+ADR 083. Auditing the lockfile right after ADR 082 surfaced two more advisories
+plus a self-inflicted one:
+
+- **CVE-2026-59950 (High)** — mcp's deprecated WebSocket transport accepted the
+  handshake with no Host/Origin validation (fixed 1.28.1). We are **not
+  exploitable** (that transport is not reachable through FastMCP and we never
+  wire it up), but the vulnerable code shipped in the pinned version.
+- **PYSEC-2026-2132 (High)** — command injection in `click.edit()` (transitive
+  via uvicorn, fixed 8.3.3). We do not call it, but the version was in the tree.
+- **ADR 082's own cap blocked the fix.** Its `mcp>=1.27.2,<1.28.0` bound
+  excluded 1.28.1 within the hour -- the exact over-tight-cap anti-pattern that
+  ADR warned about.
+
+Raised the constraint to `mcp>=1.28.1,<2.0.0` (1.28.1 clears both mcp CVEs; the
+bound is widened to the major boundary so a future 1.x security patch is not
+blocked by us again -- safe because our only private-API coupling degrades
+gracefully and the subprocess handshake test gates real breaks). Bumped click
+to 8.4.2 lockfile-only. A pip-audit over the re-locked tree now reports no known
+vulnerabilities. Tool count unchanged (163); suite unchanged at 759.
+
 ## [1.16.16] - 2026-07-17
 
 ### Security — bump `mcp` for CVE-2026-52869 (HTTP transport principal check)
