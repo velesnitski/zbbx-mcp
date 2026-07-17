@@ -5,6 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.16.18] - 2026-07-17
+
+### Fixed — stdio-shutdown race in the server subprocess test (CI-only)
+ADR 084. After the mcp 1.28.1 bump (ADR 083), CI failed on
+`test_server.py::test_tools_list` — but only in CI, and only on 1.28.1; locally
+it passed every time including ten back-to-back runs. The harness batch-wrote
+the JSON-RPC messages and closed stdin immediately (`subprocess.run(input=...)`),
+so the server saw `initialize`, `notifications/initialized`, `tools/list` and
+then EOF at once. The hardened SDK tears the stdio session down on EOF, and that
+teardown raced the pending `tools/list` handler: the handler won on a fast local
+machine, the shutdown won on a slow/loaded CI runner.
+
+The server was correct; the harness was not. `_run_jsonrpc` now spawns the
+server with `Popen`, drains stdout on a reader thread, and holds stdin **open**
+until every request id has a matching response before closing it — so the
+EOF-driven shutdown has nothing left to race. `stderr` goes to `DEVNULL` to
+avoid a full-pipe deadlock. Test-only change; suite unchanged at 759.
+
 ## [1.16.17] - 2026-07-17
 
 ### Security — mcp 1.28.1 + click 8.4.2 (second CVE round), and a cap fix
