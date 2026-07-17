@@ -2,35 +2,83 @@ import json
 import os
 import subprocess
 import sys
+import threading
+import time
 
 
 class TestServerStartup:
     def _run_jsonrpc(self, *messages, timeout=15):
-        """Send JSON-RPC messages to the server via stdio and return responses."""
-        input_data = "\n".join(json.dumps(m) for m in messages) + "\n"
+        """Send JSON-RPC messages over stdio and return the parsed responses.
 
+        stdin is held **open** until every request (a message carrying an
+        ``id``) has a matching response, and only then closed. The old approach
+        batch-wrote the messages and closed stdin immediately
+        (``subprocess.run(input=...)``), which raced the stdio server's
+        EOF-triggered shutdown: under the hardened MCP SDK the session could
+        tear down before answering the last queued request, so `tools/list`
+        went unanswered — deterministically on a slow/loaded CI runner while
+        passing on a fast local machine.
+        """
         env = os.environ.copy()
         env["ZABBIX_URL"] = "https://test.zabbix.example.com"
         env["ZABBIX_TOKEN"] = "test-token"
 
-        result = subprocess.run(
+        proc = subprocess.Popen(
             [sys.executable, "-m", "zbbx_mcp.server"],
-            input=input_data,
-            capture_output=True,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,  # avoid a full-pipe deadlock; tests read stdout only
             text=True,
-            timeout=timeout,
             env=env,
         )
-        # Parse responses (one per line)
-        responses = []
-        for line in result.stdout.strip().split("\n"):
-            line = line.strip()
-            if line:
+
+        responses: list[dict] = []
+        lock = threading.Lock()
+
+        def _reader():
+            for line in proc.stdout:  # ends when stdout closes on process exit
+                line = line.strip()
+                if not line:
+                    continue
                 try:
-                    responses.append(json.loads(line))
+                    obj = json.loads(line)
                 except json.JSONDecodeError:
-                    pass
-        return responses
+                    continue
+                with lock:
+                    responses.append(obj)
+
+        reader = threading.Thread(target=_reader, daemon=True)
+        reader.start()
+
+        want_ids = {m["id"] for m in messages if "id" in m}
+        try:
+            for m in messages:
+                proc.stdin.write(json.dumps(m) + "\n")
+            proc.stdin.flush()
+
+            deadline = time.monotonic() + timeout
+            while time.monotonic() < deadline:
+                with lock:
+                    if want_ids.issubset({r.get("id") for r in responses}):
+                        break
+                time.sleep(0.02)
+        finally:
+            try:
+                proc.stdin.close()
+            except OSError:
+                pass
+            try:
+                proc.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                proc.terminate()
+                try:
+                    proc.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    proc.kill()
+            reader.join(timeout=2)
+
+        with lock:
+            return list(responses)
 
     def test_initialize(self):
         responses = self._run_jsonrpc({
