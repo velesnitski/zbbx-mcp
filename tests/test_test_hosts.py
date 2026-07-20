@@ -170,3 +170,65 @@ class TestPatternGaps081:
         for name in ("alpha-latest", "contest-1", "attestation-svc",
                      "testing-ground", "smartest-node"):
             assert not is_test_host({"host": name}), name
+
+
+class TestFetchEnabledHostsSeam:
+    """ADR 089 — the shared exclude_test seam on fetch_enabled_hosts."""
+
+    def _hosts(self):
+        return [
+            {"hostid": "1", "host": "edge-a1", "groups": [{"name": "edge"}]},
+            {"hostid": "2", "host": "edge-test-a1", "groups": [{"name": "edge"}]},
+        ]
+
+    def test_exclude_test_filters_and_forces_groups(self):
+        import asyncio
+
+        from tests.wiretest import RecordingClient
+        from zbbx_mcp.fetch import fetch_enabled_hosts
+
+        client = RecordingClient({"host.get": self._hosts()})
+        kept = asyncio.run(fetch_enabled_hosts(client, exclude_test=True))
+        assert [h["host"] for h in kept] == ["edge-a1"]   # test box dropped
+        # groups are forced on (the group name is half the signal)
+        assert client.sent("host.get").get("selectGroups") == ["name"]
+
+    def test_default_keeps_everything(self):
+        import asyncio
+
+        from tests.wiretest import RecordingClient
+        from zbbx_mcp.fetch import fetch_enabled_hosts
+
+        client = RecordingClient({"host.get": self._hosts()})
+        kept = asyncio.run(fetch_enabled_hosts(client))
+        assert len(kept) == 2
+
+
+class TestDetectTrafficAnomaliesExcludesTest:
+    """ADR 089 — detect_traffic_anomalies (sibling of the already-fixed
+    detect_traffic_drops) now excludes test boxes and names them."""
+
+    def test_test_host_excluded_and_named(self):
+        from tests.wiretest import RecordingClient, run_tool
+        from zbbx_mcp.tools import traffic as traffic_mod
+
+        hosts = [
+            {"hostid": "1", "host": "edge-a1", "groups": [{"name": "edge"}],
+             "interfaces": [{"ip": "10.0.0.1"}]},
+            {"hostid": "2", "host": "edge-test-a1", "groups": [{"name": "edge"}],
+             "interfaces": [{"ip": "10.0.0.2"}]},
+        ]
+        client = RecordingClient({"host.get": hosts, "item.get": []})
+        out = run_tool(traffic_mod, "detect_traffic_anomalies", client)
+        assert "1 test host(s) excluded" in out
+        assert "edge-test-a1" in out
+
+    def test_include_test_keeps_them(self):
+        from tests.wiretest import RecordingClient, run_tool
+        from zbbx_mcp.tools import traffic as traffic_mod
+
+        hosts = [{"hostid": "2", "host": "edge-test-a1",
+                  "groups": [{"name": "edge"}], "interfaces": [{"ip": "10.0.0.2"}]}]
+        client = RecordingClient({"host.get": hosts, "item.get": []})
+        out = run_tool(traffic_mod, "detect_traffic_anomalies", client, include_test=True)
+        assert "excluded" not in out

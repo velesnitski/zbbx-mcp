@@ -7,6 +7,7 @@ All functions take a ZabbixClient and return structured data.
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
 import time as _time
 from datetime import datetime, timezone
@@ -58,16 +59,25 @@ async def fetch_enabled_hosts(
     interfaces: bool = True,
     inventory: bool = False,
     extra_output: list[str] | None = None,
+    exclude_test: bool = False,
 ) -> list[dict]:
     """Fetch all enabled hosts with optional groups / interfaces / inventory.
 
     ``inventory=True`` requests Zabbix host inventory (``country_code``,
     ``country_name``, ``location``) and bypasses the client-side cache —
     use only when the caller actually needs an inventory fallback.
+
+    ``exclude_test=True`` drops test/staging hosts (ADR 080/089) so they don't
+    pollute fleet-wide verdicts. It forces ``groups=True`` because a test box is
+    routinely left in a *production* group, so the group name is half the
+    signal. This is the shared seam — a tool that needs to *name* the excluded
+    hosts should instead ``partition_test_hosts`` the result and render a note.
     """
+    if exclude_test:
+        groups = True  # group name is half the is_test_host signal
     # Cache fires only for the common no-extras path. Inventory or
     # extra_output bypass so different callers can't cross-contaminate.
-    cache_key = f"enabled_hosts:g={groups}:i={interfaces}"
+    cache_key = f"enabled_hosts:g={groups}:i={interfaces}:xt={exclude_test}"
     if not extra_output and not inventory:
         cached = client._get_cached(cache_key, ttl=60.0)
         if cached is not None:
@@ -92,6 +102,16 @@ async def fetch_enabled_hosts(
     result = await client.call("host.get", params)
     if not isinstance(result, list):
         result = []
+
+    if exclude_test:
+        from zbbx_mcp.classify import is_test_host
+        kept = [h for h in result if not is_test_host(h)]
+        if len(kept) != len(result):
+            logging.getLogger("zbbx_mcp").info(
+                "fetch_enabled_hosts excluded %d test host(s)",
+                len(result) - len(kept),
+            )
+        result = kept
 
     if not extra_output and not inventory:
         client._set_cache(cache_key, result)

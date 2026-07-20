@@ -5,6 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.16.23] - 2026-07-17
+
+### Added — shared exclude_test seam; more fleet verdicts drop test boxes
+ADR 089. ADR 080 wired test-host exclusion into 6 tools; most fleet-verdict
+tools still counted test boxes (the tell: detect_traffic_anomalies sat in the
+same file as the already-fixed detect_traffic_drops, still unfiltered).
+
+Rather than hand-thread include_test into ~20 more tools (error-prone, and a
+blanket sweep would wrongly hide test hosts from search_hosts / maps / CRUD
+where they should show), added the exclusion to the shared seam:
+fetch_enabled_hosts gains exclude_test (forces groups=True since a test box is
+often in a production group, filters via is_test_host, cache-keyed, logs the
+count). Wired detect_traffic_anomalies with the full named-note treatment
+(matching detect_traffic_drops), and the whole-fleet reports generate_ceo_report,
+generate_service_brief, get_expansion_report via the seam. The direct-host.get
+verdict tools (inventory_load lists, floods, disruption detectors) are a
+deliberate deferred batch. Tool count unchanged (163). +4 tests, 779 -> 783.
+
 ## [1.16.22] - 2026-07-17
 
 ### Fixed — silent-degradation cluster (removed/renamed API fields)
