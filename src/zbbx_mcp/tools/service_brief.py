@@ -126,7 +126,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
             date_str = now.strftime("%Y-%m-%d")
             now_str = now.strftime("%Y-%m-%d %H:%M UTC")
 
-            hosts = await fetch_enabled_hosts(client)
+            hosts = await fetch_enabled_hosts(client, exclude_test=True)
             product_hosts: dict[str, list[dict]] = {}
             for h in hosts:
                 prod, _ = _classify_host(h.get("groups", []))

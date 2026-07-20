@@ -32,6 +32,13 @@ class RecordingClient:
         """Params of the first call to ``method`` (raises if never called)."""
         return next(p for m, p in self.calls if m == method)
 
+    # No-op cache so cache-using helpers (fetch_enabled_hosts) are testable.
+    def _get_cached(self, key, ttl=0.0):
+        return None
+
+    def _set_cache(self, key, value):
+        pass
+
 
 class CaptureMCP:
     """Captures registered tool functions by name (a module may register many)."""

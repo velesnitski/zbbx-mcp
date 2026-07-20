@@ -66,6 +66,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
             region: str = "",
             threshold_pct: float = 20.0,
             min_peers: int = 3,
+            include_test: bool = False,
             instance: str = "",
         ) -> str:
             """Detect servers with abnormally low traffic compared to their peer group.
@@ -77,9 +78,14 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 region: LATAM, APAC, EMEA, NA, CIS, ALL (optional)
                 threshold_pct: % of group median to flag (default: 20)
                 min_peers: Min peers for comparison (default: 3)
+                include_test: Keep test/staging hosts (default: False — a test
+                    box in a production group otherwise skews the peer median
+                    and can read as a false anomaly, ADR 089)
                 instance: Zabbix instance (optional)
             """
             try:
+                from zbbx_mcp.data import excluded_test_note, partition_test_hosts
+
                 client = resolver.resolve(instance)
 
                 # Phase 1: hosts (1 call)
@@ -89,6 +95,9 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     "selectInterfaces": ["ip"],
                     "filter": {"status": "0"},
                 })
+                excluded: list[dict] = []
+                if not include_test:
+                    hosts, excluded = partition_test_hosts(hosts)
                 host_map = {h["hostid"]: h for h in hosts}
                 all_ids = list(host_map.keys())
 
@@ -239,7 +248,8 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                             group_stats[-1]["anomalies"] += 1
 
                 if not all_anomalies and not group_stats:
-                    return "No groups with enough peers for analysis."
+                    return ("No groups with enough peers for analysis."
+                            + excluded_test_note(excluded))
 
                 # Sort: CRITICAL first, then HIGH, then MEDIUM
                 sev_order = {"CRITICAL": 0, "HIGH": 1, "MEDIUM": 2}
@@ -290,7 +300,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                             f"{g['median_mbps']:.1f} | {g['anomalies']} |"
                         )
 
-                return "\n".join(parts)
+                return "\n".join(parts) + excluded_test_note(excluded)
             except (httpx.HTTPError, ValueError) as e:
                 return f"Error: {e}"
 

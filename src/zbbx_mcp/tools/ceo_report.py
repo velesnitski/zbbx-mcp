@@ -159,7 +159,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 now_str = now.strftime("%Y-%m-%d %H:%M UTC")
                 date_str = now.strftime("%Y-%m-%d")
 
-                hosts = await fetch_enabled_hosts(client)
+                hosts = await fetch_enabled_hosts(client, exclude_test=True)
                 all_ids = [h["hostid"] for h in hosts]
 
                 # Batch trends in chunks to avoid Zabbix 500
