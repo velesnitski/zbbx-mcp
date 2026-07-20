@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.16.21] - 2026-07-17
+
+### Fixed — traffic-unit conversion: get_peak_analysis 8x, bytes divisor 64x
+ADR 087. Two conflicting bytes->Mbps conversions had drifted apart.
+`get_peak_analysis` hardcoded `value * 8 / 1_000_000`, but the repo default is
+bits/s (everything else divides by TRAFFIC_DIVISOR=1e6) -- so on a standard
+deployment it reported **8x the true Mbps** and disagreed with every other tool
+for the same item. Separately the bytes-mode divisor was 8_000_000, but
+bytes/s->Mbps is /125_000, so it was 64x too low (latent, config-gated).
+
+Routed get_peak_analysis through the shared TRAFFIC_DIVISOR and fixed the bytes
+divisor to 125_000 -- one conversion, correct in both bits and bytes mode,
+consistent across all tools. The peak/trough ratio was always right (both
+endpoints scaled together); only the absolute Mbps labels were wrong. Tool
+count unchanged (163). +4 tests, 770 -> 774.
+
 ## [1.16.20] - 2026-07-17
 
 ### Fixed — month-boundary sort scrambled daily-trend verdicts
