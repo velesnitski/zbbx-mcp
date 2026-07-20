@@ -87,7 +87,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()):
                 client = resolver.resolve(instance)
 
                 params: dict = {
-                    "output": ["hostid", "host", "available"],
+                    "output": ["hostid", "host", "active_available"],  # 6.0 renamed (ADR 088)
                     "selectGroups": ["name"],
                     "selectInterfaces": ["ip"],
                     "filter": {"status": "0"},
@@ -224,7 +224,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()):
                             service_status = "OK"
 
                     # Task 41: Agent availability
-                    agent_avail = h.get("available", "0")
+                    agent_avail = h.get("active_available", "0")
                     if agent_avail == "2":
                         server_issues.append("Zabbix agent unavailable")
                         score -= 30

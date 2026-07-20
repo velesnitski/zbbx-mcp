@@ -53,7 +53,10 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
             try:
                 client = resolver.resolve(instance)
                 params = {
-                    "output": ["hostid", "host", "name", "status", "available"],
+                    # `available` was removed from the host object in Zabbix 6.0
+                    # (passive availability moved to the interface); the host-level
+                    # field is now `active_available`, same 0/1/2 encoding (ADR 088).
+                    "output": ["hostid", "host", "name", "status", "active_available"],
                     "selectInterfaces": ["ip"],
                     "selectGroups": ["name"],
                     "sortfield": "host",

@@ -151,9 +151,9 @@ def format_host_list(hosts: list) -> str:
     for h in hosts:
         status = "Enabled" if h.get("status") == "0" else "Disabled"
         avail = ""
-        if h.get("available") == "1":
+        if h.get("active_available") == "1":
             avail = " [available]"
-        elif h.get("available") == "2":
+        elif h.get("active_available") == "2":
             avail = " [unavailable]"
         hid = f" (hostid: {h['hostid']})" if "hostid" in h else ""
         lines.append(f"- **{h.get('host', '?')}** ({h.get('name', '')}){hid} [{status}]{avail}")

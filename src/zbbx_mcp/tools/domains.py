@@ -115,12 +115,31 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 items = await client.call("item.get", {
                     "output": ["itemid", "hostid", "key_", "lastvalue", "lastclock"],
                     "filter": {"key_": [_KEY_CERT, _KEY_WHOIS, _KEY_HTTPS], "status": "0"},
-                    "selectHosts": ["hostid", "host", "groups"],
+                    "selectHosts": ["hostid", "host"],  # groups can't nest here (ADR 088)
                     "sortfield": "key_",
                 })
 
                 if not items:
                     return "No domain monitoring items found."
+
+                # Host groups can't be nested inside item.get's selectHosts (that
+                # was a permanent silent-empty) — resolve them in one host.get
+                # keyed by the item hosts (ADR 088).
+                host_ids = sorted({
+                    it["hosts"][0]["hostid"] for it in items if it.get("hosts")
+                })
+                groups_by_host: dict[str, str] = {}
+                if host_ids:
+                    ghosts = await client.call("host.get", {
+                        "output": ["hostid"], "hostids": host_ids,
+                        "selectGroups": ["name"],
+                    })
+                    groups_by_host = {
+                        h["hostid"]: ", ".join(
+                            g.get("name", "") for g in h.get("groups", [])
+                        )
+                        for h in ghosts
+                    }
 
                 # Group by host (skip non-domain hostnames)
                 domains: dict[str, dict] = {}
@@ -131,7 +150,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                         continue  # not a real domain name
                     if search and search.lower() not in hostname.lower():
                         continue
-                    groups = ", ".join(g.get("name", "") for g in host.get("groups", []))
+                    groups = groups_by_host.get(host.get("hostid", ""), "")
                     d = domains.setdefault(hostname, {"cert": None, "whois": None, "https": None, "groups": groups})
                     key = it.get("key_", "")
                     val = it.get("lastvalue", "")

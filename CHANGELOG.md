@@ -5,6 +5,27 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.16.22] - 2026-07-17
+
+### Fixed — silent-degradation cluster (removed/renamed API fields)
+ADR 088. Four Zabbix fields removed/renamed in modern versions that this 7.4.9
+instance *silently ignores* rather than rejecting — so a column just went blank
+instead of erroring:
+- `host.get` output `available` (removed 6.0, now `active_available`, same 0/1/2
+  encoding) -> the `[available]` tag and "agent unavailable" count never
+  populated. Fixed in search_hosts + get_capacity_planning + format_host_list.
+- `discoveryrule.get` output `lastclock` -> LLD rules have no last-poll field, so
+  the "last run" column showed a permanent 1970. Dropped.
+- `item.get selectHosts: [..., "groups"]` in get_domain_status -> groups can't
+  nest in a selectHosts subquery, so the domain group column was always empty.
+  Now resolved via a separate host.get with selectGroups.
+- `maintenance.get selectGroups` (renamed selectHostGroups in 7.0) -> added
+  maintenance.get to the client's 6.x<->7.2 shim for portability.
+
+Extended the output-field guard (ADR 085) with host.get/discoveryrule.get so
+neither removed field can return. Tool count unchanged (163). +5 tests,
+774 -> 779.
+
 ## [1.16.21] - 2026-07-17
 
 ### Fixed — traffic-unit conversion: get_peak_analysis 8x, bytes divisor 64x

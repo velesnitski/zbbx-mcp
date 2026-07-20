@@ -65,7 +65,9 @@ ALLOWED_SELECT_FIELDS = {
 # get_users shipped `user.get` output ["...","type","...","rows_per_page"]
 # dead-on-every-call (ADR 085: `type` removed 5.2 -> role-based `roleid`).
 DENIED_OUTPUT_FIELDS = {
-    "user.get": {"type", "rows_per_page"},
+    "user.get": {"type", "rows_per_page"},   # removed 5.2 -> roleid (ADR 085)
+    "host.get": {"available"},                # removed 6.0 -> active_available (ADR 088)
+    "discoveryrule.get": {"lastclock"},       # never a property of an LLD rule (ADR 088)
 }
 
 
