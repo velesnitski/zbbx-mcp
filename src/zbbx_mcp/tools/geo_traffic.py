@@ -19,6 +19,7 @@ from zbbx_mcp.data import (
     KEY_service_PRIMARY,
     build_value_map,
     countries_for_region,
+    day_label,
     extract_country,
     fetch_enabled_hosts,
     fetch_traffic_map,
@@ -578,7 +579,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 ]
                 for b in blocks:
                     parts.append(
-                        f"| {b['country']} | {b['servers']} | {b['drop_start']} | "
+                        f"| {b['country']} | {b['servers']} | {day_label(b['drop_start'])} | "
                         f"{b['duration']}d | {b['pre_drop_gbps']} Gbps | {b['current_gbps']} Gbps |"
                     )
 

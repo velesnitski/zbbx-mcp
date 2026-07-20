@@ -5,6 +5,7 @@ import httpx
 from zbbx_mcp.classify import classify_host as _classify_host
 from zbbx_mcp.classify import detect_provider
 from zbbx_mcp.data import (
+    day_label,
     extract_country,
     fetch_trends_batch,
     host_ip,
@@ -95,7 +96,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()):
                     if not all_days:
                         return "No daily data available."
 
-                    day_cols = " | ".join(all_days)
+                    day_cols = " | ".join(day_label(d) for d in all_days)
                     parts = [
                         f"**Daily Trends ({period}) for {server_count} servers**\n",
                         f"| Server | Metric | {day_cols} |",
@@ -198,7 +199,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()):
                     all_days = sorted(set(d for r in trend_rows for d in r.daily))
                     if all_days:
                         parts.append("\n## Daily Breakdown\n")
-                        day_cols = " | ".join(all_days)
+                        day_cols = " | ".join(day_label(d) for d in all_days)
                         parts.append(f"| Metric | {day_cols} |")
                         parts.append(f"|--------|{'---|' * len(all_days)}")
                         for r in trend_rows:

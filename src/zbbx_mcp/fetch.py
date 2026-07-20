@@ -119,6 +119,19 @@ def is_physical_traffic_in_key(key: str) -> bool:
     return iface.startswith(PHYSICAL_IFACE_PREFIXES)
 
 
+def day_label(day_key: str) -> str:
+    """Render a sortable ``YYYY-MM-DD`` daily key as a compact ``Mon DD`` label.
+
+    Daily trend keys are stored ISO-sortable so ``sorted()`` is always
+    chronological (ADR 086); this reformats one for display. Falls back to the
+    raw key if it isn't ISO (defensive). Pure.
+    """
+    try:
+        return datetime.strptime(day_key, "%Y-%m-%d").strftime("%b %d")
+    except (ValueError, TypeError):
+        return day_key
+
+
 async def fetch_traffic_map(client: ZabbixClient, hostids: list[str]) -> dict[str, float]:
     """Fetch max inbound traffic (Mbps) per host. Returns {hostid: mbps}.
 
@@ -778,7 +791,12 @@ async def fetch_trends_batch(
         daily_count: dict[str, int] = {}
         for t in t_data:
             dt = datetime.fromtimestamp(int(t["clock"]), tz=timezone.utc)
-            day_key = dt.strftime("%b %d")
+            # ISO key so sorted() is always chronological. "%b %d" sorted
+            # lexically (Jul < Jun), scrambling any window crossing a month
+            # boundary — silently flipping verdicts in every consumer that
+            # treated sorted(daily) as time order (ADR 086). Rendered as
+            # "Mon DD" at display via day_label().
+            day_key = dt.strftime("%Y-%m-%d")
             day_val = float(t["value_avg"])
             if metric_name == "cpu":
                 day_val = round(100 - day_val, 1)

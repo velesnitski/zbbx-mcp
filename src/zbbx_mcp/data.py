@@ -40,6 +40,7 @@ __all__ = [
     "KEY_PING_LOSS", "KEY_PING_RTT", "KEY_SERVICE_BPS",
     "_get_regional_traffic_keys",
     # Re-exports from fetch.py for backward compatibility
+    "day_label",
     "fetch_all_data", "fetch_trends_batch", "fetch_enabled_hosts",
     "fetch_traffic_map", "fetch_cpu_map", "fetch_service_status", "fetch_host_dashboards",
     "is_service_check_stale",
@@ -561,6 +562,7 @@ def _parse_period(period: str) -> int:
 
 # Re-exports from fetch.py — allows existing `from zbbx_mcp.data import fetch_*` to keep working
 from zbbx_mcp.fetch import (  # noqa: E402, F401
+    day_label,
     fetch_all_data,
     fetch_cpu_map,
     fetch_enabled_hosts,
