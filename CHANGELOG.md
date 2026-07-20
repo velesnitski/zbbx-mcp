@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.16.19] - 2026-07-17
+
+### Fixed — get_users was dead on every call (-32602)
+ADR 085. `user.get` requested the removed `type` field (Zabbix 5.2 replaced
+user types with role-based `roleid`) plus `rows_per_page`, so the API rejected
+the whole call with -32602. Fixed the output to valid 7.x fields and resolve
+role names via `role.get` (best-effort, falls back to the raw id).
+
+Two guard blind spots let this ship: no guard validated the top-level `output`
+list, and get_users built its params in a *variable* that the inline-only AST
+scanners never saw. Added an output-field guard (`DENIED_OUTPUT_FIELDS`) whose
+scanner resolves variable-built params by nearest-preceding assignment. Tool
+count unchanged (163). +7 tests, 759 -> 766.
+
 ## [1.16.18] - 2026-07-17
 
 ### Fixed — stdio-shutdown race in the server subprocess test (CI-only)

@@ -59,6 +59,15 @@ ALLOWED_SELECT_FIELDS = {
     },
 }
 
+# method -> top-level `output` fields Zabbix rejects with -32602 because the
+# field was removed/renamed. The prior guards only checked param *names* and
+# *select-list* fields, never the top-level `output` list — which is how
+# get_users shipped `user.get` output ["...","type","...","rows_per_page"]
+# dead-on-every-call (ADR 085: `type` removed 5.2 -> role-based `roleid`).
+DENIED_OUTPUT_FIELDS = {
+    "user.get": {"type", "rows_per_page"},
+}
+
 
 def iter_call_dict_keys():
     """Yield (path, lineno, api_method, param_keys) for every
@@ -112,6 +121,88 @@ def iter_call_select_fields():
                 ]
                 if fields:
                     yield path, node.lineno, method, k.value, fields
+
+
+def _resolve_dict_arg(arg, call_line, assigns):
+    """Resolve a call's second arg to a Dict node: inline literal, or the
+    nearest-preceding same-name ``name = {...}`` assignment."""
+    if isinstance(arg, ast.Dict):
+        return arg
+    if isinstance(arg, ast.Name):
+        cands = [d for ln, n, d in assigns if n == arg.id and ln < call_line]
+        return cands[-1] if cands else None
+    return None
+
+
+def iter_call_output_fields():
+    """Yield (path, lineno, method, output_fields) for every ``client.call``.
+
+    Unlike the other two scanners, this resolves a params dict passed **by
+    variable** (``params = {...}; client.call("m", params)``), not only inline
+    literals — get_users built its params in a variable, which is exactly why
+    the earlier guards never saw its bad ``output`` (ADR 085). Resolution is by
+    nearest preceding same-name assignment in the file, which matches this
+    codebase's build-then-call idiom.
+    """
+    for path in sorted(SRC.rglob("*.py")):
+        tree = ast.parse(path.read_text(), filename=str(path))
+        assigns: list[tuple[int, str, ast.Dict]] = [
+            (node.lineno, node.targets[0].id, node.value)
+            for node in ast.walk(tree)
+            if isinstance(node, ast.Assign)
+            and len(node.targets) == 1
+            and isinstance(node.targets[0], ast.Name)
+            and isinstance(node.value, ast.Dict)
+        ]
+
+        for node in ast.walk(tree):
+            if not (
+                isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Attribute)
+                and node.func.attr == "call"
+                and len(node.args) > 1
+                and isinstance(node.args[0], ast.Constant)
+                and isinstance(node.args[0].value, str)
+            ):
+                continue
+            d = _resolve_dict_arg(node.args[1], node.lineno, assigns)
+            if d is None:
+                continue
+            for k, v in zip(d.keys, d.values, strict=False):
+                if (
+                    isinstance(k, ast.Constant) and k.value == "output"
+                    and isinstance(v, ast.List)
+                ):
+                    fields = [
+                        e.value for e in v.elts
+                        if isinstance(e, ast.Constant) and isinstance(e.value, str)
+                    ]
+                    if fields:
+                        yield path, node.lineno, node.args[0].value, fields
+
+
+class TestOutputFieldGuard:
+    def test_no_denied_output_fields(self):
+        violations = []
+        for path, lineno, method, fields in iter_call_output_fields():
+            denied = DENIED_OUTPUT_FIELDS.get(method)
+            if not denied:
+                continue
+            bad = sorted(set(fields) & denied)
+            if bad:
+                violations.append(
+                    f"{path.relative_to(ROOT)}:{lineno} — {method} output carries "
+                    f"{bad} (Zabbix rejects the whole call with -32602; the field "
+                    "was removed/renamed). See ADR 085"
+                )
+        assert not violations, "\n".join(violations)
+
+    def test_output_scanner_sees_variable_built_params(self):
+        # It must resolve params passed by variable, not just inline dicts —
+        # that was the blind spot. user.get is built as `params = {...}`.
+        methods = {m for _, _, m, _ in iter_call_output_fields()}
+        assert "user.get" in methods
+        assert "host.get" in methods
 
 
 class TestFleetDataGuard:
