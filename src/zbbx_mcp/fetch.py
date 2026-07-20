@@ -43,7 +43,9 @@ from zbbx_mcp.excel import BW_MAX, classify_bandwidth
 
 # Traffic unit: bits/sec (default) or bytes/sec — configurable per deployment
 _TRAFFIC_BYTES = os.environ.get("ZABBIX_TRAFFIC_UNIT", "").lower() == "bytes"
-_TRAFFIC_DIVISOR = 8_000_000 if _TRAFFIC_BYTES else 1_000_000  # raw → Mbps
+# raw value -> Mbps. bits/s: /1e6. bytes/s: *8/1e6 = /125_000 (ADR 087 — the
+# old 8_000_000 was 64x too low; bytes/s -> Mbps is /125_000, not /8e6).
+_TRAFFIC_DIVISOR = 125_000 if _TRAFFIC_BYTES else 1_000_000
 # Public alias — cross-module consumers (uptime traffic gate, ADR 081) must
 # share the same raw→Mbps convention rather than re-deriving it.
 TRAFFIC_DIVISOR = _TRAFFIC_DIVISOR

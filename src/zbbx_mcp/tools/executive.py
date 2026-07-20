@@ -24,6 +24,7 @@ from zbbx_mcp.data import (
     group_by_country,
     host_ip,
 )
+from zbbx_mcp.fetch import TRAFFIC_DIVISOR
 from zbbx_mcp.resolver import InstanceResolver
 from zbbx_mcp.uptime import retention_too_short
 from zbbx_mcp.utils import safe_output_path
@@ -569,8 +570,11 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     for t in trends:
                         dt = datetime.fromtimestamp(int(t["clock"]), tz=timezone.utc)
                         hour = dt.hour
-                        avg = float(t.get("value_avg", 0)) * 8 / 1_000_000  # bytes/s → Mbps
-                        mx = float(t.get("value_max", 0)) * 8 / 1_000_000
+                        # Use the shared, config-aware conversion — hardcoding
+                        # *8/1e6 double-counted on the default bits/s config,
+                        # reporting 8x the true Mbps (ADR 087).
+                        avg = float(t.get("value_avg", 0)) / TRAFFIC_DIVISOR
+                        mx = float(t.get("value_max", 0)) / TRAFFIC_DIVISOR
                         hourly[hour].append(avg)
                         hourly_max[hour] = max(hourly_max[hour], mx)
 
@@ -603,8 +607,8 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     hourly_vals: list[tuple[str, float, float]] = []
                     for t in sorted(trends, key=lambda x: x["clock"]):
                         dt = datetime.fromtimestamp(int(t["clock"]), tz=timezone.utc)
-                        avg = float(t.get("value_avg", 0)) * 8 / 1_000_000
-                        mx = float(t.get("value_max", 0)) * 8 / 1_000_000
+                        avg = float(t.get("value_avg", 0)) / TRAFFIC_DIVISOR
+                        mx = float(t.get("value_max", 0)) / TRAFFIC_DIVISOR
                         hourly_vals.append((dt.strftime("%m-%d %H:00"), avg, mx))
 
                     lines = [f"**Peak Analysis — {host_id}** ({period})\n"]
