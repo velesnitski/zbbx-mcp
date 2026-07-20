@@ -5,6 +5,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.16.20] - 2026-07-17
+
+### Fixed — month-boundary sort scrambled daily-trend verdicts
+ADR 086. Daily trend keys were formatted `"%b %d"` ("Jul 03"), which sorts
+*lexically* — and `"Jul" < "Jun"`. So any window crossing a month boundary
+(essentially always for the 30d default) scrambled every `sorted(daily)` that
+was treated as time order, silently flipping verdicts: `get_traffic_drop_timeline`
+took the wrong day as "today" and skipped genuinely-blocked countries (a
+false negative in blocking detection); `detect_regional_anomalies` split
+recent/baseline on the scrambled order so real drops read as 0%;
+`get_executive_dashboard` computed growth backwards; geo-trend and CEO-report
+trend direction were affected too.
+
+Fixed at the source: keys are now `"%Y-%m-%d"` (ISO, sortable, year-carrying),
+so every consumer is chronological by construction, with a `day_label` helper
+rendering the compact "Mon DD" label at display. `get_month_over_month` now
+parses ISO directly, dropping its year-guess. Tool count unchanged (163).
++4 tests, 766 -> 770.
+
 ## [1.16.19] - 2026-07-17
 
 ### Fixed — get_users was dead on every call (-32602)

@@ -150,7 +150,6 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 def _agg(rows, recent: bool):
                     """Split daily data: recent=True for period B, False for A."""
                     cutoff = _time.time() - days * 86400
-                    current_year = datetime.now(timezone.utc).year
 
                     traffic_by_host: dict[str, float] = {}
                     country_set: set[str] = set()
@@ -161,7 +160,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                         count = 0
                         for day_str, val in r.daily.items():
                             try:
-                                dt = datetime.strptime(day_str, "%b %d").replace(year=current_year, tzinfo=timezone.utc)
+                                dt = datetime.strptime(day_str, "%Y-%m-%d").replace(tzinfo=timezone.utc)
                             except ValueError:
                                 continue
                             if (dt.timestamp() >= cutoff) == recent:
@@ -182,13 +181,13 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 # Retention guard (ADR 075): with limited trend housekeeping the
                 # prior period [now-2d, now-d] can be empty, making the delta a
                 # comparison against a void. Detect via the earliest daily sample.
-                _yr = datetime.now(timezone.utc).year
+                # ISO day keys carry the year (ADR 086), so no year-guess needed.
                 min_ts = None
                 for r in rows_a:
                     for day_str in (r.daily or {}):
                         try:
-                            ts = datetime.strptime(day_str, "%b %d").replace(
-                                year=_yr, tzinfo=timezone.utc).timestamp()
+                            ts = datetime.strptime(day_str, "%Y-%m-%d").replace(
+                                tzinfo=timezone.utc).timestamp()
                         except ValueError:
                             continue
                         min_ts = ts if min_ts is None else min(min_ts, ts)

@@ -364,3 +364,42 @@ class TestRecentBaselineFromDaily:
         daily = {f"2026-06-0{i}": 80.0 for i in range(1, 6)}
         r, b = recent_baseline_from_daily(daily, recent_days=2)
         assert r == 80.0 and b == 80.0
+
+    def test_month_boundary_recent_is_actually_latest(self):
+        # ADR 086 regression: with the old "%b %d" keys, sorted() put July
+        # before June, so "recent" picked mid-window June days and a real
+        # July drop read as no drop. ISO keys sort chronologically.
+        from zbbx_mcp.anomaly import recent_baseline_from_daily
+        daily = {  # window Jun 29 -> Jul 03, drop begins Jul 1
+            "2026-06-29": 100.0, "2026-06-30": 100.0,
+            "2026-07-01": 20.0, "2026-07-02": 20.0, "2026-07-03": 20.0,
+        }
+        r, b = recent_baseline_from_daily(daily, recent_days=2)
+        assert r == 20.0            # the actual latest days (Jul 02-03)
+        assert b > r                # baseline is the earlier, higher June/Jul-01
+        assert r < b * 0.5          # a real drop is visible, not masked
+
+
+class TestDayLabel:
+    """ADR 086 — daily keys are stored ISO-sortable and rendered Mon DD."""
+
+    def test_iso_to_pretty(self):
+        from zbbx_mcp.fetch import day_label
+        assert day_label("2026-07-03") == "Jul 03"
+        assert day_label("2026-06-30") == "Jun 30"
+
+    def test_sorted_iso_is_chronological_across_month(self):
+        # The core invariant the fix restores.
+        from zbbx_mcp.fetch import day_label
+        keys = ["2026-07-01", "2026-06-30", "2026-07-20", "2026-06-21"]
+        assert sorted(keys) == [
+            "2026-06-21", "2026-06-30", "2026-07-01", "2026-07-20",
+        ]
+        assert [day_label(k) for k in sorted(keys)] == [
+            "Jun 21", "Jun 30", "Jul 01", "Jul 20",
+        ]
+
+    def test_non_iso_falls_back(self):
+        from zbbx_mcp.fetch import day_label
+        assert day_label("Jul 03") == "Jul 03"   # defensive: unchanged
+        assert day_label("") == ""
