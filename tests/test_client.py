@@ -91,6 +91,20 @@ class TestClientZabbix7Compat:
         assert out[0]["groups"] == [{"name": "T"}]
         await client.close()
 
+    async def test_maintenance_get_also_translated(self):
+        # ADR 088: maintenance.get lost selectGroups in 7.0 (only selectHostGroups)
+        # — the shim must translate it like host.get/trigger.get.
+        captured: list = []
+        client = _client_with_handler(
+            _make_handler(captured, [{"maintenanceid": "1", "hostgroups": [{"name": "M"}]}])
+        )
+        out = await client.call("maintenance.get", {"selectGroups": ["groupid", "name"]})
+        sent = json.loads(captured[-1].content)["params"]
+        assert sent.get("selectHostGroups") == ["groupid", "name"]
+        assert "selectGroups" not in sent
+        assert out[0]["groups"] == [{"name": "M"}]
+        await client.close()
+
     async def test_caller_params_dict_not_mutated(self):
         captured: list = []
         client = _client_with_handler(_make_handler(captured, []))

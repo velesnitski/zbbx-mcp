@@ -1,6 +1,5 @@
 import httpx
 
-from zbbx_mcp.formatters import _ts
 from zbbx_mcp.resolver import InstanceResolver
 
 LLD_STATUS = {"0": "Enabled", "1": "Disabled"}
@@ -36,8 +35,11 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
             try:
                 client = resolver.resolve(instance)
                 params = {
+                    # LLD discovery-rule objects have no `lastclock` (it's not a
+                    # property of the rule) — requesting it yielded a permanent
+                    # "1970" last-run; dropped (ADR 088).
                     "output": ["itemid", "name", "key_", "type", "status",
-                               "state", "lastclock", "lifetime", "delay"],
+                               "state", "lifetime", "delay"],
                     "selectHosts": ["host"],
                     "sortfield": "name",
                     "limit": max_results,
@@ -62,11 +64,10 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     if r.get("state") == "1":
                         state = " [NOT SUPPORTED]"
                     hosts = ", ".join(h["host"] for h in r.get("hosts", []))
-                    clock = _ts(r.get("lastclock", "0"))
                     lines.append(
                         f"- **{r.get('name', '?')}** [{status}]{state}\n"
                         f"  key: `{r.get('key_', '?')}` | type: {rtype} | "
-                        f"host: {hosts} | last: {clock} | "
+                        f"host: {hosts} | "
                         f"id: {r.get('itemid', '?')}"
                     )
 

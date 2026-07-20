@@ -14,7 +14,7 @@ __all__ = ["ZabbixClient"]
 # (`selectGroups` -> `selectHostGroups`) and the returned property
 # (`groups` -> `hostgroups`). The client translates both ways (see `call`) so
 # the tool layer keeps the 6.x spelling and runs unchanged on 6.2+ and 7.x.
-_GROUP_SELECT_METHODS = frozenset({"host.get", "trigger.get"})
+_GROUP_SELECT_METHODS = frozenset({"host.get", "trigger.get", "maintenance.get"})
 
 
 class ZabbixClient:
