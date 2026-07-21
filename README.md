@@ -3,7 +3,7 @@
 [![Tests](https://github.com/velesnitski/zbbx-mcp/actions/workflows/test.yml/badge.svg)](https://github.com/velesnitski/zbbx-mcp/actions/workflows/test.yml)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-yellow.svg)](LICENSE)
-[![Tools: 163](https://img.shields.io/badge/tools-163-brightgreen.svg)](#what-it-does)
+[![Tools: 163](https://img.shields.io/badge/tools-164-brightgreen.svg)](#what-it-does)
 [![Latest release](https://img.shields.io/github/v/release/velesnitski/zbbx-mcp.svg)](https://github.com/velesnitski/zbbx-mcp/releases)
 
 Zabbix MCP server for [Claude Code](https://claude.com/claude-code), [GitHub Copilot](https://github.com/features/copilot), [Codex CLI](https://github.com/openai/codex), [n8n](https://n8n.io), and any MCP-compatible client. Talk to your Zabbix monitoring in natural language.
@@ -66,7 +66,7 @@ You should see `zabbix` listed when Claude starts. Try asking: *"Show current pr
 
 ## What it does
 
-**163 tools**:
+**164 tools**:
 
 | Category | Tools |
 |----------|-------|
@@ -140,7 +140,7 @@ subset. `ZABBIX_TIER` ships preset bundles that cut this:
 | `ops` | 57 | ~9k | Incident response — `core` + correlation, disruption detection, risk scoring, IP history, extended health |
 | `finance` | 49 | ~7k | Cost / billing — `core` + cost imports, audits, provider analysis |
 | `reports` | 65 | ~10k | Executive reporting — `core` + report generators, executive analytics, geo, inventory |
-| `full` | 163 | ~25k | Default — everything (no restriction) |
+| `full` | 164 | ~25k | Default — everything (no restriction) |
 
 `ZABBIX_TIER=ops` saves ~18k tokens per session compared to the default.
 Switch tiers by changing the env var; the server picks it up on restart.

@@ -4,7 +4,7 @@ Instructions for Claude Code when working in this repository.
 
 ## Project
 
-Zabbix MCP server — 163 tools across 40+ modules. Python 3.10+, FastMCP framework, async httpx HTTP/2 client.
+Zabbix MCP server — 164 tools across 40+ modules. Python 3.10+, FastMCP framework, async httpx HTTP/2 client.
 
 ## Commands
 
@@ -78,6 +78,7 @@ uv run pytest -k "test_name"               # single test by name
 | `full_report.py` | 1 | `generate_full_report` (Excel, 8 sheets) |
 | `html_report.py` | 1 | `generate_html_report` (HTML, dark theme) |
 | `dashboard_report.py` | 2 | `export_dashboard`, `classify_external_ips` |
+| `check_flaps.py` | 1 | `detect_check_flaps` — minute-level flap matrix: prober-noise subtraction, TEST-check split, chronic-but-triggerless ranking |
 | `triage.py` | 1 | `triage_slack_alert` — resolve an alert line's host, re-query live Zabbix, verdict (read-only); pure core in `alert_triage.py` |
 
 ### Environment variables
