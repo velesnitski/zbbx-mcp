@@ -7,6 +7,7 @@ from zbbx_mcp.tools import (
     audit,
     availability,
     ceo_report,
+    check_flaps,
     configuration,
     correlation,
     costs_audit,
@@ -130,6 +131,7 @@ ALL_TOOLS: frozenset[str] = frozenset({
     "delete_item",
     "delete_maintenance",
     "delete_trigger",
+    "detect_check_flaps",
     "detect_cost_anomalies",
     "detect_disruption_wave",
     "detect_loss_drift",
@@ -298,7 +300,7 @@ def register_all(
         trends_compare, trends_health,
         html_report, geo_traffic, geo_health, executive, ceo_report, service_brief, analysis,
         web_scenarios, correlation, ip_history, loss_drift, disruption, risk, floods,
-        telemetry, diagnose, triage,
+        telemetry, diagnose, triage, check_flaps,
     ]
     for module in modules:
         module.register(mcp, resolver, skip=skip)

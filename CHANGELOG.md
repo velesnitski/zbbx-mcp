@@ -5,6 +5,29 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.16.24] - 2026-07-21
+
+### Added — detect_check_flaps: minute-level flap matrix (noise/real split)
+ADR 090, task 174. A minute-level flap audit proved three things triggers
+cannot see: same-minute dips on geographically distant hosts are prober/egress
+noise (must be subtracted before scoring any host); a TEST-class check flaps
+several times more than the production check on the same host (script noise,
+weight ~0); and chronically degraded hosts -- prod check failing in most hours,
+1-2 minutes at a time -- fire ZERO triggers, because consecutive-fail triggers
+are blind to short dips (and hourly trend uptime smooths them away).
+
+New bounded, read-only `detect_check_flaps` (hosts/group/country scope,
+max_hosts <= 12, window <= 7d) pulls raw minute history for the configured
+service checks and classifies every flap-minute in priority order: fleet-
+correlated (>=2 distant countries, or >=3 hosts unknown-country) -> discard;
+host-correlated (>=2 prod services, one host) -> real event; TEST-only ->
+tracked at weight 0 (and TEST dips can never fabricate fleet noise); residual
+prod flaps -> honest rate/day. Output: ranked matrix + noise summary +
+rate-based trigger candidates (chronic rate, zero problem events -- the hosts
+alerting misses). Scoped sweeps drop test hosts (ADR 080 semantics); the
+operator follow-up (a rate-based Zabbix trigger) is deliberately left to the
+operator. Tool count 163 -> 164. +14 tests, 783 -> 797.
+
 ## [1.16.23] - 2026-07-17
 
 ### Added — shared exclude_test seam; more fleet verdicts drop test boxes
