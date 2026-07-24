@@ -5,6 +5,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.16.26] - 2026-07-24
+
+### Fixed — uptime under-count: read value_max, not integer-truncated value_avg (task 175)
+ADR 092. `get_service_uptime_report` computed hourly uptime from service-check
+trends using `value_avg`. A service check is a 0/1 unsigned-int item, so its
+trends live in `trends_uint`, whose columns are integer (bigint): Zabbix stores
+the hourly average `sum/count` truncated toward zero, so an hour up 59 of 60
+minutes reads `value_avg=0` and was scored a full outage — a 60x over-penalty
+that systematically understated uptime and could read a flappy-but-reachable
+host near 0%. Now requests `value_max`: up-hour = `value_max>=0.5` (protocol
+responded at least once), down-hour = `value_max=0` (fully dark); a partial
+hour is a flap (that dimension is `detect_check_flaps`' job), not a full down.
+The traffic gate keeps `value_avg` (accurate for the large-uint NIC counter).
+`compute_host_uptime` is unchanged; its per-hour input is now documented as an
+up-indicator with the truncation reason inline. `get_sla_dashboard` is
+unaffected (point-in-time `lastvalue`); `get_trends` needed no table change
+(`trend.get` returns `trends_uint` rows — the earlier empty result was a
+date-arg parse error). +2 wire tests, 816 -> 818.
+
 ## [1.16.25] - 2026-07-24
 
 ### Added — detect_traffic_erosion: cohort-relative multi-week slow-decline detector

@@ -1,5 +1,9 @@
 """Time-honest uptime + retention-coverage tests (ADR 075, tasks 168-170)."""
 
+import time as _time
+
+from tests.wiretest import RecordingClient, run_tool
+from zbbx_mcp.tools import geo_health as geo_mod
 from zbbx_mcp.uptime import compute_host_uptime, coverage_note, retention_too_short
 
 HOUR = 3600
@@ -117,6 +121,55 @@ class TestPerHourTrafficGate:
         hours = {(NOW - 1 * HOUR) // HOUR, NOW // HOUR}
         up, total = compute_host_uptime(rows, NOW, START, host_has_traffic=hours)
         assert up == 0 and total == 2
+
+
+class TestServiceUptimeReportUintFix:
+    """Task 175 / ADR 092: get_service_uptime_report must read value_MAX for
+    the 0/1 service checks, not the integer-truncated trends_uint value_avg.
+    """
+
+    def _client(self, now):
+        # 24 consecutive up-hours where Zabbix stored value_avg=0 (a 59/60 hour
+        # truncates to 0 in the bigint trends_uint column) but value_max=1.
+        trend_rows = [
+            {"itemid": "i1", "clock": str(now - h * 3600),
+             "value_avg": "0", "value_max": "1"}
+            for h in range(24)
+        ]
+        return RecordingClient({
+            "host.get": [
+                {"hostid": "1", "host": "edge-de1", "groups": [{"name": "edge"}]},
+            ],
+            "item.get": [
+                {"itemid": "i1", "hostid": "1", "key_": "svc.check",
+                 "state": "0", "lastclock": str(now)},
+            ],
+            "trend.get": trend_rows,
+        })
+
+    def test_near_perfect_uint_hours_read_up_not_down(self, monkeypatch):
+        monkeypatch.setattr(geo_mod, "KEY_service_PRIMARY", "svc.check")
+        monkeypatch.setattr(geo_mod, "KEY_service_SECONDARY", "")
+        now = int(_time.time())
+        out = run_tool(
+            geo_mod, "get_service_uptime_report", self._client(now),
+            only_problems=False, period="1d",
+        )
+        # value_max=1 every hour -> ~100% HEALTHY. Under the old value_avg=0
+        # path this same host read 0.0% / DOWN (the 60x over-penalty).
+        # value_max=1 every hour -> the host's row reads 100.0% / HEALTHY.
+        # Under the old value_avg=0 path it read 0.0% / DOWN.
+        assert "| edge-de1 | DE | 100.0% | N/A | HEALTHY |" in out
+
+    def test_wire_requests_value_max_for_checks(self, monkeypatch):
+        monkeypatch.setattr(geo_mod, "KEY_service_PRIMARY", "svc.check")
+        monkeypatch.setattr(geo_mod, "KEY_service_SECONDARY", "")
+        now = int(_time.time())
+        client = self._client(now)
+        run_tool(geo_mod, "get_service_uptime_report", client,
+                 only_problems=False, period="1d")
+        sent = client.sent("trend.get")
+        assert "value_max" in sent["output"]
 
 
 class TestTrafficHoursFromTrends:

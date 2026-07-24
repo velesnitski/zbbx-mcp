@@ -51,9 +51,15 @@ def compute_host_uptime(
 ):
     """Return (up_hours, total_hours) for one host from hourly service trends.
 
-    ``service_rows``: ``[(clock, value_avg), ...]`` hourly service-check
-    trends (a service check is 1=up / 0=down; ``value_avg >= up_threshold``
-    means the hour was mostly up). ``host_has_traffic``: the traffic gate for
+    ``service_rows``: ``[(clock, up_value), ...]`` hourly service-check
+    trends (a service check is 1=up / 0=down). ``up_value`` is the hour's
+    **up indicator** — the caller passes trend **value_max**, so
+    ``value_max >= up_threshold`` means the protocol responded at least once
+    that hour (up), and a fully-dark hour (value_max=0) is down. It must NOT
+    be value_avg: Zabbix stores ``trends_uint.value_avg`` as an integer
+    (bigint column, sum/count truncated), so a 59/60-up hour reads
+    value_avg=0 and every good-but-imperfect hour would be scored a full
+    outage — a 60x over-penalty (task 175 / ADR 092). ``host_has_traffic``: the traffic gate for
     the deprecated-check false-down guard (task 169). Preferred form: a
     **set of hour buckets** (``clock // 3600``) in which the host moved real
     traffic (see ``traffic_hours_from_trends``) — a missing check-hour is

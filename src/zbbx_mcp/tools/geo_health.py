@@ -141,7 +141,16 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     client.call("trend.get", {
                         "itemids": item_ids,
                         "time_from": time_from,
-                        "output": ["itemid", "clock", "value_avg"],
+                        # value_MAX, not value_avg, for the 0/1 service checks
+                        # (task 175 / ADR 092). Zabbix stores trends_uint
+                        # value_avg as an integer (bigint column, sum/count
+                        # truncated toward 0), so a 59/60-up hour reads
+                        # value_avg=0 and compute_host_uptime marks the whole
+                        # hour DOWN — a 60x over-penalty. value_max>=0.5 means
+                        # the protocol responded at least once that hour (up);
+                        # a full-dark hour is value_max=0 (down). Traffic below
+                        # keeps value_avg (accurate for the large-uint NIC).
+                        "output": ["itemid", "clock", "value_max"],
                         "limit": len(item_ids) * 24 * 31,
                     }),
                     client.call("trend.get", {
@@ -181,7 +190,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     hid, proto = info
                     clk = t.get("clock")
                     rows_by.setdefault(hid, {}).setdefault(proto, []).append(
-                        (clk, t.get("value_avg"))
+                        (clk, t.get("value_max"))   # up = responded at least once (task 175)
                     )
                     try:
                         c = int(clk)
