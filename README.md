@@ -3,7 +3,7 @@
 [![Tests](https://github.com/velesnitski/zbbx-mcp/actions/workflows/test.yml/badge.svg)](https://github.com/velesnitski/zbbx-mcp/actions/workflows/test.yml)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-yellow.svg)](LICENSE)
-[![Tools: 163](https://img.shields.io/badge/tools-164-brightgreen.svg)](#what-it-does)
+[![Tools: 165](https://img.shields.io/badge/tools-165-brightgreen.svg)](#what-it-does)
 [![Latest release](https://img.shields.io/github/v/release/velesnitski/zbbx-mcp.svg)](https://github.com/velesnitski/zbbx-mcp/releases)
 
 Zabbix MCP server for [Claude Code](https://claude.com/claude-code), [GitHub Copilot](https://github.com/features/copilot), [Codex CLI](https://github.com/openai/codex), [n8n](https://n8n.io), and any MCP-compatible client. Talk to your Zabbix monitoring in natural language.
@@ -66,7 +66,7 @@ You should see `zabbix` listed when Claude starts. Try asking: *"Show current pr
 
 ## What it does
 
-**164 tools**:
+**165 tools**:
 
 | Category | Tools |
 |----------|-------|
@@ -95,7 +95,7 @@ You should see `zabbix` listed when Claude starts. Try asking: *"Show current pr
 | **Media & Actions** | `get_media_types`, `get_actions` |
 | **Slack** | `send_slack_message`, `send_slack_report` |
 | **Costs** | `import_server_costs`, `import_costs_by_ip`, `import_cluster_ip_fees`, `import_from_xlsx`, `set_bulk_cost`, `fill_cost_median`, `analyze_cost_import`, `reconcile_billing_audit`, `find_stale_billing_ips`, `detect_cost_anomalies`, `export_cost_audit`, `get_cost_summary`, `get_cost_gaps`, `get_cost_efficiency` |
-| **Traffic** | `detect_traffic_anomalies`, `detect_traffic_drops`, `get_traffic_report` |
+| **Traffic** | `detect_traffic_anomalies`, `detect_traffic_drops`, `detect_traffic_erosion`, `get_traffic_report` |
 | **Trends & Analysis** | `get_trends_batch`, `get_server_dashboard`, `compare_servers`, `get_health_assessment`, `get_shutdown_candidates`, `get_capacity_planning` |
 | **Geo Monitoring** | `detect_regional_anomalies`, `get_geo_traffic_trends`, `get_service_uptime_report`, `get_service_health_matrix`, `get_traffic_drop_timeline`, `get_expansion_report`, `get_regional_density_map`, `get_latency_estimate`, `get_servers_by_ping` |
 | **Availability & Health** | `check_connection`, `get_active_problems`, `get_agent_unreachable`, `get_stale_servers`, `get_host_availability`, `get_recent_changes` |
@@ -130,17 +130,17 @@ get_traffic_report(country="us")
 
 ## Choosing a tier
 
-The full 162-tool catalog costs ~30k tokens at every session start (the
+The full 165-tool catalog costs ~30k tokens at every session start (the
 LLM has to load every tool's schema). For most sessions you only use a
 subset. `ZABBIX_TIER` ships preset bundles that cut this:
 
 | Tier | Tools | Handshake (~tokens) | Use when |
 |------|------:|--------------------:|----------|
 | `core` | 27 | ~4k | Read-only Zabbix querying — search, get, problems, dashboards |
-| `ops` | 57 | ~9k | Incident response — `core` + correlation, disruption detection, risk scoring, IP history, extended health |
+| `ops` | 58 | ~9k | Incident response — `core` + correlation, disruption detection, risk scoring, IP history, extended health |
 | `finance` | 49 | ~7k | Cost / billing — `core` + cost imports, audits, provider analysis |
 | `reports` | 65 | ~10k | Executive reporting — `core` + report generators, executive analytics, geo, inventory |
-| `full` | 164 | ~25k | Default — everything (no restriction) |
+| `full` | 165 | ~25k | Default — everything (no restriction) |
 
 `ZABBIX_TIER=ops` saves ~18k tokens per session compared to the default.
 Switch tiers by changing the env var; the server picks it up on restart.

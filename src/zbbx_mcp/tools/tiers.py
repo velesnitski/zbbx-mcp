@@ -80,7 +80,7 @@ OPS_EXTRA: frozenset[str] = frozenset({
     "acknowledge_problem", "get_alerts",
     # traffic-side
     "detect_traffic_drops", "detect_traffic_anomalies", "get_traffic_report",
-    "get_traffic_drop_timeline",
+    "get_traffic_drop_timeline", "detect_traffic_erosion",
     # health analysis
     "get_health_assessment", "get_predictive_alerts", "get_alert_summary",
     "get_recent_changes",

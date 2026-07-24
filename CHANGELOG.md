@@ -5,6 +5,34 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.16.25] - 2026-07-24
+
+### Added — detect_traffic_erosion: cohort-relative multi-week slow-decline detector
+ADR 091. `detect_traffic_drops` (ADR 040) is acute — it compares a recent window
+against a 7-day seasonal baseline and fires on a large same-hour drop — so it is
+structurally blind to a *gradual* multi-week decline, where each day sits only
+slightly below the trailing week yet the host bleeds most of its traffic over a
+couple of months (gradual reachability loss, effectiveness decay, slow demand
+rot). Hourly-trend uptime smooths the shape away and country-aggregated geo
+trends hide a subset eroding inside a healthy region, so nothing in the suite
+covered this class.
+
+New read-only `detect_traffic_erosion` (group/product/country/region scope,
+`weeks` <= 12) fits a slope to each host's weekly-mean throughput and judges it
+**cohort-relative**: a host is flagged as eroding only when it declines
+materially faster than its scope's median slope, so a fleet-wide demand dip that
+drags every host down together is labelled `demand`, not erosion. Verdict
+priority: insufficient (< 4 weekly points) -> idle (peak below the Mbps floor,
+the denominator rule) -> recovering (a rise is never a drop) -> eroding (>= the
+decline threshold AND faster than the cohort) -> demand (declining, tracking the
+cohort) -> stable. A scope with fewer than 3 non-idle peers has no meaningful
+cohort (a one-host median is that host's own slope), so it falls back to an
+absolute-decline verdict and says so. Interface selection, the traffic-unit
+divisor, and test-host exclusion reuse the acute detector's machinery. Output
+ranks the declining set (eroding before demand), states the cohort median, and
+counts the rest. Added to the `ops` tier. Tool count 164 -> 165. +19 tests,
+797 -> 816.
+
 ## [1.16.24] - 2026-07-21
 
 ### Added — detect_check_flaps: minute-level flap matrix (noise/real split)
