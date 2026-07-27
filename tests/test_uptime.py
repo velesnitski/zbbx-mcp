@@ -17,7 +17,9 @@ class TestComputeHostUptime:
         # The task-168 bug: up 1h 14d ago, dead since, no traffic → ~0%, not 100%.
         rows = [(NOW - 14 * 24 * HOUR, "1")]
         up, total = compute_host_uptime(rows, NOW, START, host_has_traffic=False)
-        assert total == 14 * 24 + 1          # first-seen → now, every hour counted
+        # first-seen → now, every COMPLETED hour counted. The in-progress
+        # hour has no trend row yet, so it is unmeasured, not down (ADR 097).
+        assert total == 14 * 24
         assert up == 1                        # only the one observed up hour
         assert up / total < 0.01
 
@@ -29,7 +31,8 @@ class TestComputeHostUptime:
     def test_explicit_down_hours_count_down(self):
         rows = [(NOW - 3 * HOUR, "1"), (NOW - 2 * HOUR, "0"), (NOW - 1 * HOUR, "1")]
         up, total = compute_host_uptime(rows, NOW, START, host_has_traffic=False)
-        assert total == 4 and up == 2         # first-seen 3h ago → now = 4 hours, 2 up
+        # 3 completed hours observed, 2 up; the in-progress hour is excluded.
+        assert total == 3 and up == 2
 
     def test_traffic_rescues_missing_hours(self):
         # Deprecated check: one old sample then silence, but real traffic → UP.
@@ -51,12 +54,12 @@ class TestComputeHostUptime:
     def test_samples_before_window_ignored(self):
         rows = [(START - 5 * HOUR, "1"), (NOW - 1 * HOUR, "1")]
         up, total = compute_host_uptime(rows, NOW, START, host_has_traffic=False)
-        assert total == 2                     # pre-window sample dropped
+        assert total == 1                     # pre-window sample dropped
 
     def test_bad_values_skipped(self):
         rows = [(NOW - 1 * HOUR, "1"), ("bad", "1"), (NOW - 2 * HOUR, None)]
         up, total = compute_host_uptime(rows, NOW, START, host_has_traffic=False)
-        assert total == 2 and up == 1
+        assert total == 1 and up == 1
 
 
 class TestCoverageNote:
@@ -97,7 +100,7 @@ class TestPerHourTrafficGate:
         rows = [(first + h * HOUR, "1") for h in range(0, 7 * 24)]
         hours = {(first + h * HOUR) // HOUR for h in range(0, 7 * 24)}
         up, total = compute_host_uptime(rows, NOW, START, host_has_traffic=hours)
-        assert total == 14 * 24 + 1
+        assert total == 14 * 24
         assert abs(up / total - 0.5) < 0.01
         # regression contrast: legacy bool inflates the same host to 100%
         up_b, total_b = compute_host_uptime(rows, NOW, START, host_has_traffic=True)
@@ -109,12 +112,12 @@ class TestPerHourTrafficGate:
         hours = {(NOW - 5 * HOUR) // HOUR, (NOW - 4 * HOUR) // HOUR,
                  (NOW - 3 * HOUR) // HOUR}
         up, total = compute_host_uptime(rows, NOW, START, host_has_traffic=hours)
-        assert total == 11 and up == 1 + 3   # the sample + the 3 traffic hours
+        assert total == 10 and up == 1 + 3   # the sample + the 3 traffic hours
 
     def test_empty_set_means_no_rescue(self):
         rows = [(NOW - 10 * HOUR, "1")]
         up, total = compute_host_uptime(rows, NOW, START, host_has_traffic=set())
-        assert total == 11 and up == 1
+        assert total == 10 and up == 1
 
     def test_traffic_hour_does_not_override_explicit_down(self):
         rows = [(NOW - 1 * HOUR, "0"), (NOW, "0")]

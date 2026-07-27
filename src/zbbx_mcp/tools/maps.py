@@ -20,18 +20,25 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 client = resolver.resolve(instance)
                 data = await client.call("map.get", {
                     "output": ["sysmapid", "name", "width", "height", "expandproblem"],
-                    "selectSelements": "count",
-                    "selectLinks": "count",
+                    # map.get's select* params do not support "count" (unlike
+                    # e.g. httptest.get's selectSteps), so the keys never came
+                    # back and every row rendered "? elements, ? links". Ask for
+                    # a minimal id list and count client-side (ADR 096).
+                    "selectSelements": ["selementid"],
+                    "selectLinks": ["linkid"],
                     "sortfield": "name",
                 })
 
                 if not data:
                     return "No maps found."
 
+                def _count(v):
+                    return len(v) if isinstance(v, list) else "?"
+
                 lines = []
                 for m in data:
-                    elements = m.get("selements", "?")
-                    links = m.get("links", "?")
+                    elements = _count(m.get("selements"))
+                    links = _count(m.get("links"))
                     size = f"{m.get('width', '?')}×{m.get('height', '?')}"
                     lines.append(
                         f"- **{m.get('name', '?')}** — "

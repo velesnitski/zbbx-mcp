@@ -5,7 +5,7 @@ import httpx
 
 from zbbx_mcp.formatters import _ts, format_severity, normalize_problem_name
 from zbbx_mcp.resolver import InstanceResolver
-from zbbx_mcp.utils import resolve_group_ids
+from zbbx_mcp.utils import parse_time, resolve_group_ids
 
 EVENT_SOURCES = {"0": "Trigger", "1": "Discovery", "2": "Autoregistration", "3": "Internal"}
 EVENT_VALUES = {
@@ -14,6 +14,23 @@ EVENT_VALUES = {
     "2": {"0": "Registered"},
     "3": {"0": "Normal", "1": "Unknown"},
 }
+
+
+def _parse_epoch(value: str) -> int:
+    """Epoch from a time argument, tolerating anything ``parse_time`` knows.
+
+    ``int(value)`` alone raised ``invalid literal for int()`` on the natural
+    ``"2026-07-24"`` form and killed the whole call, so the caller had to
+    know to pre-convert. Delegates to the shared ``parse_time`` (epoch / ISO
+    date / ISO datetime / relative "24h") and returns 0 for empty or
+    unparseable input, letting the caller apply its own default. Pure.
+    """
+    if not (value or "").strip():
+        return 0
+    try:
+        return parse_time(value)
+    except ValueError:
+        return 0
 
 
 def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> None:
@@ -103,9 +120,10 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
 
             Args:
                 item_id: Zabbix item ID
-                time_from: Start time as Unix timestamp (optional)
-                time_till: End time as Unix timestamp (optional)
-                limit: Maximum records (default: 50)
+                time_from: Start as Unix timestamp or YYYY-MM-DD (optional;
+                    defaults to a window holding `limit` hours ending now)
+                time_till: End as Unix timestamp or YYYY-MM-DD (optional)
+                limit: Maximum records, newest first (default: 50)
                 instance: Zabbix instance name (optional, for multi-instance setups)
             """
             try:
@@ -122,22 +140,39 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 item = items[0]
                 units = item.get("units", "")
 
+                # trend.get supports only itemids / time_from / time_till /
+                # countOutput / limit / output. sortfield+sortorder are NOT
+                # parameters of the method and are silently ignored, so `limit`
+                # used to slice the natural (ascending) order — i.e. the OLDEST
+                # retained hours — while the caller reasonably expected the
+                # newest. Bound the window explicitly instead, then order for
+                # display below (ADR 096).
                 params = {
                     "itemids": [item_id],
-                    "sortfield": "clock",
-                    "sortorder": "DESC",
                     "limit": limit,
                     "output": "extend",
                 }
-                if time_from:
-                    params["time_from"] = int(time_from)
-                if time_till:
-                    params["time_till"] = int(time_till)
+                t_from = _parse_epoch(time_from)
+                t_till = _parse_epoch(time_till)
+                if t_from:
+                    params["time_from"] = t_from
+                if t_till:
+                    params["time_till"] = t_till
+                if not t_from:
+                    # No explicit start: ask for a window that can hold `limit`
+                    # hourly rows ending now, so the default answer is recent.
+                    now = int(time.time())
+                    params["time_from"] = now - max(1, limit) * 3600
+                    if not t_till:
+                        params["time_till"] = now
 
                 data = await client.call("trend.get", params)
 
                 if not data:
                     return f"No trend data for item '{item.get('name', item_id)}'."
+
+                # Newest first — the ordering the API could not provide.
+                data = sorted(data, key=lambda r: int(r.get("clock", 0)), reverse=True)
 
                 from zbbx_mcp.formatters import format_value
 

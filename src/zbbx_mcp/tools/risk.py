@@ -20,6 +20,8 @@ import httpx
 
 from zbbx_mcp.classify import classify_host as _classify_host
 from zbbx_mcp.data import (
+    AUDIT_ACTION_UPDATE,
+    AUDIT_RESOURCE_HOST,
     KEY_CONNECTIONS,
     KEY_PING_LOSS,
     KEY_PING_RTT,
@@ -111,28 +113,44 @@ async def _history_avg(
     item_ids: list[str],
     time_from: int,
     time_till: int,
+    value_types: dict[str, int] | None = None,
 ) -> dict[str, float]:
     """itemid → avg of `history.get` numeric values in a window.
 
     Uses history rather than trend because connection-count windows are
     typically tighter than the 1h trend granularity.
+
+    ``history.get`` reads a DIFFERENT TABLE per value type, and this asked
+    only for ``0`` (float). A connection counter is normally an unsigned
+    integer (type 3) living in ``history_uint``, so the query returned zero
+    rows and every peer scored "n/a" — a confident empty answer with no
+    error. Pass ``value_types`` (itemid → value_type) to query each type
+    present; without it, both numeric types are tried (ADR 097).
     """
     if not item_ids:
         return {}
-    records = await client.call("history.get", {
-        "itemids": item_ids,
-        "history": 0,  # numeric float
-        "time_from": time_from,
-        "time_till": time_till,
-        "output": ["itemid", "value"],
-        "limit": len(item_ids) * 600,
-    })
+    by_type: dict[int, list[str]] = {}
+    if value_types:
+        for iid in item_ids:
+            by_type.setdefault(int(value_types.get(iid, 3)), []).append(iid)
+    else:
+        by_type = {0: list(item_ids), 3: list(item_ids)}   # float + unsigned
+
     bucket: dict[str, list[float]] = {}
-    for r in records:
-        try:
-            bucket.setdefault(r["itemid"], []).append(float(r.get("value", "0") or 0))
-        except (ValueError, TypeError):
-            continue
+    for vtype, iids in by_type.items():
+        records = await client.call("history.get", {
+            "itemids": iids,
+            "history": vtype,
+            "time_from": time_from,
+            "time_till": time_till,
+            "output": ["itemid", "value"],
+            "limit": len(iids) * 600,
+        })
+        for r in records:
+            try:
+                bucket.setdefault(r["itemid"], []).append(float(r.get("value", "0") or 0))
+            except (ValueError, TypeError):
+                continue
     return {iid: sum(vals) / len(vals) for iid, vals in bucket.items() if vals}
 
 
@@ -186,7 +204,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 window_from = now - window_days * 86400
                 audit = await client.call("auditlog.get", {
                     "output": ["clock", "details", "resourceid"],
-                    "filter": {"resourcetype": 2, "action": 1, "resourceid": hostids},
+                    "filter": {"resourcetype": AUDIT_RESOURCE_HOST, "action": AUDIT_ACTION_UPDATE, "resourceid": hostids},
                     "time_from": window_from,
                     "sortfield": "clock",
                     "sortorder": "DESC",
@@ -368,12 +386,16 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 cohort_ids = [h["hostid"] for h in cohort]
                 items = await client.call("item.get", {
                     "hostids": cohort_ids,
-                    "output": ["itemid", "hostid"],
+                    # value_type drives which history table holds the data.
+                    "output": ["itemid", "hostid", "value_type"],
                     "filter": {"key_": KEY_CONNECTIONS, "status": "0"},
                 })
                 if not items:
                     return f"No connection-count items found on {len(cohort)} cohort peers."
                 iid_to_hid = {it["itemid"]: it["hostid"] for it in items}
+                iid_vtype = {
+                    it["itemid"]: int(it.get("value_type", 3) or 3) for it in items
+                }
 
                 now = int(_time.time())
                 anchor = drop_clock if drop_clock > 0 else now - 3600
@@ -384,8 +406,10 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 if post_till > now:
                     post_till = now
 
-                pre_avg = await _history_avg(client, list(iid_to_hid.keys()), pre_from, pre_till)
-                post_avg = await _history_avg(client, list(iid_to_hid.keys()), post_from, post_till)
+                pre_avg = await _history_avg(
+                    client, list(iid_to_hid.keys()), pre_from, pre_till, iid_vtype)
+                post_avg = await _history_avg(
+                    client, list(iid_to_hid.keys()), post_from, post_till, iid_vtype)
 
                 rows: list[dict] = []
                 summary = {"absorbing": 0, "stable": 0, "draining": 0, "n/a": 0}

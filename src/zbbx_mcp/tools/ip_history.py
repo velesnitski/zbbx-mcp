@@ -13,7 +13,14 @@ from datetime import datetime, timezone
 
 import httpx
 
-from zbbx_mcp.data import STATUS_ENABLED, TRAFFIC_IN_KEYS, extract_country, host_ip
+from zbbx_mcp.data import (
+    AUDIT_ACTION_UPDATE,
+    AUDIT_RESOURCE_HOST,
+    STATUS_ENABLED,
+    TRAFFIC_IN_KEYS,
+    extract_country,
+    host_ip,
+)
 from zbbx_mcp.resolver import InstanceResolver
 
 # Recovery-score thresholds expressed as post/baseline traffic ratio.
@@ -205,7 +212,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     hid = h["hostid"]
                     records = await client.call("auditlog.get", {
                         "output": ["clock", "details"],
-                        "filter": {"resourcetype": 2, "action": 1, "resourceid": hid},
+                        "filter": {"resourcetype": AUDIT_RESOURCE_HOST, "action": AUDIT_ACTION_UPDATE, "resourceid": hid},
                         "time_from": time_from,
                         "sortfield": "clock",
                         "sortorder": "ASC",
@@ -304,7 +311,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 # Single audit-log query batched across all hosts.
                 records = await client.call("auditlog.get", {
                     "output": ["clock", "details", "resourceid"],
-                    "filter": {"resourcetype": 2, "action": 1, "resourceid": hostids},
+                    "filter": {"resourcetype": AUDIT_RESOURCE_HOST, "action": AUDIT_ACTION_UPDATE, "resourceid": hostids},
                     "time_from": time_from,
                     "sortfield": "clock",
                     "sortorder": "ASC",

@@ -62,7 +62,11 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 items = await client.call("item.get", {
                     "hostids": hostids,
                     "output": ["hostid", "lastvalue", "key_"],
-                    "search": {"key_": "net.if.in["},
+                    # Wildcards MUST be explicit once searchWildcardsEnabled is
+                    # on: the flag stops Zabbix wrapping the term in %…%, so a
+                    # bare literal becomes an EXACT match and silently returns
+                    # nothing (ADR 094).
+                    "search": {"key_": "*net.if.in[*"},
                     "searchWildcardsEnabled": True,
                     "filter": {"status": "0"},
                 })

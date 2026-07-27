@@ -72,7 +72,8 @@ uv run pytest -k "test_name"               # single test by name
 | `audit.py` | 1 | `get_audit_log` |
 | `domains.py` | 3 | `get_domain_list`, `get_domain_status`, `get_ssl_expiry` |
 | `web_scenarios.py` | 2 | `get_web_scenarios`, `get_web_scenario_status` |
-| `executive.py` | 8 | `get_executive_dashboard`, `get_month_over_month`, `get_fleet_risk_score`, `get_sla_dashboard`, `get_report_snapshot`, `get_peak_analysis`, `get_product_audit`, `generate_product_map` |
+| `executive.py` | 7 | `get_executive_dashboard`, `get_month_over_month`, `get_fleet_risk_score`, `get_sla_dashboard`, `get_report_snapshot`, `get_peak_analysis`, `get_product_audit` |
+| `predictive.py` | 1 | `get_predictive_alerts` — regress a metric's trend to a threshold crossing (split from `executive.py`, ADR 097) |
 | `ceo_report.py` | 1 | `generate_ceo_report` — full HTML report with all analytics |
 | `report.py` | 1 | `generate_server_report` (Excel) |
 | `infra_report.py` | 1 | `generate_infra_report` (Excel) |

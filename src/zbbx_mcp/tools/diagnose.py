@@ -25,6 +25,8 @@ import httpx
 
 from zbbx_mcp.country import resolve_country
 from zbbx_mcp.data import (
+    AUDIT_ACTION_UPDATE,
+    AUDIT_RESOURCE_HOST,
     STATUS_ENABLED,
     canonical_host_name,
     excluded_test_note,
@@ -387,7 +389,7 @@ async def _collect_diagnosis_inner(
         if rotation_days > 0:
             records = await client.call("auditlog.get", {
                 "output": ["clock", "details"],
-                "filter": {"resourcetype": 2, "action": 1, "resourceid": hid},
+                "filter": {"resourcetype": AUDIT_RESOURCE_HOST, "action": AUDIT_ACTION_UPDATE, "resourceid": hid},
                 "time_from": now - rotation_days * 86400,
                 "sortfield": "clock",
                 "sortorder": "DESC",

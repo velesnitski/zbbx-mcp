@@ -25,6 +25,7 @@ import re
 __all__ = [
     "REGION_MAP",
     "CAPITAL_COORDS",
+    "ISO2_CODES",
     "extract_country",
     "normalize_country",
     "resolve_country",
@@ -32,11 +33,27 @@ __all__ = [
 ]
 
 
-_COUNTRY_RE = re.compile(
-    r"(?:[-_]([a-z]{2})\d)"       # nl0999, de0999
-    r"|(?:[-_]([a-z]{2})[-_])",   # -in-lite, -us-lite
-    re.IGNORECASE,
-)
+# Two distinct host-name conventions carry a country, and they are NOT
+# equally trustworthy (ADR 093):
+#
+#   1. INDEXED — a country code immediately followed by its index
+#      ("<cc>0105", "<cc>3"). This is the form that actually encodes
+#      where the host is.
+#   2. SEGMENT — a bare two-letter token between separators ("-<cc>-lite").
+#      Also used for datacenter / role / market tags that merely LOOK like
+#      country codes, so it is only consulted when no indexed form matched.
+#
+# These were once a single alternation scanned with re.search, which returns
+# the LEFTMOST match — so a leading tag beat the real indexed suffix and won
+# silently. Where the tag happened to be a real ISO code the host was filed
+# under a country it has no presence in (a wrong answer that reads as
+# authoritative); where it wasn't, the bogus-but-truthy code short-circuited
+# resolve_country's inventory fallback, so correct inventory data could not
+# rescue it. Hence: indexed first, and only ever return a real ISO code.
+_COUNTRY_INDEXED_RE = re.compile(r"[-_]([a-z]{2})\d", re.IGNORECASE)
+# Lookahead, not a consuming match, so adjacent segments ("-ab-cd-") are
+# both visited instead of the first one eating its neighbour's separator.
+_COUNTRY_SEGMENT_RE = re.compile(r"[-_]([a-z]{2})(?=[-_])", re.IGNORECASE)
 
 # Region → country code mapping for geo filtering.
 # Every ISO 3166-1 country lands in at least one region; some sit in two
@@ -393,6 +410,13 @@ _COUNTRY_NAMES: dict[str, str] = {
 }
 
 
+# Every valid ISO 3166-1 alpha-2 code, derived from the reference table
+# above rather than hand-listed, so the two can never drift apart. This is
+# the allow-list that keeps a datacenter/role tag from being reported as a
+# country (ADR 093).
+ISO2_CODES: frozenset[str] = frozenset(_COUNTRY_NAMES.values())
+
+
 def countries_for_region(region: str) -> set[str]:
     """Return set of country codes for a region name. ALL returns everything."""
     r = region.upper()
@@ -404,14 +428,26 @@ def countries_for_region(region: str) -> set[str]:
 def extract_country(hostname: str) -> str:
     """Extract 2-letter country code from hostname.
 
-    Handles names with the embedded country pattern (e.g. ``srv-nl01`` →
-    ``NL``, ``srv-us03`` → ``US``). Normalises ``UK`` to ``GB``.
+    Handles names with the embedded country pattern (e.g. ``host-<cc>0105``
+    or ``host-<cc>01-lite`` → that code). Normalises ``UK`` to ``GB``.
+
+    The **indexed** form (``ab1``) wins over a bare ``-ab-`` segment
+    wherever each appears in the name, because only the indexed form
+    reliably encodes location — a bare segment is just as often a
+    datacenter, role or market tag (ADR 093). Returns ``""`` unless the
+    result is a real ISO 3166-1 code, so a tag that merely looks like one
+    can neither be reported as a country nor block the inventory fallback
+    in ``resolve_country``.
     """
-    m = _COUNTRY_RE.search(hostname)
-    if not m:
+    if not hostname:
         return ""
-    cc = (m.group(1) or m.group(2) or "").upper()
-    return _COUNTRY_ALIASES.get(cc, cc)
+    for rx in (_COUNTRY_INDEXED_RE, _COUNTRY_SEGMENT_RE):
+        for m in rx.finditer(hostname):
+            cc = m.group(1).upper()
+            cc = _COUNTRY_ALIASES.get(cc, cc)
+            if cc in ISO2_CODES:
+                return cc
+    return ""
 
 
 def normalize_country(value: str) -> str:
@@ -428,7 +464,11 @@ def normalize_country(value: str) -> str:
     if not key:
         return ""
     if len(key) == 2 and key.isalpha():
-        return _COUNTRY_ALIASES.get(key, key)
+        code = _COUNTRY_ALIASES.get(key, key)
+        # Validated, not passed through: an unassigned pair used to be
+        # echoed back as if it were a country, so a filter on it silently
+        # matched nothing instead of reporting the bad input (ADR 093).
+        return code if code in ISO2_CODES else ""
     return _COUNTRY_NAMES.get(key, "")
 
 

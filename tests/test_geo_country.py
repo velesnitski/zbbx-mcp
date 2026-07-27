@@ -263,9 +263,25 @@ class TestExtractCountry:
         assert extract_country("account.example.com") == ""
         assert extract_country("a1") == ""
 
-    def test_multiple_country_codes(self):
-        """Multiple country codes in hostname — first wins."""
-        assert extract_country("srv-de01") == "DE"
+    def test_indexed_form_wins_over_bare_segment(self):
+        """Two candidates in one name — the INDEXED form wins (ADR 093).
+
+        A bare two-letter segment is as often a datacenter/role/market tag
+        as a country, so it must never outrank the ``ab1`` form that
+        actually encodes location — regardless of which appears first.
+        Codes here are deliberately arbitrary (Pacific island states) so
+        the fixture describes no real deployment.
+        """
+        assert extract_country("host-fj-ki01") == "KI"
+        assert extract_country("host-ki-fj01") == "FJ"
+
+    def test_tag_that_is_not_a_country_is_ignored(self):
+        """A segment tag that isn't an ISO code can't mask the real one."""
+        assert extract_country("host-zq-fj1") == "FJ"
+
+    def test_non_iso_pair_yields_empty_not_a_fake_code(self):
+        """No real code anywhere -> "" so the inventory fallback can run."""
+        assert extract_country("host-zq-qz1") == ""
 
 class TestNormalizeCountry:
     """Pure-helper tests for normalize_country (#140)."""
@@ -310,13 +326,17 @@ class TestNormalizeCountry:
         assert normalize_country("Atlantis") == ""
         assert normalize_country("ZZZ") == ""
 
-    def test_two_letter_unknown_still_returns_iso2_like(self):
+    def test_unassigned_two_letter_input_is_rejected(self):
         from zbbx_mcp.data import normalize_country
 
-        # We don't enumerate the full ISO-2 set; any 2-letter alphabetic
-        # input is treated as a code (the downstream filter just won't
-        # match any host). UK-alias normalisation still applies.
-        assert normalize_country("ZZ") == "ZZ"
+        # Superseded by ADR 093. This used to echo ANY 2-letter input back
+        # as if it were a country, so a filter on an unassigned pair
+        # silently matched nothing instead of reporting the bad input.
+        # The full ISO-2 set is now derived from the reference table, so an
+        # unassigned pair is rejected at the door. UK-alias still applies.
+        assert normalize_country("ZZ") == ""
+        assert normalize_country("QZ") == ""
+        assert normalize_country("UK") == "GB"
 
 class TestResolveCountry:
     """Pure-helper tests for resolve_country chain (#141)."""

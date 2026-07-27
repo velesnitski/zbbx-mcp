@@ -29,7 +29,9 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
             try:
                 client = resolver.resolve(instance)
                 params = {
-                    "output": ["httptestid", "name", "delay", "status", "nextcheck"],
+                    # `nextcheck` is not a property of the web-scenario object
+                    # (silently ignored on 7.x, and never read here) — ADR 096.
+                    "output": ["httptestid", "name", "delay", "status"],
                     "selectHosts": ["hostid", "host"],
                     "selectSteps": ["name", "url", "status_codes", "no"],
                     "sortfield": "name",
@@ -110,7 +112,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 items = await client.call("item.get", {
                     "hostids": [s["hosts"][0]["hostid"] for s in scenarios if s.get("hosts")],
                     "output": ["itemid", "hostid", "key_", "lastvalue", "lastclock"],
-                    "search": {"key_": "web.test"},
+                    "search": {"key_": "*web.test*"},     # explicit wildcards, ADR 094
                     "searchWildcardsEnabled": True,
                     "limit": len(test_ids) * 5,
                 })

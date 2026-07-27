@@ -3,7 +3,7 @@ import httpx
 
 from zbbx_mcp.formatters import _ts
 from zbbx_mcp.resolver import InstanceResolver
-from zbbx_mcp.utils import resolve_group_ids
+from zbbx_mcp.utils import parse_time, resolve_group_ids
 
 MAINTENANCE_TYPES = {"0": "With data collection", "1": "Without data collection"}
 
@@ -96,10 +96,13 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
             """
             try:
                 try:
-                    since_ts = int(active_since)
-                    till_ts = int(active_till)
+                    # Shared parser: epoch, ISO date/datetime, or relative —
+                    # int() alone rejected every natural form (ADR 096).
+                    since_ts = parse_time(active_since)
+                    till_ts = parse_time(active_till)
                 except (ValueError, TypeError):
-                    return "Invalid timestamps. Use Unix timestamps (e.g., 1710000000)."
+                    return ("Invalid timestamps. Use a Unix timestamp, "
+                            "YYYY-MM-DD, or YYYY-MM-DD HH:MM.")
                 if till_ts <= since_ts:
                     return "active_till must be after active_since."
                 if till_ts - since_ts > 365 * 86400:
@@ -113,10 +116,19 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     "maintenance_type": 0 if collect_data else 1,
                     "timeperiods": [{"timeperiod_type": 0, "period": till_ts - since_ts}],
                 }
+                # Object arrays, not id lists: `hostids`/`groupids` were
+                # deprecated on maintenance.create in 6.0 and REMOVED in 7.2,
+                # so passing them is rejected — and with neither reaching the
+                # server the call fails anyway, since a window needs at least
+                # one host or group. Same shape host.create already uses.
                 if host_ids:
-                    params["hostids"] = [h.strip() for h in host_ids.split(",")]
+                    params["hosts"] = [
+                        {"hostid": h.strip()} for h in host_ids.split(",") if h.strip()
+                    ]
                 if group_ids:
-                    params["groupids"] = [g.strip() for g in group_ids.split(",")]
+                    params["groups"] = [
+                        {"groupid": g.strip()} for g in group_ids.split(",") if g.strip()
+                    ]
                 if description:
                     params["description"] = description
 

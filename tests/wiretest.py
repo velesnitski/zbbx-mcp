@@ -21,6 +21,7 @@ class RecordingClient:
 
     def __init__(self, responses=None):
         self.calls = []
+        self.rollback = []
         self._responses = responses or {}
 
     async def call(self, method, params):
@@ -38,6 +39,17 @@ class RecordingClient:
 
     def _set_cache(self, key, value):
         pass
+
+    # Rollback journal no-ops, recorded for assertions. Without these a write
+    # tool could not be wire-tested at all — it calls them after mutating.
+    def record_create(self, kind, obj_id, note=""):
+        self.rollback.append(("create", kind, obj_id, note))
+
+    def record_update(self, kind, obj_id, before=None, note=""):
+        self.rollback.append(("update", kind, obj_id, note))
+
+    def record_delete(self, kind, obj_id, before=None, note=""):
+        self.rollback.append(("delete", kind, obj_id, note))
 
 
 class CaptureMCP:

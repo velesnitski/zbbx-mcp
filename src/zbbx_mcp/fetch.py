@@ -170,7 +170,7 @@ async def fetch_traffic_map(client: ZabbixClient, hostids: list[str]) -> dict[st
             "output": ["hostid", "lastvalue", "key_"],
             "tags": [{"tag": "Application", "value": "Network interfaces", "operator": "1"}],
             "filter": {"status": STATUS_ENABLED},
-            "search": {"key_": "net.if.in["},
+            "search": {"key_": "*net.if.in[*"},   # explicit wildcards, ADR 094
             "searchWildcardsEnabled": True,
         })
     except Exception:
@@ -773,7 +773,11 @@ async def fetch_trends_batch(
             current = round(100 - current, 1)
             avg_val = round(100 - avg_val, 1)
             peak_val = round(100 - min_val, 1)  # min idle = max used
-            min_val = round(100 - max(avgs), 1) if avgs else 0
+            # max idle = min used. This read max(avgs) — an hourly MEAN — so
+            # peak and min sat on different grains and the floor was pulled up
+            # toward the average. Downstream that made "never below N%" checks
+            # fire on hosts that did idle deeply (ADR 097).
+            min_val = round(100 - max(peaks), 1) if peaks else 0
 
         # For traffic: convert to Mbps (respects ZABBIX_TRAFFIC_UNIT)
         if metric_name == "traffic":
@@ -790,9 +794,14 @@ async def fetch_trends_batch(
             min_val = round(min_val / GB_BYTES, 1)
 
         # Determine trend direction
-        if len(avgs) >= 2:
-            recent = sum(avgs[-len(avgs)//4:]) / max(1, len(avgs)//4) if avgs else 0
-            older = sum(avgs[:len(avgs)//4]) / max(1, len(avgs)//4) if avgs else 0
+        # Needs >= 4 points: with fewer, len//4 == 0, so the "recent" slice
+        # became the WHOLE list and "older" was empty -> older=0. For CPU
+        # (which then computes 100-older) that produced a ~-90% change and
+        # labelled every short series "dropping" (ADR 097).
+        if len(avgs) >= 4:
+            q = max(1, len(avgs) // 4)
+            recent = sum(avgs[-q:]) / q
+            older = sum(avgs[:q]) / q
             if metric_name == "cpu":
                 recent, older = 100 - recent, 100 - older
             if metric_name in ("traffic", "memory"):

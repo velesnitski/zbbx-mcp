@@ -129,7 +129,11 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 traffic_items = await client.call("item.get", {
                     "hostids": hostids,
                     "output": ["itemid", "hostid", "key_"],
-                    "search": {"key_": "net.if.in["},
+                    # Explicit wildcards — a bare literal under
+                    # searchWildcardsEnabled is an exact match and matches
+                    # nothing, which left the per-hour traffic gate below
+                    # permanently disengaged (ADR 094).
+                    "search": {"key_": "*net.if.in[*"},
                     "searchWildcardsEnabled": True,
                     "filter": {"status": "0"},
                 })
@@ -241,7 +245,11 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                         "overall": overall, "hours": service1_data["total"],
                     })
 
-                rows.sort(key=lambda r: (r["service1"] or 100))
+                # `or 100` treated a real 0.0% as "no data": a fully-dead host
+                # sorted behind an 88% one, so it was cut by max_results AND
+                # the worst-wins canonical fold below (which relies on this
+                # ascending order) kept the healthy sub-host instead (ADR 097).
+                rows.sort(key=lambda r: (100.0 if r["service1"] is None else r["service1"]))
 
                 # Fold sub-hosts to canonical (tasks.md #152): one physical
                 # machine = one row. Worst-wins: rows already sorted by
@@ -253,6 +261,10 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 # Filter and limit
                 total_all = len(rows)
                 healthy_count = sum(1 for r in rows if r["overall"] == "HEALTHY")
+                # Snapshot BEFORE the only_problems filter: the country roll-up
+                # below must describe the whole estate, not the problem subset
+                # (it read "1 server" for a country with many healthy ones).
+                all_rows = list(rows)
                 if only_problems:
                     rows = [r for r in rows if r["overall"] != "HEALTHY"]
                 shown = rows[:max_results]
@@ -273,13 +285,14 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
 
                 # Country summary
                 country_stats: dict[str, list] = {}
-                for r in rows:
+                for r in all_rows:
                     if r["country"]:
                         country_stats.setdefault(r["country"], []).append(r)
 
                 if country_stats:
                     parts.append("\n### Country Summary\n")
-                    parts.append("| Country | Servers | Avg service Uptime | DOWN |")
+                    # "Median", not "Avg" — median() is what is computed.
+                    parts.append("| Country | Servers | Median service Uptime | DOWN |")
                     parts.append("|---------|---------|-----------------|------|")
                     for ctry in sorted(country_stats):
                         cs = country_stats[ctry]
@@ -414,11 +427,19 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                             service2_up += 1
                         if all((service3_map.get(hid) or 0) >= 1 or hid in active_by_traffic for hid in group_ids):
                             service3_up += 1
-                        if any(hid in service1_map for hid in group_ids):
+                        # "checked" must admit the same evidence that can mark
+                        # a group up. Counting only check-ITEMS while traffic
+                        # alone could raise `up` let up exceed checked, so a
+                        # country whose one measured host was DOWN rendered as
+                        # "OK (2/1)" — a >100% ratio (ADR 097).
+                        if any(hid in service1_map or hid in active_by_traffic
+                               for hid in group_ids):
                             service1_checked += 1
-                        if any(hid in service2_map for hid in group_ids):
+                        if any(hid in service2_map or hid in active_by_traffic
+                               for hid in group_ids):
                             service2_checked += 1
-                        if any(hid in service3_map for hid in group_ids):
+                        if any(hid in service3_map or hid in active_by_traffic
+                               for hid in group_ids):
                             service3_checked += 1
 
                     def _status(up: int, checked: int) -> str:

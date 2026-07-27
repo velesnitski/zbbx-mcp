@@ -103,7 +103,12 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 time_from = now - (hours * 3600)
 
                 params = {
-                    "output": ["alertid", "status", "subject", "alerttype"],
+                    # `clock` is what the current/previous split below reads; it
+                    # was never requested, so every row fell back to `now` and
+                    # landed in `current`. With compare=True the query window is
+                    # 2x hours, so the headline count silently covered twice the
+                    # stated period and the trend row never rendered (ADR 096).
+                    "output": ["alertid", "clock", "status", "subject", "alerttype"],
                     "sortfield": "clock",
                     "sortorder": "DESC",
                     "limit": 2000,

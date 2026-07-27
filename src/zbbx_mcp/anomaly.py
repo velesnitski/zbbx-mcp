@@ -96,13 +96,23 @@ def seasonal_floor(
     normal diurnal band (not a drop); below it is genuinely anomalous for
     this time of day.
 
+    The bucket spans the target hour **±1**, because an exact-hour bucket
+    over 7 days holds only ~7 points and a nearest-rank 10th percentile of
+    7 is just the minimum — so one freak-low hour a week ago became the
+    floor and permanently silenced that hour-of-day (any later real drop
+    still cleared it and read "diurnal trough"). Adjacent hours have
+    near-identical load, so widening triples the sample without blurring
+    the diurnal shape, and the percentile becomes a real percentile
+    (ADR 097).
+
     Returns None when there aren't enough same-hour samples to form a band
     (caller then falls back to the plain baseline-ratio path with reduced
     confidence).
     """
+    neighbours = {(target_hour - 1) % 24, target_hour, (target_hour + 1) % 24}
     bucket = [
         v for (clock, v) in hourly_points
-        if (int(clock) // 3600) % 24 == target_hour
+        if (int(clock) // 3600) % 24 in neighbours
     ]
     if len(bucket) < min_samples:
         return None

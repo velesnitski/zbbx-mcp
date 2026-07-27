@@ -68,6 +68,7 @@ DENIED_OUTPUT_FIELDS = {
     "user.get": {"type", "rows_per_page"},   # removed 5.2 -> roleid (ADR 085)
     "host.get": {"available"},                # removed 6.0 -> active_available (ADR 088)
     "discoveryrule.get": {"lastclock"},       # never a property of an LLD rule (ADR 088)
+    "httptest.get": {"nextcheck"},            # not a web-scenario property (ADR 096)
 }
 
 
@@ -181,6 +182,139 @@ def iter_call_output_fields():
                     ]
                     if fields:
                         yield path, node.lineno, node.args[0].value, fields
+
+
+# method -> sortfields Zabbix actually accepts. Only methods whose sort
+# columns are NARROWER than the usual "any output field" are listed; an
+# illegal value is a hard -32500 that kills the call (ADR 096: mediatype.get
+# sorted by "name", which is not a sort column, so the tool errored on every
+# invocation). trend.get/history.get take no sort parameters at all.
+ALLOWED_SORTFIELDS = {
+    "mediatype.get": {"mediatypeid"},
+    "trend.get": set(),
+    "history.get": set(),
+    "alert.get": {"alertid", "clock", "eventid", "status"},
+    "auditlog.get": {"auditid", "clock"},
+}
+
+
+def iter_call_sortfields():
+    """Yield (path, lineno, method, sortfield) for every literal sortfield."""
+    for path in sorted(SRC.rglob("*.py")):
+        tree = ast.parse(path.read_text(), filename=str(path))
+        for node in ast.walk(tree):
+            if not (
+                isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Attribute)
+                and node.func.attr == "call"
+                and len(node.args) > 1
+                and isinstance(node.args[0], ast.Constant)
+                and isinstance(node.args[1], ast.Dict)
+            ):
+                continue
+            d = node.args[1]
+            for k, v in zip(d.keys, d.values, strict=False):
+                if (
+                    isinstance(k, ast.Constant) and k.value == "sortfield"
+                    and isinstance(v, ast.Constant) and isinstance(v.value, str)
+                ):
+                    yield path, node.lineno, node.args[0].value, v.value
+
+
+class TestSortfieldGuard:
+    def test_sortfields_are_legal(self):
+        violations = []
+        for path, lineno, method, field in iter_call_sortfields():
+            allowed = ALLOWED_SORTFIELDS.get(method)
+            if allowed is None:
+                continue
+            if field not in allowed:
+                detail = (
+                    "accepts no sort parameters at all"
+                    if not allowed else f"allows only {sorted(allowed)}"
+                )
+                violations.append(
+                    f"{path.relative_to(ROOT)}:{lineno} — {method} sortfield="
+                    f"{field!r}; {method} {detail}. Zabbix rejects with -32500 "
+                    "(or silently ignores). Sort client-side. See ADR 096"
+                )
+        assert not violations, "\n".join(violations)
+
+    def test_guard_is_not_vacuous(self):
+        # Must actually reach the narrow-sort method it exists to protect.
+        seen = {(m, f) for _, _, m, f in iter_call_sortfields()}
+        assert ("mediatype.get", "mediatypeid") in seen
+        assert len(seen) >= 8
+
+
+def iter_call_wildcard_searches():
+    """Yield (path, lineno, method, field, term) for every ``client.call``
+    dict literal that enables ``searchWildcardsEnabled`` alongside a literal
+    ``search`` term.
+
+    Inline literals only — by design. The sites that build params in a
+    variable are the ones taking a *caller's* query, and they wrap it
+    (``q = s if "*" in s else f"*{s}*"``); it is the hardcoded literals that
+    got this wrong.
+    """
+    for path in sorted(SRC.rglob("*.py")):
+        tree = ast.parse(path.read_text(), filename=str(path))
+        for node in ast.walk(tree):
+            if not (
+                isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Attribute)
+                and node.func.attr == "call"
+                and len(node.args) > 1
+                and isinstance(node.args[0], ast.Constant)
+                and isinstance(node.args[1], ast.Dict)
+            ):
+                continue
+            d = node.args[1]
+            pairs = {
+                k.value: v for k, v in zip(d.keys, d.values, strict=False)
+                if isinstance(k, ast.Constant) and isinstance(k.value, str)
+            }
+            flag = pairs.get("searchWildcardsEnabled")
+            if not (isinstance(flag, ast.Constant) and flag.value is True):
+                continue
+            search = pairs.get("search")
+            if not isinstance(search, ast.Dict):
+                continue
+            for sk, sv in zip(search.keys, search.values, strict=False):
+                if (
+                    isinstance(sk, ast.Constant) and isinstance(sk.value, str)
+                    and isinstance(sv, ast.Constant) and isinstance(sv.value, str)
+                ):
+                    yield path, node.lineno, node.args[0].value, sk.value, sv.value
+
+
+class TestSearchWildcardGuard:
+    """ADR 094 — `searchWildcardsEnabled` turns a bare term into an EXACT match.
+
+    With the flag on, Zabbix stops wrapping the term in ``%…%`` and only
+    translates ``*`` → ``%``. A literal with no ``*`` therefore matches the
+    key *exactly* — and since no real item key equals a prefix like
+    ``vfs.fs.size``, the query silently returns nothing. Five call sites
+    shipped this way; each rendered a confident, fully-populated-looking
+    answer built from zero rows.
+    """
+
+    def test_literal_search_terms_carry_a_wildcard(self):
+        violations = [
+            f"{path.relative_to(ROOT)}:{lineno} — {method} search[{field!r}]="
+            f"{term!r} has no '*' while searchWildcardsEnabled is True, so it "
+            "is an EXACT match and returns nothing. Wrap it: "
+            f"'*{term}*'. See ADR 094"
+            for path, lineno, method, field, term in iter_call_wildcard_searches()
+            if "*" not in term
+        ]
+        assert not violations, "\n".join(violations)
+
+    def test_guard_is_not_vacuous(self):
+        # Worthless unless it actually sees the call sites it guards.
+        seen = list(iter_call_wildcard_searches())
+        assert len(seen) >= 4, f"scanner found only {len(seen)} wildcard searches"
+        assert all("*" in term for *_, term in seen)
 
 
 class TestOutputFieldGuard:

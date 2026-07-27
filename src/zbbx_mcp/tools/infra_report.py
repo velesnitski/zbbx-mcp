@@ -221,7 +221,13 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                         })
 
                 rows.sort(key=lambda r: (r["Product"], r["Tier"], r["Host"]))
-                unused_rows.sort(key=lambda r: (r.get("CPU Used %") or 100))
+                # Explicit None check — `or 100` sent a genuine 0.0% (a fully
+                # idle box, i.e. the top decommission candidate) to the bottom
+                # of the underloaded sheet (ADR 097).
+                unused_rows.sort(
+                    key=lambda r: (100.0 if r.get("CPU Used %") is None
+                                   else r["CPU Used %"])
+                )
 
                 # Provider summary
                 prov_data: dict[str, dict] = {}

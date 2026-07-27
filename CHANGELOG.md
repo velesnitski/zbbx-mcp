@@ -5,6 +5,73 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.16.27] - 2026-07-27
+
+Review batch: five root causes behind a class of defect that returns a
+confident wrong answer instead of an error. Eight were confirmed against a
+live instance. No tool-count change (165).
+
+### Fixed — country extraction picked a tag over the real country (ADR 093)
+`extract_country` scanned one alternation with `re.search`, which returns the
+LEFTMOST match, so a datacenter/role/market segment beat the indexed
+`<cc><digit>` suffix that actually encodes location. Where that tag happened to
+be a real ISO code, hosts were reported in a country they have no presence in —
+verified live, a country filter returned several hosts, carrying real traffic,
+that are physically elsewhere. Where it wasn't a real code, the bogus-but-truthy
+value short-circuited `resolve_country`'s inventory fallback, so correct
+inventory data could not fix the host. Now the indexed form is tried first
+regardless of position, and only a real ISO 3166-1 code is ever returned (the
+allow-list is derived from the existing reference table). `normalize_country`
+validates two-letter input instead of echoing any two letters back.
+
+### Fixed — `searchWildcardsEnabled` made bare search terms EXACT (ADR 094)
+With the flag set, Zabbix stops wrapping the term in `%…%` and only translates
+`*`. Five hardcoded literals therefore matched nothing and rendered complete,
+plausible answers built from zero rows: `analyze_server_roles` classified the
+ENTIRE fleet as "idle" at 0.0 Mbps; `get_service_uptime_report`'s per-hour
+traffic gate (ADR 081) never engaged; `get_low_disk_servers` saw no `vfs.fs.*`
+items; `get_web_scenario_status` could never report a failure; and
+`fetch_traffic_map`'s tag-based NIC discovery was dead. Wildcards are now
+explicit, and an AST guard fails the suite on any literal search term without
+one.
+
+### Fixed — audit resource/action tables were offset from Zabbix (ADR 095)
+Verified live: rows the code labelled "Trigger" named hosts, and rows labelled
+"Host group" named items — the whole table was shifted, so every row borrowed a
+neighbouring object class's label while `resource=` filtered on a different
+class than requested. Four modules also inlined the host resource type as `2`,
+which is not an assigned type, so those filters matched zero rows and
+`get_external_ip_history` reported no rotations ever. Corrected to the 6.0+
+constants, named once in `data.py` and used everywhere; an unmapped code now
+renders `Type N` rather than borrowing a wrong label.
+
+### Fixed — sortfield, removed write params, unread output, trend order (ADR 096)
+`mediatype.get` was sorted by `name`, which is not a sort column — a hard -32500
+on every call, so `get_media_types` never worked. `maintenance.create` passed
+`hostids`/`groupids`, removed in 7.2, so the tool was broken outright.
+`get_alert_summary` never requested the `clock` its current/previous split reads,
+so every row counted as current and the default `compare=True` window silently
+covered twice the stated period. `get_trends` passed sort params `trend.get`
+ignores, so `limit` returned the OLDEST retained hours. Also: `map.get` select
+params don't support `"count"` (counts always rendered `?`), and `nextcheck` is
+not a web-scenario property. Both time arguments now accept `YYYY-MM-DD` via the
+shared `parse_time` instead of raising on it. New sortfield allow-list guard.
+
+### Fixed — analytics correctness cluster (ADR 097)
+Eleven calculation defects that produced plausible numbers: the `pused` disk
+predictor was sign-inverted (trend left as used-% while the current value was
+flipped to free-%) making it all false negatives on a `pused` fleet; `or 100`
+ranked a 0%-uptime host as perfectly healthy and thereby broke the worst-wins
+canonical fold; the health matrix could render a >100% ratio; the CPU floor was
+derived from hourly means rather than maxima; `history: 0` blinded the
+blast-radius tool to unsigned-integer items; unjudged and agent-down hosts were
+counted as "healthy"; peak analysis picked the first interface rather than the
+busiest; the seasonal floor was effectively the bucket minimum, so one freak-low
+hour permanently silenced that hour-of-day; the country summary described the
+post-filter subset and labelled a median "Avg"; trend direction was garbage below
+four points; and the in-progress hour always scored DOWN. `get_predictive_alerts`
+moved to a new `tools/predictive.py` (`executive.py` hit its size budget).
+
 ## [1.16.26] - 2026-07-24
 
 ### Fixed — uptime under-count: read value_max, not integer-truncated value_avg (task 175)

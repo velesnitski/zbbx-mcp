@@ -6,21 +6,39 @@ from datetime import datetime, timezone
 
 import httpx
 
+from zbbx_mcp.data import AUDIT_RESOURCE_HOST
 from zbbx_mcp.resolver import InstanceResolver
 
-# auditlog.get resourcetype values
+# auditlog.get resourcetype values — the Zabbix 6.0+ audit constants.
+#
+# The previous table was offset from reality: it read 4 as "Trigger" (really
+# Host) and 15 as "Host group" (really Item), so audit output confidently
+# mislabelled every row — host operations shown as triggers, item operations
+# as host groups — while the `resource=` filter selected a different object
+# class than the caller asked for. Verified live against this instance for
+# the two load-bearing codes; the remainder are the documented constants.
+# Anything unmapped renders as "Type N" rather than borrowing a wrong label.
 _RESOURCE_NAMES = {
-    0: "User", 2: "Host", 3: "Item", 4: "Trigger", 5: "Graph",
-    6: "Template", 7: "Action", 12: "Script", 13: "Relay",
-    14: "Maintenance", 15: "Host group", 18: "Map", 19: "Discovery rule",
-    22: "Media type", 23: "User group", 25: "Template link",
-    29: "Discovery check", 33: "Dashboard", 34: "Service",
+    0: "User", 3: "Media type", 4: "Host", 5: "Action", 6: "Graph",
+    11: "User group", 13: "Trigger", 14: "Host group", 15: "Item",
+    16: "Image", 17: "Value map", 18: "Service", 19: "Map",
+    22: "Web scenario", 23: "Discovery rule", 25: "Script", 26: "Relay",
+    27: "Maintenance", 28: "Regular expression", 29: "Macro",
+    30: "Template", 31: "Trigger prototype", 32: "Icon map",
+    33: "Dashboard", 34: "Event correlation", 35: "Graph prototype",
+    37: "Host prototype", 38: "Autoregistration", 39: "Module",
+    40: "Settings", 41: "Housekeeping", 42: "Authentication",
+    43: "Template dashboard", 44: "User role", 45: "API token",
+    46: "Scheduled report", 47: "HA node", 48: "SLA",
+    49: "User directory", 50: "Template group", 51: "Connector",
 }
 
+# Audit actions. The old table mapped 4 to "Login" (4 is Logout), invented
+# 5 for "Failed login" (unassigned — so that filter could never match), and
+# fabricated 6-9 as timeperiod operations.
 _ACTION_NAMES = {
-    0: "Add", 1: "Update", 2: "Delete", 4: "Login", 5: "Failed login",
-    6: "History clear", 7: "Timeperiod add", 8: "Timeperiod update",
-    9: "Timeperiod delete",
+    0: "Add", 1: "Update", 2: "Delete", 4: "Logout", 7: "Execute",
+    8: "Login", 9: "Failed login", 10: "History clear",
 }
 
 
@@ -63,12 +81,12 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
 
                 # Resource type filter
                 resource_map = {
-                    "user": 0, "host": 2, "item": 3, "trigger": 4,
-                    "graph": 5, "template": 6, "action": 7, "script": 12,
-                    "relay": 13, "maintenance": 14, "hostgroup": 15,
-                    "host group": 15, "map": 18, "discovery": 19,
-                    "media": 22, "usergroup": 23, "dashboard": 33,
-                    "service": 34,
+                    "user": 0, "media": 3, "host": AUDIT_RESOURCE_HOST,
+                    "action": 5, "graph": 6, "usergroup": 11, "trigger": 13,
+                    "hostgroup": 14, "host group": 14, "item": 15,
+                    "service": 18, "map": 19, "discovery": 23, "script": 25,
+                    "relay": 26, "maintenance": 27, "template": 30,
+                    "dashboard": 33, "endpoint": AUDIT_RESOURCE_HOST,
                 }
                 if resource:
                     rid = resource_map.get(resource.lower())
@@ -79,7 +97,8 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 # Action filter
                 action_map = {
                     "add": 0, "create": 0, "update": 1, "delete": 2,
-                    "login": 4, "failed login": 5,
+                    "logout": 4, "execute": 7, "login": 8,
+                    "failed login": 9, "history clear": 10,
                 }
                 if action:
                     aid = action_map.get(action.lower())
@@ -99,7 +118,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 # Host ID filter — search in resourceid
                 if host_id:
                     params["filter"] = params.get("filter", {})
-                    params["filter"]["resourcetype"] = 2  # Host
+                    params["filter"]["resourcetype"] = AUDIT_RESOURCE_HOST
                     params["filter"]["resourceid"] = host_id
 
                 # Time filters
@@ -139,7 +158,8 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     time_str = ts.strftime("%Y-%m-%d %H:%M")
                     username = r.get("username", "")
                     act = _ACTION_NAMES.get(int(r.get("action", -1)), str(r.get("action", "")))
-                    res_type = _RESOURCE_NAMES.get(int(r.get("resourcetype", -1)), str(r.get("resourcetype", "")))
+                    rt_raw = int(r.get("resourcetype", -1))
+                    res_type = _RESOURCE_NAMES.get(rt_raw, f"Type {rt_raw}")
                     name = r.get("resourcename", "")
                     # Extract meaningful details from recordsetid/details
                     details = r.get("details", "")

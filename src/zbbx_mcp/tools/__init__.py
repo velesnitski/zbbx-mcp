@@ -39,6 +39,7 @@ from zbbx_mcp.tools import (
     maintenance,
     maps,
     media,
+    predictive,
     problems,
     proxies,
     report,
@@ -300,7 +301,7 @@ def register_all(
         infra_report, costs_import, costs_audit, costs_summary,
         traffic, traffic_erosion, dashboard_report, full_report,
         trends_compare, trends_health,
-        html_report, geo_traffic, geo_health, executive, ceo_report, service_brief, analysis,
+        html_report, geo_traffic, geo_health, executive, predictive, ceo_report, service_brief, analysis,
         web_scenarios, correlation, ip_history, loss_drift, disruption, risk, floods,
         telemetry, diagnose, triage, check_flaps,
     ]

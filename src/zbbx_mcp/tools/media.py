@@ -31,11 +31,18 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     "output": ["mediatypeid", "name", "type", "status",
                                "description", "maxsessions", "maxattempts"],
                     "selectUsers": ["userid", "username"],
-                    "sortfield": "name",
+                    # mediatype.get accepts ONLY mediatypeid as a sortfield —
+                    # unlike most *.get methods, "name" is not a sort column and
+                    # Zabbix rejects the whole call with -32500, so this tool
+                    # errored on every invocation. Sort by name below instead
+                    # (ADR 096).
+                    "sortfield": "mediatypeid",
                 })
 
                 if not data:
                     return "No media types found."
+
+                data = sorted(data, key=lambda m: (m.get("name") or "").lower())
 
                 lines = []
                 for m in data:

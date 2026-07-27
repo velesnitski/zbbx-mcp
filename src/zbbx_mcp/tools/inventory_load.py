@@ -684,7 +684,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()):
                 import asyncio as _aio
                 vfs_task = client.call("item.get", {
                     "output": ["itemid", "hostid", "key_", "lastvalue"],
-                    "search": {"key_": "vfs.fs.size"},
+                    "search": {"key_": "*vfs.fs.size*"},   # explicit wildcards, ADR 094
                     "searchWildcardsEnabled": True,
                     "filter": {"status": "0"},
                 })

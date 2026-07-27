@@ -7,9 +7,11 @@ from statistics import median, stdev
 import httpx
 
 from zbbx_mcp.anomaly import (
+    ARTIFACT,
     BLOCKED_ACUTE,
     BLOCKED_SUSTAINED,
     LOW_DEMAND,
+    UNKNOWN,
     classify_drop,
     metric_recent_baseline_ratio,
     pick_traffic_interface,
@@ -625,7 +627,8 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 # Hosts that come back blocked become "candidates" for the
                 # corroboration pass; everything else is settled here.
                 skips = {"no_history": 0, "no_baseline_window": 0,
-                         "below_floor": 0, "healthy": 0, "low_demand": 0}
+                         "below_floor": 0, "healthy": 0, "low_demand": 0,
+                         "agent_down": 0}
                 analyzed = 0
                 candidates: list[dict] = []
                 for hid, ifaces in host_ifaces.items():
@@ -684,6 +687,12 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                         })
                     elif verdict.state == LOW_DEMAND:
                         skips["low_demand"] += 1
+                    elif verdict.state == ARTIFACT:
+                        # Baseline under the floor — never judged, so it must
+                        # not be reported as healthy (ADR 097).
+                        skips["below_floor"] += 1
+                    elif verdict.state == UNKNOWN:
+                        skips["agent_down"] += 1
                     else:
                         skips["healthy"] += 1
 
@@ -760,6 +769,12 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                         })
                     elif verdict.state == LOW_DEMAND:
                         skips["low_demand"] += 1
+                    elif verdict.state == ARTIFACT:
+                        # Baseline under the floor — never judged, so it must
+                        # not be reported as healthy (ADR 097).
+                        skips["below_floor"] += 1
+                    elif verdict.state == UNKNOWN:
+                        skips["agent_down"] += 1
                     else:
                         skips["healthy"] += 1
 
@@ -776,6 +791,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                         f"No blocks detected (analyzed {analyzed} servers; "
                         f"{skips['healthy']} healthy/diurnal, "
                         f"{skips['low_demand']} low-demand-not-blocked, "
+                        f"{skips['agent_down']} agent-down (not a traffic block), "
                         f"{skips['below_floor'] + skips['no_baseline_window'] + skips['no_history']} "
                         "skipped for insufficient/low baseline)."
                         + excluded_test_note(excluded)

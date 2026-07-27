@@ -50,6 +50,14 @@ GB_BYTES = 1_073_741_824  # 1 GB in bytes
 
 # Zabbix API filter values used across many calls
 STATUS_ENABLED = "0"
+
+# auditlog.get resource/action codes (Zabbix 6.0+ audit constants). Named
+# because the host code was inlined as a bare `2` in four modules — and `2`
+# is not an assigned resource type at all, so every one of those filters
+# matched zero rows and the features built on them reported "nothing found"
+# rather than failing (ADR 095). Host is 4.
+AUDIT_RESOURCE_HOST = 4
+AUDIT_ACTION_UPDATE = 1
 # service health check item keys — configurable per deployment
 KEY_service_PRIMARY = os.environ.get("ZABBIX_SERVICE_CHECK_KEY", "")
 KEY_service_SECONDARY = os.environ.get("ZABBIX_SERVICE2_CHECK_KEY", "")

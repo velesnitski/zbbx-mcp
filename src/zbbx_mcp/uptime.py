@@ -102,14 +102,23 @@ def compute_host_uptime(
 
     per_hour_gate = isinstance(host_has_traffic, (set, frozenset))
     first_h = min(sample)
-    total = now_h - first_h + 1
     up = 0
+    total = 0
     for h in range(first_h, now_h + 1):
         if h in sample:
+            total += 1
             up += 1 if sample[h] else 0
         elif (h in host_has_traffic) if per_hour_gate else host_has_traffic:
+            total += 1
             up += 1  # alive per traffic that hour, check silent
-        # else: missing + no traffic → down (counted in denominator only)
+        elif h == now_h:
+            # The CURRENT hour is still in progress — Zabbix has not flushed
+            # its trend row yet, so "no sample" here means unmeasured, not
+            # down. Counting it cost every host exactly one hour on every
+            # window (99.86% on 30d, 96% on 24h) (ADR 097).
+            continue
+        else:
+            total += 1   # missing + no traffic → down (denominator only)
     return (up, total)
 
 
