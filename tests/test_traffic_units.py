@@ -18,7 +18,9 @@ EXECUTIVE = TOOLS / "executive.py"
 # Literals that can only be a raw<->Mbps traffic conversion. 1e9 (bytes->GB)
 # and 1000 (Mbps->Gbps, applied to already-converted values) are legitimate
 # and deliberately absent.
-_TRAFFIC_LITERALS = {1e6, 1_000_000, 125_000}
+# `1e6` alone covers the int form too: 1_000_000 == 1e6, so set membership
+# matches both spellings (asserted below so this is not taken on faith).
+_TRAFFIC_LITERALS = {1e6, 125_000}
 
 
 def iter_traffic_literals():
@@ -63,6 +65,14 @@ class TestNoHardcodedTrafficDivisor:
     def test_guard_is_not_vacuous(self):
         # The scanner must actually parse the tool tree.
         assert len(list(TOOLS.rglob("*.py"))) > 30
+
+    def test_literal_set_matches_both_spellings(self):
+        # The guard stores 1e6 only; both spellings must still be caught.
+        assert 1_000_000 in _TRAFFIC_LITERALS
+        assert 1e6 in _TRAFFIC_LITERALS
+        assert 125_000 in _TRAFFIC_LITERALS
+        assert 1_000_000_000 not in _TRAFFIC_LITERALS   # bytes->GB is legitimate
+        assert 1000 not in _TRAFFIC_LITERALS            # Mbps->Gbps is legitimate
 
     def test_helpers_honour_the_unit_setting(self):
         from zbbx_mcp.fetch import from_mbps, to_kbps, to_mbps
