@@ -412,11 +412,29 @@ _COUNTRY_NAMES: dict[str, str] = {
 }
 
 
-# Every valid ISO 3166-1 alpha-2 code, derived from the reference table
-# above rather than hand-listed, so the two can never drift apart. This is
-# the allow-list that keeps a datacenter/role tag from being reported as a
-# country (ADR 093).
-ISO2_CODES: frozenset[str] = frozenset(_COUNTRY_NAMES.values())
+# ISO 3166-1 alpha-2 codes with no entry in the name table above — mostly
+# dependencies and overseas territories, which have a code but rarely a
+# useful ISO-3/English-name lookup here.
+#
+# They matter because ADR 093 made the allow-list LOAD-BEARING: a code
+# outside it is treated as "not a country" and discarded. Deriving the set
+# from the name table alone therefore silently erased ~50 real codes — a
+# host in one of these territories resolved to a blank country everywhere,
+# and a filter on such a code was rejected as unknown input. Exactly the
+# confident-wrong-answer class ADR 093 set out to remove (ADR 100).
+_ISO2_TERRITORIES: frozenset[str] = frozenset({
+    "AI", "AQ", "AS", "AW", "AX", "BL", "BM", "BQ", "BV", "CC",
+    "CK", "CW", "CX", "EH", "FK", "FO", "GF", "GG", "GI", "GL",
+    "GP", "GS", "GU", "HM", "IM", "IO", "JE", "KY", "MF", "MP",
+    "MQ", "MS", "NC", "NF", "NU", "PF", "PM", "PN", "RE", "SH",
+    "SJ", "SX", "TC", "TF", "TK", "UM", "VG", "VI", "WF", "YT",
+})
+
+# The allow-list that keeps a datacenter/role tag from being reported as a
+# country (ADR 093). 250 entries = the 249 officially assigned ISO 3166-1
+# alpha-2 codes plus "XK" (Kosovo — user-assigned, not official, but in
+# practical use). Pinned by a test so it cannot silently shrink again.
+ISO2_CODES: frozenset[str] = frozenset(_COUNTRY_NAMES.values()) | _ISO2_TERRITORIES
 
 
 def countries_for_region(region: str) -> set[str]:

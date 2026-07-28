@@ -5,6 +5,55 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.16.30] - 2026-07-28
+
+Independent audit of the ADR 093-099 change set (~30 files, previously
+unreviewed). Two of those fixes had introduced the same class of defect they
+were written to remove; both are fixed here, with the cases that would have
+caught them.
+
+### Fixed — the country allow-list erased ~50 real countries (ADR 100)
+ADR 093 made `ISO2_CODES` load-bearing (a code outside it is discarded as "not
+a country"), but derived it from the ISO-3/English NAME table, which covers
+only 200 codes. The ~50 alpha-2 codes with no name entry -- mostly dependencies
+and overseas territories -- therefore became invalid: a host in one resolved to
+a blank country everywhere `extract_country` is used, dropping silently out of
+every country roll-up across ~60 call sites, and `normalize_country` rejected a
+genuine ISO-2 code as unknown input. The allow-list is now the union of the
+name table and an explicit territory set (250 = 249 official + `XK`), pinned by
+a test. The ADR 093 property is unchanged: a non-ISO tag is still rejected.
+
+### Fixed — detect_disruption_wave went blind to total outages (ADR 100)
+ADR 098 required an interface to report in BOTH windows, so a renamed item
+could not inflate the baseline side and manufacture a drop. But a host that
+goes completely dark has NO recent rows, so it was skipped entirely and never
+analysed -- precisely the mass-outage case the tool exists to find. The
+accompanying test covered only the multi-NIC variant, which is how it shipped.
+Aggregation now goes through one shared pure `aggregate_host_windows`: a bond
+is not additional to its slaves (no double count), only interfaces in both
+windows contribute (no phantom drop), and total silence is an outage with
+recent = 0.0 (not an absent host). Independent NICs sum rather than max -- two
+active 3 Mbps cards genuinely carry 6, and a max would drop that host under a
+5 Mbps floor.
+
+### Fixed — get_trends was only half-bounded (ADR 100)
+ADR 096 bounded the default call, but an explicit `time_from` left `time_till`
+open while still sending `limit`, which the server applies to an ascending
+scan -- so the caller got the OLDEST rows of the range, now sorted newest-first
+and therefore more misleading than before. The window now anchors on its end
+and walks back far enough to hold `limit` rows.
+
+### Changed — seasonal_floor min_samples scales with the widened bucket (ADR 100)
+ADR 097 widened the bucket to the target hour +/-1 but left `min_samples` at 3,
+a threshold set for a bucket a third of the size -- so a floor could form from a
+single day's three consecutive hours. Raised to 9 (3 hours x 3 days).
+
+Also: the ADR 098 traffic guard scanned only `tools/` despite claiming
+tree-wide coverage (now the whole package, with named-constant definitions
+exempted); the aggregation test imports the shared rule instead of restating
+it; two tautological assertions replaced; stale CLAUDE.md module row fixed.
+870 -> 872 tests.
+
 ## [1.16.29] - 2026-07-28
 
 ### Added — investigation-ready `get_host` (ADR 099)

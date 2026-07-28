@@ -12,7 +12,8 @@ import ast
 import pathlib
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
-TOOLS = ROOT / "src" / "zbbx_mcp" / "tools"
+SRC = ROOT / "src" / "zbbx_mcp"
+TOOLS = SRC / "tools"
 EXECUTIVE = TOOLS / "executive.py"
 
 # Literals that can only be a raw<->Mbps traffic conversion. 1e9 (bytes->GB)
@@ -23,20 +24,45 @@ EXECUTIVE = TOOLS / "executive.py"
 _TRAFFIC_LITERALS = {1e6, 125_000}
 
 
+def _named_constant_literals(tree):
+    """Constant nodes that ARE the definition of a named constant.
+
+    ``MB_DECIMAL = 1_000_000`` and ``_TRAFFIC_DIVISOR = 125_000 if ... else
+    1_000_000`` are the canonical definitions — naming the value is exactly
+    the fix this guard exists to enforce, so the definitions must not be
+    reported as violations of it.
+    """
+    exempt = set()
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Assign):
+            continue
+        if not any(
+            isinstance(t, ast.Name) and t.id.lstrip("_").isupper()
+            for t in node.targets
+        ):
+            continue
+        for sub in ast.walk(node.value):
+            if isinstance(sub, ast.Constant):
+                exempt.add(id(sub))
+    return exempt
+
+
 def iter_traffic_literals():
-    """Yield (path, lineno, value) for traffic-divisor literals in tools/.
+    """Yield (path, lineno, value) for traffic-divisor literals in src/.
 
     Comments are invisible to the AST, so the historical notes explaining the
     old constants do not trip this.
     """
-    for path in sorted(TOOLS.rglob("*.py")):
+    for path in sorted(SRC.rglob("*.py")):
         tree = ast.parse(path.read_text(), filename=str(path))
+        exempt = _named_constant_literals(tree)
         for node in ast.walk(tree):
             if (
                 isinstance(node, ast.Constant)
                 and isinstance(node.value, (int, float))
                 and not isinstance(node.value, bool)
                 and node.value in _TRAFFIC_LITERALS
+                and id(node) not in exempt
             ):
                 yield path, node.lineno, node.value
 
@@ -63,8 +89,12 @@ class TestNoHardcodedTrafficDivisor:
         assert not violations, "\n".join(violations)
 
     def test_guard_is_not_vacuous(self):
-        # The scanner must actually parse the tool tree.
-        assert len(list(TOOLS.rglob("*.py"))) > 30
+        # Must cover the WHOLE package, not just tools/ — the shared helpers
+        # in data/uptime/anomaly/fetch convert traffic too (ADR 100).
+        scanned = list(SRC.rglob("*.py"))
+        assert len(scanned) > 40
+        assert any(p.name == "fetch.py" for p in scanned)
+        assert any(p.parent.name == "tools" for p in scanned)
 
     def test_literal_set_matches_both_spellings(self):
         # The guard stores 1e6 only; both spellings must still be caught.

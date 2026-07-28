@@ -85,7 +85,7 @@ def seasonal_floor(
     target_hour: int,
     *,
     pct: float = 10.0,
-    min_samples: int = 3,
+    min_samples: int = 9,
 ) -> float | None:
     """Return the ``pct``-percentile traffic for ``target_hour`` (0-23 UTC).
 
@@ -104,6 +104,14 @@ def seasonal_floor(
     near-identical load, so widening triples the sample without blurring
     the diurnal shape, and the percentile becomes a real percentile
     (ADR 097).
+
+    ``min_samples`` is 9 (3 hours × 3 days), not 3: widening the bucket
+    tripled its size, so the old threshold of 3 became satisfiable by a
+    single day's three consecutive hours — a floor built from one day of
+    history, where the function previously declined and handed off to the
+    lower-confidence baseline-ratio path. Scaling the threshold with the
+    bucket keeps "enough history to know what normal looks like" meaning the
+    same thing it did before (ADR 100).
 
     Returns None when there aren't enough same-hour samples to form a band
     (caller then falls back to the plain baseline-ratio path with reduced
@@ -164,6 +172,58 @@ def aggregate_hourly_by_country(
         for clock, val in series:
             acc[clock] = acc.get(clock, 0.0) + float(val)
     return {cc: sorted(acc.items()) for cc, acc in by_country.items()}
+
+
+def aggregate_host_windows(
+    entries: list[tuple[str, float | None, float | None]],
+) -> tuple[float, float] | None:
+    """Collapse one host's per-interface (key, baseline, recent) into a pair.
+
+    Returns ``(baseline, recent)`` in raw units, or None when the host has no
+    usable baseline at all.
+
+    Three rules, each fixing a distinct way of getting the wrong answer:
+
+    1. **A bond is not additional to its slaves.** ``bond0`` and ``eno1`` /
+       ``eno2`` all match the traffic key list, but the bond *is* the slaves,
+       so summing counted a bonded host twice — which halved the effective
+       absolute baseline floor. When a bond is present it alone represents
+       the host; otherwise genuinely independent NICs are summed, because two
+       active 3 Mbps cards really do carry 6 Mbps (a plain max would drop
+       that host under a 5 Mbps floor).
+    2. **Compare like with like.** Only interfaces reporting in BOTH windows
+       contribute, so an interface with baseline rows but no recent rows (a
+       renamed item, a removed card) cannot inflate one side and manufacture
+       a drop that never happened.
+    3. **Total silence is an outage, not an absent host.** If NO interface
+       reports in the recent window while the baseline exists, the host went
+       fully dark — recent is 0.0, not "skip". Dropping it would blind the
+       disruption detector to precisely the mass-outage case it exists to
+       find (ADR 100).
+
+    Pure.
+    """
+    both = [(k, b, r) for k, b, r in entries if b is not None and r is not None]
+    if not both:
+        base_only = [(k, b) for k, b, _ in entries if b is not None]
+        if not base_only:
+            return None
+        dark_bonds = [b for k, b in base_only if _is_bond_key(k)]
+        baseline = (
+            max(dark_bonds) if dark_bonds else sum(b for _, b in base_only)
+        )
+        return baseline, 0.0
+
+    bond_pairs = [(b, r) for k, b, r in both if _is_bond_key(k)]
+    if bond_pairs:
+        # One bond carries the host; if several, the busiest represents it.
+        return max(bond_pairs, key=lambda br: br[0])
+    return sum(b for _, b, _ in both), sum(r for _, _, r in both)
+
+
+def _is_bond_key(key: str) -> bool:
+    """True if an item key names a bonded interface (its slaves are separate)."""
+    return "bond" in (key or "").lower()
 
 
 def recent_baseline_from_daily(
@@ -379,5 +439,6 @@ __all__ = [
     "ARTIFACT", "UNKNOWN",
     "DropVerdict", "percentile", "seasonal_floor",
     "pick_traffic_interface", "metric_recent_baseline_ratio",
+    "aggregate_host_windows",
     "recent_baseline_from_daily", "aggregate_hourly_by_country", "classify_drop",
 ]

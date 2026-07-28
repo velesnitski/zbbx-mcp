@@ -152,19 +152,21 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     "limit": limit,
                     "output": "extend",
                 }
+                # `limit` is applied by the server to an ASCENDING scan, so the
+                # window's START decides which rows come back. Anchor to its
+                # END and walk back far enough to hold `limit` hourly rows:
+                # otherwise a caller passing only `time_from` still receives
+                # the OLDEST rows of that range — which the newest-first sort
+                # below would then present as if they were the latest
+                # (ADR 100; the ADR 096 fix covered only the default call).
+                now = int(time.time())
                 t_from = _parse_epoch(time_from)
-                t_till = _parse_epoch(time_till)
-                if t_from:
-                    params["time_from"] = t_from
-                if t_till:
-                    params["time_till"] = t_till
-                if not t_from:
-                    # No explicit start: ask for a window that can hold `limit`
-                    # hourly rows ending now, so the default answer is recent.
-                    now = int(time.time())
-                    params["time_from"] = now - max(1, limit) * 3600
-                    if not t_till:
-                        params["time_till"] = now
+                t_till = _parse_epoch(time_till) or now
+                span = max(1, limit) * 3600
+                params["time_till"] = t_till
+                params["time_from"] = (
+                    max(t_from, t_till - span) if t_from else t_till - span
+                )
 
                 data = await client.call("trend.get", params)
 

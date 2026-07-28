@@ -19,6 +19,7 @@ import time as _time
 
 import httpx
 
+from zbbx_mcp.anomaly import aggregate_host_windows
 from zbbx_mcp.classify import classify_host as _classify_host
 from zbbx_mcp.data import (
     KEY_SERVICE_BPS,
@@ -554,11 +555,15 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     cohort_keys[h["hostid"]] = f"{prod}:{tier}:{hcc}"
 
                 items = await client.call("item.get", {
+                    # key_ is needed to tell a bond from its slaves (ADR 100).
+                    "output": ["itemid", "hostid", "key_"],
                     "hostids": hostids,
-                    "output": ["itemid", "hostid"],
                     "filter": {"key_": TRAFFIC_IN_KEYS, "status": "0"},
                 })
                 iid_to_hid: dict[str, str] = {it["itemid"]: it["hostid"] for it in items}
+                iid_key: dict[str, str] = {
+                    it["itemid"]: it.get("key_", "") for it in items
+                }
                 if not iid_to_hid:
                     return "No traffic items found on the selected hosts."
 
@@ -569,30 +574,22 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 baseline = await _trends_window_avg(client, all_iids, baseline_from, cutoff)
                 recent = await _trends_window_avg(client, all_iids, cutoff, now)
 
-                # Aggregate per canonical host, taking the MAX interface rather
-                # than the sum, and only over interfaces present in BOTH
-                # windows (ADR 098). Two defects lived in the old sum:
-                #
-                #  - `bond0` and its slaves are all in TRAFFIC_IN_KEYS, but the
-                #    bond IS its slaves, so a bonded host counted its traffic
-                #    twice. The ratio mostly cancels, but the absolute
-                #    min_baseline floor then admitted hosts at half the
-                #    intended threshold.
-                #  - baseline and recent were accumulated independently, so an
-                #    interface with baseline rows but no recent rows (renamed
-                #    item, NIC removed) inflated only the baseline side and
-                #    manufactured a drop that never happened.
-                #
-                # Max matches build_max_map, which fetch.py already uses for
-                # this same key list — one physical machine, one carrier.
+                # Aggregate per canonical host via the shared pure rule
+                # (bond-aware, both-windows, total-silence = outage). See
+                # aggregate_host_windows for why each rule exists (ADR 100).
+                by_host: dict[str, list] = {}
+                for iid, hid in iid_to_hid.items():
+                    canon = parent_map.get(hid, hid)
+                    by_host.setdefault(canon, []).append(
+                        (iid_key.get(iid, ""), baseline.get(iid), recent.get(iid))
+                    )
                 host_baseline: dict[str, float] = {}
                 host_recent: dict[str, float] = {}
-                for iid, hid in iid_to_hid.items():
-                    if iid not in baseline or iid not in recent:
+                for canon, entries in by_host.items():
+                    agg = aggregate_host_windows(entries)
+                    if agg is None:
                         continue
-                    canon = parent_map.get(hid, hid)
-                    host_baseline[canon] = max(host_baseline.get(canon, 0.0), baseline[iid])
-                    host_recent[canon] = max(host_recent.get(canon, 0.0), recent[iid])
+                    host_baseline[canon], host_recent[canon] = agg
 
                 # First pass: compute every host's drop above the baseline floor.
                 # The peer-relative filter needs the full distribution (not just

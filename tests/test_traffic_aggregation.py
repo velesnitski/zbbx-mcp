@@ -4,6 +4,7 @@ import importlib
 import subprocess
 import sys
 
+from zbbx_mcp.anomaly import aggregate_host_windows
 from zbbx_mcp.fetch import from_mbps, to_kbps, to_mbps
 
 
@@ -60,20 +61,26 @@ class TestTrafficHelpers:
             assert to_mbps(junk) == 0.0
 
 
-def _agg(iid_to_hid, baseline, recent, parent_map=None):
-    """The ADR 098 aggregation rule, mirrored for testing.
+def _agg(iid_to_hid, baseline, recent, parent_map=None, keys=None):
+    """Group per host, then delegate to the SHARED rule.
 
-    Kept in lockstep with disruption.py: max across interfaces, and only
-    interfaces present in BOTH windows.
+    Imports aggregate_host_windows rather than restating it, so this file
+    cannot silently drift from the implementation it claims to lock (ADR 100).
     """
     parent_map = parent_map or {}
-    hb, hr = {}, {}
+    keys = keys or {}
+    by_host: dict = {}
     for iid, hid in iid_to_hid.items():
-        if iid not in baseline or iid not in recent:
-            continue
         canon = parent_map.get(hid, hid)
-        hb[canon] = max(hb.get(canon, 0.0), baseline[iid])
-        hr[canon] = max(hr.get(canon, 0.0), recent[iid])
+        by_host.setdefault(canon, []).append(
+            (keys.get(iid, ""), baseline.get(iid), recent.get(iid))
+        )
+    hb, hr = {}, {}
+    for canon, entries in by_host.items():
+        agg = aggregate_host_windows(entries)
+        if agg is None:
+            continue
+        hb[canon], hr[canon] = agg
     return hb, hr
 
 
@@ -81,9 +88,11 @@ class TestDisruptionAggregation:
     def test_bond_and_slaves_do_not_double_count(self):
         # bond0 IS eno1+eno2; summing reported 2x the real throughput.
         iid_to_hid = {"bond": "h1", "s1": "h1", "s2": "h1"}
+        keys = {"bond": "net.if.in[bond0]", "s1": "net.if.in[eno1]",
+                "s2": "net.if.in[eno2]"}
         base = {"bond": 100.0, "s1": 60.0, "s2": 40.0}
         rec = {"bond": 50.0, "s1": 30.0, "s2": 20.0}
-        hb, hr = _agg(iid_to_hid, base, rec)
+        hb, hr = _agg(iid_to_hid, base, rec, keys=keys)
         assert hb["h1"] == 100.0   # not 200.0
         assert hr["h1"] == 50.0    # not 100.0
 
@@ -108,4 +117,13 @@ class TestDisruptionAggregation:
         base, rec = {"a": 30.0, "b": 80.0}, {"a": 10.0, "b": 40.0}
         hb, hr = _agg(iid_to_hid, base, rec, parent_map={"sub": "parent"})
         assert set(hb) == {"parent"}
-        assert hb["parent"] == 80.0 and hr["parent"] == 40.0
+        # Independent NICs sum: two real cards genuinely carry both loads.
+        assert hb["parent"] == 110.0 and hr["parent"] == 50.0
+
+    def test_total_silence_is_an_outage_not_an_absent_host(self):
+        # The regression this file missed: a single-NIC host that goes fully
+        # dark has NO recent rows. Skipping it blinded the disruption
+        # detector to the mass-outage case it exists to find (ADR 100).
+        hb, hr = _agg({"i1": "h1"}, {"i1": 100.0}, {})
+        assert hb["h1"] == 100.0 and hr["h1"] == 0.0
+        assert (hb["h1"] - hr["h1"]) / hb["h1"] * 100 == 100.0

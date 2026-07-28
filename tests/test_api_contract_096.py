@@ -121,13 +121,11 @@ class TestGetTrendsWindowAndOrder:
             for k in range(3)
         ]
         out = run_tool(events_mod, "get_trends", self._client(rows), item_id="1")
-        first, last = out.index("| 2"), out.rindex("| 2")
-        # newest (k=2) must appear above oldest (k=0)
-        assert out.index(str(base + 2 * HOUR and "")) >= 0  # placeholder-free
         rendered = [ln for ln in out.splitlines() if ln.startswith("| 20")]
         assert len(rendered) == 3
-        assert rendered[0] > rendered[-1]  # timestamps descend
-        assert first <= last
+        # Rows carry ISO-ish timestamps, so descending string order IS
+        # descending time order.
+        assert rendered == sorted(rendered, reverse=True)
 
 
 class TestParseEpoch:

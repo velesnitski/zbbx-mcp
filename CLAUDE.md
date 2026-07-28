@@ -68,7 +68,7 @@ uv run pytest -k "test_name"               # single test by name
 | `geo_health.py` | 6 | `get_service_uptime_report`, `get_service_health_matrix`, `get_latency_estimate`, `get_servers_by_ping` |
 | `health.py` | 4 | `check_connection`, `get_active_problems`, `get_agent_unreachable`, `get_error_rate` |
 | `availability.py` | 2 | `get_host_availability`, `get_recent_changes` |
-| `analysis.py` | 4 | `get_predictive_alerts`, `get_incident_report`, `correlate_logs`, `analyze_server_roles` |
+| `analysis.py` | 3 | `get_incident_report`, `correlate_logs`, `analyze_server_roles` |
 | `audit.py` | 1 | `get_audit_log` |
 | `domains.py` | 3 | `get_domain_list`, `get_domain_status`, `get_ssl_expiry` |
 | `web_scenarios.py` | 2 | `get_web_scenarios`, `get_web_scenario_status` |

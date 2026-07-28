@@ -62,18 +62,36 @@ class TestSeasonalFloor:
         assert seasonal_floor(pts, 2, min_samples=3) is None
 
     def test_floor_is_low_percentile_of_hour_bucket(self):
-        # Hour 3 sees [50,52,48,51,49,53,47] across 7 days; nightly hour 3
-        pts = self._series({3: [50.0, 52.0, 48.0, 51.0, 49.0, 53.0, 47.0]})
-        floor = seasonal_floor(pts, 3, pct=10)
-        # p10 nearest-rank of 7 sorted → rank 1 → the min (47)
-        assert floor == 47.0
+        # The bucket spans hour +/-1 (ADR 097), so a realistic fixture
+        # supplies all three hours across 7 days = 21 samples. p10
+        # nearest-rank of 21 -> rank 3 -> the 3rd lowest, NOT the minimum:
+        # that is the point of the widening, since one freak-low hour must
+        # no longer define the floor for the whole hour-of-day.
+        vals = [50.0, 52.0, 48.0, 51.0, 49.0, 53.0, 47.0]
+        pts = self._series({2: vals, 3: vals, 4: vals})
+        # 21 samples, p10 nearest-rank -> rank 3 -> the 3rd lowest. Here the
+        # three hours are identical, so that is still 47.
+        assert seasonal_floor(pts, 3, pct=10) == 47.0
+        # The property that matters: a lone freak-low reading can no longer
+        # BECOME the floor, which is what silenced an hour-of-day before.
+        pts_outlier = self._series({2: vals, 3: [1.0] + vals[1:], 4: vals})
+        assert seasonal_floor(pts_outlier, 3, pct=10) == 47.0
 
-    def test_only_matching_hour_counted(self):
+    def test_distant_hours_are_not_counted(self):
+        # Neighbours (+/-1) are in the bucket; a distant hour is not, so a
+        # busy-trough elsewhere in the day cannot pull this floor down.
+        nine = [50.0] * 9
         pts = self._series({
-            3: [50.0, 50.0, 50.0],   # the hour we ask about
-            14: [5.0, 5.0, 5.0],     # a different (busy-trough) hour, ignored
+            2: nine, 3: nine, 4: nine,      # the bucket
+            14: [5.0] * 9,                  # far away — must be ignored
         })
         assert seasonal_floor(pts, 3, pct=10) == 50.0
+
+    def test_neighbour_hours_are_included(self):
+        # Only the neighbours carry data; the target hour itself has none.
+        # A floor still forms, which is what widening the bucket buys.
+        pts = self._series({2: [40.0] * 5, 4: [40.0] * 5})
+        assert seasonal_floor(pts, 3, pct=10) == 40.0
 
 
 class TestPickTrafficInterface:
