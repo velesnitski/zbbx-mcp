@@ -175,7 +175,20 @@ def format_problem_list(problems: list) -> str:
     return "\n".join(lines)
 
 
-def format_host_detail(host: dict) -> str:
+def format_host_detail(host: dict, context: dict | None = None) -> str:
+    """Render one host. ``context`` carries the derived/fetched extras.
+
+    The bare object answers "does this host exist"; an investigation always
+    needs *where it is, what it runs, who hosts it, what it costs and whether
+    it is moving traffic* — which used to cost three follow-up calls every
+    time. ``context`` is optional so the formatter stays pure and the caller
+    decides how much to pay for (ADR 099).
+
+    Recognised keys: ``country``, ``product``, ``tier``, ``provider``,
+    ``datacenter``, ``traffic_mbps``, ``cost_month``, ``bw_limit``,
+    ``service_status``, ``templates``. Missing keys are simply not rendered.
+    """
+    ctx = context or {}
     parts = [
         f"# Host: {host.get('host', '?')}",
         "",
@@ -183,6 +196,35 @@ def format_host_detail(host: dict) -> str:
         f"**Host ID:** {host.get('hostid', '?')}",
         f"**Status:** {'Enabled' if host.get('status') == '0' else 'Disabled'}",
     ]
+
+    # Identity line: where it is / what it is / who runs it.
+    ident = []
+    if ctx.get("country"):
+        ident.append(f"**Country:** {ctx['country']}")
+    if ctx.get("product"):
+        prod = ctx["product"]
+        if ctx.get("tier"):
+            prod = f"{prod} / {ctx['tier']}"
+        ident.append(f"**Product:** {prod}")
+    if ctx.get("provider"):
+        ident.append(f"**Provider:** {ctx['provider']}")
+    if ctx.get("datacenter"):
+        ident.append(f"**Location:** {ctx['datacenter']}")
+    if ident:
+        parts.extend(["", " | ".join(ident)])
+
+    # Live state: traffic, service check, cost.
+    state = []
+    if ctx.get("traffic_mbps") is not None:
+        state.append(f"**Traffic in:** {ctx['traffic_mbps']:.1f} Mbps")
+    if ctx.get("service_status"):
+        state.append(f"**Service check:** {ctx['service_status']}")
+    if ctx.get("cost_month") is not None:
+        state.append(f"**Cost/month:** {ctx['cost_month']:g}")
+    if ctx.get("bw_limit") is not None:
+        state.append(f"**BW limit:** {ctx['bw_limit']:g} Mbps")
+    if state:
+        parts.extend(["", " | ".join(state)])
 
     if host.get("description"):
         parts.extend(["", "## Description", host["description"]])
@@ -203,6 +245,11 @@ def format_host_detail(host: dict) -> str:
                 iface.get("type", ""), "?"
             )
             parts.append(f"- {itype}: {iface.get('ip', '')}:{iface.get('port', '')}")
+
+    templates = ctx.get("templates")
+    if templates:
+        parts.extend(["", "## Templates"])
+        parts.extend(f"- {t}" for t in templates)
 
     return "\n".join(parts)
 

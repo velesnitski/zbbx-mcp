@@ -18,7 +18,11 @@ jobs:
           python-version: "3.12"
 
       - name: Install ruff
-        run: pip install ruff
+        # Pinned: an unpinned install silently upgrades, so a new rule can
+        # turn CI red on a commit that linted clean locally against whatever
+        # older version the lockfile resolved (that is exactly how B033
+        # landed). Bump deliberately, in its own commit.
+        run: pip install "ruff==0.16.0"
 
       - name: Lint
         run: ruff check src tests

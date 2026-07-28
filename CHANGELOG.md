@@ -5,6 +5,37 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.16.29] - 2026-07-28
+
+### Added — investigation-ready `get_host` (ADR 099)
+`get_host` rendered name, id, status, groups and interfaces and nothing else,
+so the tool that exists to answer "tell me about this host" cost three further
+calls before it answered anything -- while already fetching `output: "extend"`
+and discarding the rest. It now also returns country (resolved from inventory,
+which rides along on the call already being made), product/tier, provider,
+datacenter, current inbound traffic, service-check state, cost and bandwidth
+macros, and linked templates. Every enrichment block is individually
+best-effort -- a macro or traffic failure can never turn a working identity
+lookup into an error -- and `brief=True` skips the extra calls entirely.
+
+### Fixed — an empty country filter no longer asserts absence (ADR 099)
+`search_hosts` and `search_hosts_by_location` returned a flat "no hosts found"
+when a country filter matched nothing. That conflates "there are none" with
+"their country cannot be derived" -- and the confident empty reads as fact.
+ADR 093 fixed the extractor bug behind the observed case, but the ambiguity is
+structural: any naming convention the parser cannot read reproduces it. Both
+tools now append a note naming the hosts whose name looks like the requested
+country but does not resolve to it, and pointing at the likely inventory gap.
+The loose matcher is used only to EXPLAIN an empty result, never to assign a
+country, so a false positive costs a hint rather than a wrong verdict.
+
+### Changed — pinned ruff in CI and the project (ADR 099)
+The workflow installed `ruff` unpinned while the project floated `ruff>=0.4`,
+so CI silently ran a newer version with newer rules: a commit could lint clean
+locally and fail CI, which is what happened with B033 (the same
+pass-local/fail-CI class as ADR 084). Both now pin the identical version.
++13 tests, 857 -> 870.
+
 ## [1.16.28] - 2026-07-28
 
 ### Fixed — one traffic conversion everywhere, and two defects it exposed (ADR 098)

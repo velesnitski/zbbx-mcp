@@ -26,7 +26,9 @@ __all__ = [
     "REGION_MAP",
     "CAPITAL_COORDS",
     "ISO2_CODES",
+    "country_inventory_gap",
     "extract_country",
+    "name_suggests_country",
     "normalize_country",
     "resolve_country",
     "countries_for_region",
@@ -448,6 +450,44 @@ def extract_country(hostname: str) -> str:
             if cc in ISO2_CODES:
                 return cc
     return ""
+
+
+def name_suggests_country(hostname: str, cc: str) -> bool:
+    """True if ``hostname`` *looks* like it belongs to country ``cc``.
+
+    Deliberately looser than ``extract_country``: it accepts the code in any
+    separator-delimited position, including ones the strict parser will not
+    treat as a country. Used only to explain an EMPTY country filter — never
+    to assign a country — so a false positive costs a hint, not a wrong
+    verdict.
+
+    The leading separator is required so a code embedded inside a longer word
+    cannot match. Pure.
+    """
+    cc = (cc or "").strip().lower()
+    if len(cc) != 2 or not hostname:
+        return False
+    return bool(re.search(rf"[-_.]{cc}(?=[0-9\-_.]|$)", hostname, re.IGNORECASE))
+
+
+def country_inventory_gap(hosts: list[dict], cc: str) -> list[str]:
+    """Host names that look like ``cc`` but do not resolve to it.
+
+    A country filter that matches nothing is ambiguous: either there really
+    are no such hosts, or they exist and their country cannot be derived. An
+    empty result presented as fact is the worse failure — so callers use this
+    to say which it is. Returns the host names, sorted. Pure.
+    """
+    cc = (cc or "").strip().upper()
+    if len(cc) != 2:
+        return []
+    out = [
+        h.get("host", "")
+        for h in hosts
+        if name_suggests_country(h.get("host", ""), cc)
+        and resolve_country(h) != cc
+    ]
+    return sorted(n for n in out if n)
 
 
 def normalize_country(value: str) -> str:

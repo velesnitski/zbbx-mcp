@@ -5,10 +5,12 @@ from collections import defaultdict
 import httpx
 
 from zbbx_mcp.classify import classify_host as _classify_host
-from zbbx_mcp.classify import resolve_datacenter
+from zbbx_mcp.classify import detect_provider, resolve_datacenter
 from zbbx_mcp.data import (
+    country_inventory_gap,
     extract_country,
     fetch_enabled_hosts,
+    fetch_service_status,
     fetch_traffic_map,
     host_ip,
     normalize_country,
@@ -18,6 +20,100 @@ from zbbx_mcp.formatters import cell, format_host_detail, format_host_list
 from zbbx_mcp.resolver import InstanceResolver
 from zbbx_mcp.tag_filter import parse_tag_filter
 from zbbx_mcp.utils import resolve_group_ids
+
+
+async def _host_context(client, host: dict) -> dict:
+    """Gather the derived + fetched extras for one host (ADR 099).
+
+    Two extra API calls: macros and the traffic/service snapshot. Every part
+    is individually best-effort — an enrichment failure must never turn a
+    working identity lookup into an error, so each block degrades to "absent
+    key" and the formatter simply omits that line.
+    """
+    ctx: dict = {}
+    hid = host.get("hostid", "")
+
+    # Free — derived from what host.get already returned.
+    prod, tier = _classify_host(host.get("groups", []) or [])
+    if prod and prod != "Unknown":
+        ctx["product"] = prod
+    if tier:
+        ctx["tier"] = tier
+    cc = resolve_country(host)
+    if cc:
+        ctx["country"] = cc
+    ip = host_ip(host)
+    if ip:
+        provider = detect_provider(ip)
+        if provider and provider != "Unknown":
+            ctx["provider"] = provider
+        _prov, city = resolve_datacenter(ip)
+        if city:
+            ctx["datacenter"] = city
+    tnames = [t.get("name", "") for t in host.get("parentTemplates", []) or []]
+    if tnames:
+        ctx["templates"] = [t for t in tnames if t][:6]
+
+    # Cost / bandwidth macros.
+    try:
+        macros = await client.call("usermacro.get", {
+            "hostids": [hid],
+            "output": ["macro", "value"],
+            "filter": {"macro": ["{$COST_MONTH}", "{$BW_LIMIT}"]},
+        })
+        for m in macros or []:
+            try:
+                if m.get("macro") == "{$COST_MONTH}":
+                    ctx["cost_month"] = float(m["value"])
+                elif m.get("macro") == "{$BW_LIMIT}":
+                    ctx["bw_limit"] = float(m["value"])
+            except (ValueError, TypeError, KeyError):
+                continue
+    except (httpx.HTTPError, ValueError, KeyError):
+        pass
+
+    # Current inbound traffic + service-check state.
+    try:
+        traffic = await fetch_traffic_map(client, [hid])
+        if hid in traffic:
+            ctx["traffic_mbps"] = traffic[hid]
+    except (httpx.HTTPError, ValueError, KeyError):
+        pass
+    try:
+        status = await fetch_service_status(client, [hid])
+        if hid in status:
+            ctx["service_status"] = {
+                1: "OK", -1: "PARTIAL", 0: "DOWN",
+            }.get(status[hid], "")
+    except (httpx.HTTPError, ValueError, KeyError):
+        pass
+
+    return ctx
+
+
+def _inventory_gap_note(hosts: list[dict], cc: str, max_names: int = 5) -> str:
+    """Explain an empty country filter instead of asserting "none exist".
+
+    A country filter matching nothing is ambiguous: either there genuinely
+    are no such hosts, or they exist and their country cannot be derived from
+    the name and carry no inventory tag. Reporting the first case when the
+    truth is the second is a confident wrong answer — the failure class this
+    codebase keeps hitting. Returns "" when there is nothing to add, so the
+    caller can always concatenate (ADR 099).
+    """
+    if not cc:
+        return ""
+    names = country_inventory_gap(hosts, cc)
+    if not names:
+        return ""
+    shown = ", ".join(names[:max_names])
+    more = f" (+{len(names) - max_names} more)" if len(names) > max_names else ""
+    return (
+        f"\n\n_{len(names)} host(s) look like {cc} by name but have no "
+        f"resolvable country — likely an inventory gap rather than an absence: "
+        f"{shown}{more}. Set `country_code` in Zabbix host inventory, or check "
+        "the naming convention._"
+    )
 
 
 def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> None:
@@ -92,13 +188,15 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
 
                 data = await client.call("host.get", params)
 
+                pre_country = data
                 if cc_filter:
                     data = [h for h in data if resolve_country(h) == cc_filter]
                 if product:
                     data = [h for h in data if product.lower() in (_classify_host(h.get("groups", []))[0] or "").lower()]
 
                 if not data:
-                    return "No hosts found."
+                    return "No hosts found." + _inventory_gap_note(
+                        pre_country, cc_filter)
 
                 total = len(data)
                 data = data[:max_results]
@@ -239,11 +337,17 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
     if "get_host" not in skip:
 
         @mcp.tool()
-        async def get_host(host_id: str, instance: str = "") -> str:
+        async def get_host(host_id: str, brief: bool = False, instance: str = "") -> str:
             """Get full details of a specific Zabbix host.
+
+            Returns identity plus the context an investigation actually needs:
+            country, product/tier, provider, current inbound traffic, service
+            check state, cost and bandwidth macros, and linked templates.
 
             Args:
                 host_id: Zabbix host ID or hostname (auto-resolved)
+                brief: Skip the enrichment calls and return identity only
+                    (default: False)
                 instance: Zabbix instance name (optional, for multi-instance setups)
             """
             try:
@@ -271,11 +375,21 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     "output": "extend",
                     "selectGroups": ["name"],
                     "selectInterfaces": ["type", "ip", "port"],
+                    # Inventory rides along on the call we already make, so
+                    # country resolution costs nothing extra (ADR 099).
+                    "selectInventory": ["country_code", "country_name", "location"],
+                    "selectParentTemplates": ["name"],
                 })
 
                 if not data:
                     return f"Host '{host_id}' not found."
-                return format_host_detail(data[0])
+
+                host = data[0]
+                if brief:
+                    return format_host_detail(host)
+
+                ctx = await _host_context(client, host)
+                return format_host_detail(host, ctx)
             except (httpx.HTTPError, ValueError) as e:
                 return f"Error querying Zabbix: {e}"
 
@@ -497,13 +611,15 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     gid_set = set(gids)
                     hosts = [h for h in hosts if any(g.get("groupid") in gid_set for g in h.get("groups", []))]
 
+                pre_country = hosts
                 if cc_filter:
                     hosts = [h for h in hosts if resolve_country(h) == cc_filter]
                 if product:
                     hosts = [h for h in hosts if product.lower() in (_classify_host(h.get("groups", []))[0] or "").lower()]
 
                 if not hosts:
-                    return "No hosts match the filters."
+                    return "No hosts match the filters." + _inventory_gap_note(
+                        pre_country, cc_filter)
 
                 hids = [h["hostid"] for h in hosts]
                 traffic_map = await fetch_traffic_map(client, hids)
