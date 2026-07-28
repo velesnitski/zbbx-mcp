@@ -17,6 +17,7 @@ from zbbx_mcp.data import (
     canonical_host_name,
     extract_country,
 )
+from zbbx_mcp.fetch import to_mbps
 from zbbx_mcp.formatters import format_value
 from zbbx_mcp.resolver import InstanceResolver
 
@@ -417,7 +418,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()):
                         if iface.get("ip") and iface["ip"] != "127.0.0.1":
                             ip = iface["ip"]
                             break
-                    t_str = f"{traffic/1e6:.1f}" if traffic else "N/A"
+                    t_str = f"{to_mbps(traffic):.1f}" if traffic else "N/A"
                     parts.append(
                         f"| {h.get('host', '?')} | {h['_product']} | "
                         f"{h['_tier']} | {ip} | {cpu}% | {t_str} |"

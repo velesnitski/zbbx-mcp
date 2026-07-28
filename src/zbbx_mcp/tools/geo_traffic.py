@@ -27,6 +27,7 @@ from zbbx_mcp.data import (
     group_by_country,
     host_ip,
 )
+from zbbx_mcp.fetch import to_mbps
 from zbbx_mcp.resolver import InstanceResolver
 
 
@@ -88,7 +89,7 @@ async def _detect_regional_acute(
         if hid is None:
             continue
         host_series.setdefault(hid, []).append(
-            (int(t["clock"]), float(t.get("value_avg", 0) or 0) / 1e6)
+            (int(t["clock"]), to_mbps(t.get("value_avg", 0) or 0))
         )
 
     country_series = aggregate_hourly_by_country(host_series, host_country)

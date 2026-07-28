@@ -11,7 +11,7 @@ import time as _time
 
 import httpx
 
-from zbbx_mcp.data import fetch_enabled_hosts
+from zbbx_mcp.data import GB_DECIMAL, MB_DECIMAL, fetch_enabled_hosts
 from zbbx_mcp.resolver import InstanceResolver
 
 
@@ -63,7 +63,13 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 # Define metrics to check
                 _METRICS = {
                     "disk": {
-                        "search": {"key_": "vfs.fs.size["},
+                        # Explicit wildcards: this term is used with
+                        # searchWildcardsEnabled below, which makes a bare
+                        # literal an EXACT match — so it fetched zero disk
+                        # items and the whole disk forecast silently never
+                        # ran (ADR 094 class, missed because the term lives
+                        # in a config dict rather than the call site).
+                        "search": {"key_": "*vfs.fs.size[*"},
                         "filter_key": "pfree",
                         "threshold": 15,  # alert when free% drops below this
                         "direction": "below",
@@ -220,8 +226,8 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
 
                         # Format current value for display
                         if metric_name == "memory":
-                            curr_display = f"{current / 1_000_000_000:.1f} GB"
-                            rate_display = f"{abs(slope) / 1_000_000:.0f} MB/day"
+                            curr_display = f"{current / GB_DECIMAL:.1f} GB"
+                            rate_display = f"{abs(slope) / MB_DECIMAL:.0f} MB/day"
                         elif metric_name == "disk":
                             curr_display = f"{current:.1f}%"
                             rate_display = f"{abs(slope):.2f}%/day"
@@ -250,9 +256,9 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                                 severity = "INFO"
                         elif metric_name == "memory":
                             # `current` is bytes available; floors at 1 GB / 2 GB
-                            if days_to < 3 and current <= 1_000_000_000:
+                            if days_to < 3 and current <= GB_DECIMAL:
                                 severity = "CRITICAL"
-                            elif days_to < 7 and current <= 2_000_000_000:
+                            elif days_to < 7 and current <= 2 * GB_DECIMAL:
                                 severity = "HIGH"
                             elif days_to < 14:
                                 severity = "WARNING"

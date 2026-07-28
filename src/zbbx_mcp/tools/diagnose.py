@@ -34,7 +34,7 @@ from zbbx_mcp.data import (
     host_ip,
     partition_test_hosts,
 )
-from zbbx_mcp.fetch import is_physical_traffic_in_key
+from zbbx_mcp.fetch import is_physical_traffic_in_key, to_mbps
 from zbbx_mcp.formatters import format_age, format_severity
 from zbbx_mcp.resolver import InstanceResolver
 from zbbx_mcp.tools.correlation import subnet24
@@ -101,8 +101,8 @@ def _carrier_traffic_mbps(
         return None, None
     b, r = base.get(carrier), recent.get(carrier)
     return (
-        b / 1e6 if b is not None else None,
-        r / 1e6 if r is not None else None,
+        to_mbps(b) if b is not None else None,
+        to_mbps(r) if r is not None else None,
     )
 
 

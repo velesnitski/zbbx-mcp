@@ -10,6 +10,7 @@ import httpx
 from zbbx_mcp.classify import classify_host as _classify_host
 from zbbx_mcp.classify import detect_provider, resolve_datacenter
 from zbbx_mcp.data import extract_country, fetch_enabled_hosts, host_ip
+from zbbx_mcp.fetch import to_mbps
 from zbbx_mcp.resolver import InstanceResolver
 from zbbx_mcp.utils import resolve_group_ids
 
@@ -79,7 +80,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                         iface = _iface_from_key(it.get("key_", ""))
                         if not iface or iface in ("lo", "docker0", "unbound_tun1", "unbound_tun2"):
                             continue
-                        mbps = float(it.get("lastvalue", 0)) / 1_000_000
+                        mbps = to_mbps(it.get("lastvalue", 0))
                         hid = it["hostid"]
                         if _is_physical(iface):
                             host_phys[hid] = max(host_phys.get(hid, 0), mbps)

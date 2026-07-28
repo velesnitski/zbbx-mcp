@@ -10,6 +10,7 @@ import httpx
 from zbbx_mcp.classify import classify_host as _classify_host
 from zbbx_mcp.classify import detect_provider
 from zbbx_mcp.data import KEY_CONNECTIONS, host_ip
+from zbbx_mcp.fetch import to_mbps
 from zbbx_mcp.resolver import InstanceResolver
 from zbbx_mcp.utils import safe_output_path
 
@@ -206,7 +207,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                             "CPU %": cpu_map.get(hid),
                             "Load Avg5": load_map.get(hid),
                             "Mem Avail GB": mem_map.get(hid),
-                            "Traffic Mbps": round(traffic / 1e6, 1) if traffic else None,
+                            "Traffic Mbps": round(to_mbps(traffic), 1) if traffic else None,
                             "Connections": conn_map.get(hid),
                             "Cost/Month ($)": cost,
                             "Groups": groups,

@@ -11,7 +11,29 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass, field
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:  # pragma: no cover
+    # Declared for type checkers and linters only. At RUNTIME these names are
+    # resolved lazily by ``__getattr__`` at the bottom of this module, because
+    # data and fetch import each other and an eager import here makes
+    # "import zbbx_mcp.fetch first" fail (ADR 098). TYPE_CHECKING is False at
+    # runtime, so this block never executes and never re-forms the cycle.
+    from zbbx_mcp.fetch import (
+        TRAFFIC_DIVISOR,
+        day_label,
+        fetch_all_data,
+        fetch_cpu_map,
+        fetch_enabled_hosts,
+        fetch_host_dashboards,
+        fetch_service_status,
+        fetch_traffic_map,
+        fetch_trends_batch,
+        from_mbps,
+        is_service_check_stale,
+        to_kbps,
+        to_mbps,
+    )
 
 from zbbx_mcp.classify import classify_host as _classify_host
 from zbbx_mcp.classify import resolve_datacenter  # noqa: F401 — re-export
@@ -39,14 +61,21 @@ __all__ = [
     "KEY_CONNECTIONS", "KEY_AGENT_VERSION",
     "KEY_PING_LOSS", "KEY_PING_RTT", "KEY_SERVICE_BPS",
     "_get_regional_traffic_keys",
-    # Re-exports from fetch.py for backward compatibility
+    # Re-exports from fetch.py for backward compatibility (resolved lazily —
+    # see __getattr__ at the bottom of this module)
     "day_label",
     "fetch_all_data", "fetch_trends_batch", "fetch_enabled_hosts",
     "fetch_traffic_map", "fetch_cpu_map", "fetch_service_status", "fetch_host_dashboards",
     "is_service_check_stale",
+    "TRAFFIC_DIVISOR", "to_mbps", "to_kbps", "from_mbps",
 ]
 
 GB_BYTES = 1_073_741_824  # 1 GB in bytes
+# Decimal SI units for human-readable memory RATES ("MB/day", "GB"). Named so
+# they are not mistaken for — nor caught by the guard against — the raw→Mbps
+# traffic divisor, which happens to share the value 1_000_000 (ADR 098).
+MB_DECIMAL = 1_000_000
+GB_DECIMAL = 1_000_000_000
 
 # Zabbix API filter values used across many calls
 STATUS_ENABLED = "0"
@@ -568,15 +597,36 @@ def _parse_period(period: str) -> int:
         return int(period[:-1]) * 3600
     return int(period) * 86400  # default to days
 
-# Re-exports from fetch.py — allows existing `from zbbx_mcp.data import fetch_*` to keep working
-from zbbx_mcp.fetch import (  # noqa: E402, F401
-    day_label,
-    fetch_all_data,
-    fetch_cpu_map,
-    fetch_enabled_hosts,
-    fetch_host_dashboards,
-    fetch_service_status,
-    fetch_traffic_map,
-    fetch_trends_batch,
-    is_service_check_stale,
-)
+# Re-exports from fetch.py — keeps `from zbbx_mcp.data import fetch_*` working.
+#
+# Resolved LAZILY via PEP 562 rather than imported at module scope, because
+# data and fetch import each other: fetch does `from zbbx_mcp.data import ...`
+# at its top, so an eager re-export here means importing **fetch first** hits a
+# partially-initialised module and raises ImportError. That worked only by
+# accident — every entry point happens to import data before fetch — and broke
+# the moment anything imported fetch directly (ADR 098). Deferring to first
+# attribute access breaks the import-time cycle entirely; callers see no
+# difference.
+_FETCH_REEXPORTS = frozenset({
+    "day_label",
+    "fetch_all_data",
+    "fetch_cpu_map",
+    "fetch_enabled_hosts",
+    "fetch_host_dashboards",
+    "fetch_service_status",
+    "fetch_traffic_map",
+    "fetch_trends_batch",
+    "is_service_check_stale",
+    "to_mbps",
+    "to_kbps",
+    "from_mbps",
+    "TRAFFIC_DIVISOR",
+})
+
+
+def __getattr__(name: str):
+    """Lazily forward the fetch.py re-exports (PEP 562)."""
+    if name in _FETCH_REEXPORTS:
+        from zbbx_mcp import fetch as _fetch
+        return getattr(_fetch, name)
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

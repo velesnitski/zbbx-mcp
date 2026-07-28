@@ -29,6 +29,7 @@ from zbbx_mcp.data import (
     extract_country,
     host_ip,
 )
+from zbbx_mcp.fetch import from_mbps, to_mbps
 from zbbx_mcp.resolver import InstanceResolver
 from zbbx_mcp.tools.correlation import subnet24
 
@@ -394,8 +395,8 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     "|------|----|-------------:|----------:|---------------------|",
                 ]
                 for r in shown:
-                    sb = r["service_b"] / 1e6 if r["service_b"] is not None else 0
-                    sr = r["service_r"] / 1e6 if r["service_r"] is not None else 0
+                    sb = to_mbps(r["service_b"]) if r["service_b"] is not None else 0
+                    sr = to_mbps(r["service_r"]) if r["service_r"] is not None else 0
                     lines.append(
                         f"| {r['host']} | {r['ip']} | "
                         f"{r['service_drop']:.0f}% | {r['mgmt_drop']:.0f}% | "
@@ -482,8 +483,8 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     "|--------|-------|-----:|---------:|-------:|",
                 ]
                 for r in flagged:
-                    b = (r["baseline"] or 0) / 1e6
-                    rc = (r["recent"] or 0) / 1e6
+                    b = to_mbps(r["baseline"] or 0)
+                    rc = to_mbps(r["recent"] or 0)
                     lines.append(
                         f"| {r['region']} | {r['label']} | {r['drop_pct']:.0f}% | "
                         f"{b:.1f} Mbps | {rc:.1f} Mbps |"
@@ -568,18 +569,30 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 baseline = await _trends_window_avg(client, all_iids, baseline_from, cutoff)
                 recent = await _trends_window_avg(client, all_iids, cutoff, now)
 
-                # Aggregate per canonical host. Multiple physical NICs sum;
-                # parent+sub-host traffic also folds to the parent so a
-                # single physical machine never appears twice in downstream
-                # counts.
+                # Aggregate per canonical host, taking the MAX interface rather
+                # than the sum, and only over interfaces present in BOTH
+                # windows (ADR 098). Two defects lived in the old sum:
+                #
+                #  - `bond0` and its slaves are all in TRAFFIC_IN_KEYS, but the
+                #    bond IS its slaves, so a bonded host counted its traffic
+                #    twice. The ratio mostly cancels, but the absolute
+                #    min_baseline floor then admitted hosts at half the
+                #    intended threshold.
+                #  - baseline and recent were accumulated independently, so an
+                #    interface with baseline rows but no recent rows (renamed
+                #    item, NIC removed) inflated only the baseline side and
+                #    manufactured a drop that never happened.
+                #
+                # Max matches build_max_map, which fetch.py already uses for
+                # this same key list — one physical machine, one carrier.
                 host_baseline: dict[str, float] = {}
                 host_recent: dict[str, float] = {}
                 for iid, hid in iid_to_hid.items():
+                    if iid not in baseline or iid not in recent:
+                        continue
                     canon = parent_map.get(hid, hid)
-                    if iid in baseline:
-                        host_baseline[canon] = host_baseline.get(canon, 0) + baseline[iid]
-                    if iid in recent:
-                        host_recent[canon] = host_recent.get(canon, 0) + recent[iid]
+                    host_baseline[canon] = max(host_baseline.get(canon, 0.0), baseline[iid])
+                    host_recent[canon] = max(host_recent.get(canon, 0.0), recent[iid])
 
                 # First pass: compute every host's drop above the baseline floor.
                 # The peer-relative filter needs the full distribution (not just
@@ -587,7 +600,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 # cohort average. We then apply the absolute + peer-relative
                 # gates together via _compute_peer_relative_drops.
                 all_dropped: list[dict] = []
-                min_baseline_bps = min_baseline_mbps * 1e6
+                min_baseline_bps = from_mbps(min_baseline_mbps)
                 for hid, b in host_baseline.items():
                     if b <= 0 or b < min_baseline_bps:
                         continue

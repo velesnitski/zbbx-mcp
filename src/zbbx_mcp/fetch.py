@@ -52,6 +52,39 @@ _TRAFFIC_DIVISOR = 125_000 if _TRAFFIC_BYTES else 1_000_000
 TRAFFIC_DIVISOR = _TRAFFIC_DIVISOR
 
 
+def to_mbps(raw: float | int | str | None) -> float:
+    """Raw Zabbix interface value → Mbps, honouring ``ZABBIX_TRAFFIC_UNIT``.
+
+    ADR 087 put the divisor in one place, but ~25 call sites kept dividing by
+    a literal ``1e6``. That is right only for the default bits/s config; under
+    a bytes/s deployment every one of them reads **8× low**. Ratio-based
+    verdicts survive (both sides share the error), but absolute floors do not
+    — a host genuinely doing 30 Mbps reads 3.75 and falls under a 5.0 Mbps
+    baseline gate, silently dropping out of the analysis entirely. Named so
+    the conversion is greppable and a literal can be guarded against
+    (ADR 098). Returns 0.0 for None/unparseable. Pure.
+    """
+    if raw is None:
+        return 0.0
+    try:
+        return float(raw) / _TRAFFIC_DIVISOR
+    except (ValueError, TypeError):
+        return 0.0
+
+
+def to_kbps(raw: float | int | str | None) -> float:
+    """Raw Zabbix interface value → Kbps. Same unit convention as ``to_mbps``."""
+    return to_mbps(raw) * 1000.0
+
+
+def from_mbps(mbps: float) -> float:
+    """Mbps → raw Zabbix interface units — the inverse of ``to_mbps``.
+
+    For comparing a caller's Mbps threshold against unconverted raw values.
+    """
+    return float(mbps) * _TRAFFIC_DIVISOR
+
+
 async def fetch_enabled_hosts(
     client: ZabbixClient,
     *,

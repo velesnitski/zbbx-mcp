@@ -316,6 +316,51 @@ class TestSearchWildcardGuard:
         assert len(seen) >= 4, f"scanner found only {len(seen)} wildcard searches"
         assert all("*" in term for *_, term in seen)
 
+    def test_module_scoped_search_terms_carry_a_wildcard(self):
+        """Catch search terms defined AWAY from the call site.
+
+        The scanner above only reads `client.call` dict literals, so a term
+        held in a config dict and assigned via
+        `params["search"] = cfg["search"]` slipped through — that is exactly
+        how the disk forecast shipped querying an exact key and silently
+        fetching zero items. Heuristic but precise: within a module that
+        enables wildcards anywhere, every literal `"search"` mapping must
+        carry a `*`. Modules that never set the flag are untouched, because
+        a bare term there is a correct substring search.
+        """
+        violations = []
+        for path in sorted(SRC.rglob("*.py")):
+            text = path.read_text()
+            # Only the *variable-built* form is invisible to the scanner
+            # above. A module that sets the flag inline is already covered,
+            # and including it here would false-positive on its unrelated
+            # non-wildcard searches (a bare term without the flag is a
+            # correct substring search).
+            if '["searchWildcardsEnabled"] = True' not in text:
+                continue
+            tree = ast.parse(text, filename=str(path))
+            for node in ast.walk(tree):
+                if not isinstance(node, ast.Dict):
+                    continue
+                for k, v in zip(node.keys, node.values, strict=False):
+                    if not (isinstance(k, ast.Constant) and k.value == "search"):
+                        continue
+                    if not isinstance(v, ast.Dict):
+                        continue
+                    for _sk, sv in zip(v.keys, v.values, strict=False):
+                        if (
+                            isinstance(sv, ast.Constant)
+                            and isinstance(sv.value, str)
+                            and "*" not in sv.value
+                        ):
+                            violations.append(
+                                f"{path.relative_to(ROOT)}:{node.lineno} — search "
+                                f"term {sv.value!r} has no '*' in a module that "
+                                "enables searchWildcardsEnabled; it will be an "
+                                "EXACT match. See ADR 094"
+                            )
+        assert not violations, "\n".join(violations)
+
 
 class TestOutputFieldGuard:
     def test_no_denied_output_fields(self):

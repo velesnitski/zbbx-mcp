@@ -5,6 +5,40 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.16.28] - 2026-07-28
+
+### Fixed — one traffic conversion everywhere, and two defects it exposed (ADR 098)
+ADR 087 established a single raw->Mbps divisor honouring `ZABBIX_TRAFFIC_UNIT`,
+but routed only `get_peak_analysis` through it: 24 call sites across 9 modules
+kept dividing by a literal `1e6`. That is right only on the default bits/s
+config; under bytes/s every one reads 8x low. Ratio verdicts survive, absolute
+floors do not -- a host genuinely doing 30 Mbps reads 3.75, falls under the
+5.0 Mbps `min_baseline` gate and is dropped from block analysis with no row and
+no warning (the same floor guards `detect_disruption_wave` and the acute
+regional detector). Added named `to_mbps`/`to_kbps`/`from_mbps` helpers, swept
+every site, and widened the regression lock from one file to an AST sweep of the
+whole tool tree. The one genuine literal collision -- a memory rate that also
+divides by 1_000_000 -- is resolved by naming it (`MB_DECIMAL`/`GB_DECIMAL`).
+
+Fixing this surfaced two further defects. `import zbbx_mcp.fetch` as the FIRST
+import raised ImportError: data and fetch import each other and data re-exported
+fetch's symbols eagerly, so importing fetch first hit a partially-initialised
+module -- it had never fired only because every entry point happens to import
+data first. Broken with a lazy PEP 562 `__getattr__`, with a TYPE_CHECKING block
+keeping the names visible to linters without a runtime edge. And a sixth
+instance of the ADR 094 wildcard bug: `get_predictive_alerts` holds its search
+term in a config dict, so the inline scanner could not see it -- its disk metric
+queried an exact key, fetched ZERO items, and the whole disk forecast never ran
+(with the ADR 097 sign inversion, disk prediction was dead twice over). The
+wildcard guard now also covers the variable-built form.
+
+Also: `detect_disruption_wave` summed every matching NIC per host, but `bond0`
+IS its slaves, so a bonded host double-counted and the absolute floor admitted
+hosts at half the intended threshold; and baseline/recent were accumulated
+independently, so an interface with baseline rows but no recent rows inflated
+only the baseline side and manufactured a drop that never happened. Now max
+across interfaces, over interfaces present in both windows. +11 tests, 845 -> 856.
+
 ## [1.16.27] - 2026-07-27
 
 Review batch: five root causes behind a class of defect that returns a

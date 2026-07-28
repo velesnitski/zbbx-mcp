@@ -21,6 +21,7 @@ from zbbx_mcp.data import (
     extract_country,
     host_ip,
 )
+from zbbx_mcp.fetch import to_mbps
 from zbbx_mcp.resolver import InstanceResolver
 
 # Recovery-score thresholds expressed as post/baseline traffic ratio.
@@ -256,8 +257,8 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 ]
                 for r in rows:
                     when = datetime.fromtimestamp(r["clock"], timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
-                    pre = f"{r['baseline'] / 1e6:.1f}" if r["baseline"] is not None else "—"
-                    post = f"{r['post'] / 1e6:.1f}" if r["post"] is not None else "—"
+                    pre = f"{to_mbps(r['baseline']):.1f}" if r["baseline"] is not None else "—"
+                    post = f"{to_mbps(r['post']):.1f}" if r["post"] is not None else "—"
                     lines.append(
                         f"| {r['host']} | {when} | {r['old_ip']} | {r['new_ip']} | "
                         f"{pre} | {post} | {r['score']} |"

@@ -28,6 +28,7 @@ from zbbx_mcp.data import (
     fold_rows_by_canonical_host,
     host_ip,
 )
+from zbbx_mcp.fetch import to_kbps, to_mbps
 from zbbx_mcp.resolver import InstanceResolver
 
 # Per-host interface shortlist size for detect_traffic_drops. Bounds the
@@ -197,7 +198,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                         "group": gname,
                         "peers": len(active_peers),
                         "total": len(member_ids),
-                        "median_mbps": med / 1e6,
+                        "median_mbps": to_mbps(med),
                         "anomalies": 0,
                     })
 
@@ -216,11 +217,11 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                         # Signal 1: Below threshold of peer median
                         if traffic < threshold and hid in host_traffic:
                             pct = (traffic / med * 100) if med > 0 else 0
-                            reasons.append(f"Traffic {pct:.0f}% of group median ({med/1e6:.1f} Mbps)")
+                            reasons.append(f"Traffic {pct:.0f}% of group median ({to_mbps(med):.1f} Mbps)")
 
                         # Signal 2: Has connections but very low traffic (tunnel broken)
                         if conns > 0 and traffic < threshold:
-                            reasons.append(f"{conns:.0f} active connections but only {traffic/1e6:.2f} Mbps")
+                            reasons.append(f"{conns:.0f} active connections but only {to_mbps(traffic):.2f} Mbps")
 
                         # Signal 3: Statistical outlier (> 2 SD below mean)
                         if sd > 0 and traffic < (avg - 2 * sd) and traffic > 0:
@@ -240,12 +241,12 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                                 "group": gname,
                                 "ip": ip,
                                 "provider": provider,
-                                "traffic_mbps": traffic / 1e6,
+                                "traffic_mbps": to_mbps(traffic),
                                 "connections": conns,
                                 "cpu_pct": cpu,
                                 "severity": severity,
                                 "reasons": reasons,
-                                "peer_median_mbps": med / 1e6,
+                                "peer_median_mbps": to_mbps(med),
                             })
                             group_stats[-1]["anomalies"] += 1
 
@@ -446,9 +447,9 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     "|--------|---------|----------|---------|-------------|-----------|",
                 ]
                 for r in rows:
-                    t = f"{r['traffic']/1e6:.1f} Mbps"
+                    t = f"{to_mbps(r['traffic']):.1f} Mbps"
                     c = f"{r['connections']:.0f}" if r["connections"] > 0 else "0"
-                    bw = f"{r['bw_per_client']/1e3:.0f} Kbps" if r["bw_per_client"] > 0 else "–"
+                    bw = f"{to_kbps(r['bw_per_client']):.0f} Kbps" if r["bw_per_client"] > 0 else "–"
                     parts.append(
                         f"| {r['host']} | {r['product']}/{r['tier']} | "
                         f"{r['provider']} | {t} | {c} | {bw} |"
@@ -614,7 +615,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     ]
                     if not recs:
                         return None
-                    return sum(float(t["value_avg"]) for t in recs) / len(recs) / 1e6
+                    return to_mbps(sum(float(t["value_avg"]) for t in recs) / len(recs))
 
                 # Group shortlisted interfaces by host; pick highest-baseline (P4).
                 host_ifaces: dict[str, list[tuple[str, float | None]]] = {}
@@ -648,23 +649,23 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                         continue
                     analyzed += 1
 
-                    baseline_avg = sum(float(t["value_avg"]) for t in baseline_recs) / len(baseline_recs) / 1e6
+                    baseline_avg = to_mbps(sum(float(t["value_avg"]) for t in baseline_recs) / len(baseline_recs))
                     recent_avg = (
-                        sum(float(t["value_avg"]) for t in recent_recs) / len(recent_recs) / 1e6
+                        to_mbps(sum(float(t["value_avg"]) for t in recent_recs) / len(recent_recs))
                         if recent_recs else 0.0
                     )
 
                     # Seasonal floor for the current hour-of-day (P2).
                     sfloor = None
                     if seasonal:
-                        hourly = [(int(t["clock"]), float(t["value_avg"]) / 1e6) for t in baseline_recs]
+                        hourly = [(int(t["clock"]), to_mbps(t["value_avg"])) for t in baseline_recs]
                         sfloor = seasonal_floor(hourly, (now // 3600) % 24)
 
                     # Persistence: consecutive recent buckets below the floor (P3).
                     sustained = 0
                     if sfloor is not None:
                         for t in sorted(recent_recs, key=lambda x: -int(x["clock"])):
-                            if float(t["value_avg"]) / 1e6 < sfloor:
+                            if to_mbps(t["value_avg"]) < sfloor:
                                 sustained += 1
                             else:
                                 break
