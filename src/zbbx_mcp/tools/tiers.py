@@ -86,6 +86,8 @@ OPS_EXTRA: frozenset[str] = frozenset({
     "get_recent_changes",
     # logs
     "correlate_logs",
+    # cross-system consistency check
+    "compare_report_facts",
 })
 
 # Cost / billing tier.

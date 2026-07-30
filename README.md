@@ -3,7 +3,7 @@
 [![Tests](https://github.com/velesnitski/zbbx-mcp/actions/workflows/test.yml/badge.svg)](https://github.com/velesnitski/zbbx-mcp/actions/workflows/test.yml)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-yellow.svg)](LICENSE)
-[![Tools: 165](https://img.shields.io/badge/tools-165-brightgreen.svg)](#what-it-does)
+[![Tools: 166](https://img.shields.io/badge/tools-166-brightgreen.svg)](#what-it-does)
 [![Latest release](https://img.shields.io/github/v/release/velesnitski/zbbx-mcp.svg)](https://github.com/velesnitski/zbbx-mcp/releases)
 
 Zabbix MCP server for [Claude Code](https://claude.com/claude-code), [GitHub Copilot](https://github.com/features/copilot), [Codex CLI](https://github.com/openai/codex), [n8n](https://n8n.io), and any MCP-compatible client. Talk to your Zabbix monitoring in natural language.
@@ -66,7 +66,7 @@ You should see `zabbix` listed when Claude starts. Try asking: *"Show current pr
 
 ## What it does
 
-**165 tools**:
+**166 tools**:
 
 | Category | Tools |
 |----------|-------|
@@ -107,6 +107,7 @@ You should see `zabbix` listed when Claude starts. Try asking: *"Show current pr
 | **Risk & Impact** | `get_at_risk_hosts`, `get_disruption_blast_radius` |
 | **External IP History** | `get_external_ip_history`, `get_recovery_score` |
 | **Self-introspection** | `get_telemetry_summary` |
+| **Cross-system checks** | `compare_report_facts` — diff a reporting pipeline's published facts against live Zabbix |
 | **Composite diagnostics** | `diagnose_host`, `bulk_diagnose`, `diagnose_subnet` |
 | **Alert triage** | `triage_slack_alert` — resolve an alert line's host, re-query live Zabbix, return an authoritative verdict (read-only) |
 
@@ -130,17 +131,17 @@ get_traffic_report(country="us")
 
 ## Choosing a tier
 
-The full 165-tool catalog costs ~30k tokens at every session start (the
+The full 166-tool catalog costs ~30k tokens at every session start (the
 LLM has to load every tool's schema). For most sessions you only use a
 subset. `ZABBIX_TIER` ships preset bundles that cut this:
 
 | Tier | Tools | Handshake (~tokens) | Use when |
 |------|------:|--------------------:|----------|
 | `core` | 27 | ~4k | Read-only Zabbix querying — search, get, problems, dashboards |
-| `ops` | 58 | ~9k | Incident response — `core` + correlation, disruption detection, risk scoring, IP history, extended health |
+| `ops` | 59 | ~9k | Incident response — `core` + correlation, disruption detection, risk scoring, IP history, extended health |
 | `finance` | 49 | ~7k | Cost / billing — `core` + cost imports, audits, provider analysis |
 | `reports` | 65 | ~10k | Executive reporting — `core` + report generators, executive analytics, geo, inventory |
-| `full` | 165 | ~25k | Default — everything (no restriction) |
+| `full` | 166 | ~25k | Default — everything (no restriction) |
 
 `ZABBIX_TIER=ops` saves ~18k tokens per session compared to the default.
 Switch tiers by changing the env var; the server picks it up on restart.

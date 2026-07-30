@@ -178,6 +178,8 @@ EXPECTED_TOOLS = {
     "get_trends_batch",
     "get_server_dashboard",
     "compare_servers",
+    # crosscheck.py
+    "compare_report_facts",
     "get_health_assessment",
     "get_shutdown_candidates",
     "get_capacity_planning",

@@ -13,6 +13,7 @@ from zbbx_mcp.tools import (
     costs_audit,
     costs_import,
     costs_summary,
+    crosscheck,
     dashboard_report,
     dashboards,
     diagnose,
@@ -120,6 +121,7 @@ ALL_TOOLS: frozenset[str] = frozenset({
     "bulk_diagnose",
     "check_connection",
     "classify_external_ips",
+    "compare_report_facts",
     "compare_servers",
     "correlate_logs",
     "create_host",
@@ -303,7 +305,7 @@ def register_all(
         trends_compare, trends_health,
         html_report, geo_traffic, geo_health, executive, predictive, ceo_report, service_brief, analysis,
         web_scenarios, correlation, ip_history, loss_drift, disruption, risk, floods,
-        telemetry, diagnose, triage, check_flaps,
+        telemetry, diagnose, triage, check_flaps, crosscheck,
     ]
     for module in modules:
         module.register(mcp, resolver, skip=skip)

@@ -5,6 +5,41 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.16.31] - 2026-07-30
+
+### Added — `compare_report_facts`: cross-system fact diff (ADR 101)
+A separate reporting pipeline runs overlapping analytics against the **same**
+Zabbix instance — erosion, uptime/SLA, dark-host detection, country resolution —
+maintained independently with findings hand-ported one way, and nothing verified
+the two agree. Both codebases have shipped defects in the same areas (country
+resolution: ADR 093/100 here, 0052 there; dark-host: ADR 100 / 0054; integer
+uint trends: ADR 092 / 0048), so a divergence introduced on either side would sit
+in a scheduled report until a human noticed two different numbers in two
+documents. The concrete near-miss: this server honours `ZABBIX_TRAFFIC_UNIT` and
+the reporting side deliberately does not, so if the fleet's items ever switch to
+bytes/sec one system's figures move 8x and the other's do not.
+
+The reporting side already publishes its comparable figures to JSON specifically
+so this side is a diff rather than a re-derivation. New read-only tool reads
+them, recomputes the same quantities live, and renders a per-field diff.
+
+**The load-bearing decision is what it refuses to judge.** Diffing every
+recognised field would immediately cry wolf, because some quantities share a name
+and are computed to different definitions on purpose — and an invariant that
+fires on correct data is one nobody reads, which is the failure mode this exists
+to prevent. So: *strict* grading only where definitions are provably identical
+(host population + country resolution, same helpers, same host list), and
+*advisory* — shown but never judged — for same-named figures whose definitions
+differ (uptime/SLA is period-integrated there, point-in-time here per ADR 097) or
+whose thresholds are unpublished (erosion counts). Plus: drift is separated from
+divergence (the fleet legitimately changes between runs), the facts file's age is
+always disclosed from its mtime since it carries no timestamp of its own, and the
+countryless-product set is mirrored exactly and pinned by a test — if the two
+sets drift, both systems count "missing country" over different populations and
+the diff reports a defect that does not exist. Caller paths go through
+`confined_input_path` (ADR 076). Added to the `ops` tier. Tool count 165 -> 166.
++18 tests, 873 -> 891.
+
 ## [1.16.30] - 2026-07-28
 
 Independent audit of the ADR 093-099 change set (~30 files, previously
