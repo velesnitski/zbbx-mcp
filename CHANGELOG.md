@@ -5,6 +5,39 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.16.32] - 2026-07-30
+
+### Security — cryptography Bleichenbacher oracle, plus a second advisory the sweep found (ADR 102)
+Reported: **GHSA-g6cj-pr64-35w5 / CVE-2026-69247** (High) — cryptography PKCS#7
+EnvelopedData decryption exposes a Bleichenbacher oracle through distinguishable
+errors and timing; vulnerable `>= 44.0.0, < 50.0.0`, the lock carried 49.0.0.
+
+**Not exploitable here:** nothing in `src/` or `tests/` imports cryptography at
+all, let alone the PKCS#7 decryption API, and a padding oracle needs an attacker
+able to submit chosen ciphertexts to a decryption endpoint — this server exposes
+none. The package is present transitively via `pyjwt[crypto]` <- `mcp`, and as a
+declared security floor from an earlier advisory. Bumped regardless, on ADR 083's
+reasoning: a dependency we ship is supply chain whether or not our call graph
+reaches it, and "not exploitable today" has an expiry date. Floor raised
+`>=46.0.7` -> `>=50.0.0` so a future resolution cannot drift back.
+
+**The sweep found a second one, closer to us than the reported High.** Following
+ADR 083 (where the reported CVE was only the tip), the whole lock was checked
+rather than just the named package. `pip-audit` cannot run on this machine — its
+isolated-venv builder dies in `ensurepip` regardless of flags — so all 117
+runtime packages were queried against the GitHub Advisory Database, the same
+source that raised the alert. That surfaced **GHSA-6hr6-w5qg-qmwg** (medium):
+h2 `<= 4.4.0` duplicate-`Host`-header request smuggling. h2 arrives via
+`httpx[http2]` and this client sets `http2=True`, so unlike the reported High
+the vulnerable code sits directly on our request path. Re-locked 4.3.0 -> 4.4.1
+(with hpack 4.2.0). Deliberately NOT promoted to a declared dependency: it is
+transitive, nothing caps it, the lock already pins it, and inventing a direct
+dependency to floor a transitive package becomes the next over-tight cap — the
+exact ADR 082 anti-pattern where our own ceiling blocked the fix we needed.
+
+Verified after both changes: **0 advisories across all 117 runtime packages.**
+891 tests, lint and typecheck unchanged.
+
 ## [1.16.31] - 2026-07-30
 
 ### Added — `compare_report_facts`: cross-system fact diff (ADR 101)
