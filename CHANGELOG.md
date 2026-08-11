@@ -5,6 +5,26 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.16.33] - 2026-08-11
+
+### Fixed — compare_report_facts cried wolf on population drift (ADR 101 addendum)
+The first live run of `compare_report_facts` against the reporting side's real
+`crosscheck.json` reported `DIVERGENCE — one side is wrong` and told the operator
+not to assume the report was stale — while EVERY per-country count matched
+exactly (72 countries, DE 116, US 117, …) and only the aggregate counts differed
+(total 943→951, blank 2→19, countryless 272→262). That is backwards, and exactly
+the cry-wolf ADR 101 exists to prevent: when per-country resolution provably
+agrees, an aggregate difference is fleet drift or a naming lag between the runs,
+not a resolution defect. New `POP_DRIFT` verdict downgrades the aggregate
+population counts (total_hosts / country_host_sum / countryless_by_design /
+blank_country_hosts) when every compared per-country count and the distinct-country
+total match; `countries` is not downgraded (a distinct-count change is itself a
+resolution signal), and a genuine per-country mismatch or absent per-country
+evidence keeps `DIVERGE`. Verified: the observed 943↔951 now reads POP_DRIFT with
+a "resolution agrees" overall verdict. Also surfaces the LIVE blank-country
+sample, not just the reported one, so the follow-up names hosts you can fix.
++4 tests, 891 → 895.
+
 ## [1.16.32] - 2026-07-30
 
 ### Security — cryptography Bleichenbacher oracle, plus a second advisory the sweep found (ADR 102)

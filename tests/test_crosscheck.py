@@ -16,6 +16,7 @@ from zbbx_mcp.tools.crosscheck import (
     DRIFT,
     MATCH,
     MISSING,
+    POP_DRIFT,
     build_live_facts,
     compare_facts,
     summarize,
@@ -100,16 +101,22 @@ class TestCompareFacts:
         overall, _ = summarize(rows)
         assert "drift" in overall
 
-    def test_large_delta_is_divergence(self):
-        reported = self._live(total_hosts=50)
+    def test_a_real_per_country_divergence_is_divergence(self):
+        # A per-country count differing IS a resolution disagreement (not
+        # drift), so it stays DIVERGE and drives the overall verdict.
+        reported = self._live(top_countries={"FJ": 40, "KI": 5})
         rows = compare_facts(reported, self._live(), drift_tolerance=2)
-        r = next(x for x in rows if x.field == "total_hosts")
+        r = next(x for x in rows if x.field == "country[KI]")
         assert r.verdict == DIVERGE
         overall, _ = summarize(rows)
         assert "DIVERGENCE" in overall
 
     def test_tolerance_zero_makes_any_delta_diverge(self):
-        rows = compare_facts(self._live(total_hosts=99), self._live(), drift_tolerance=0)
+        # No per-country evidence (top_countries absent both sides), so the
+        # POP_DRIFT discriminator cannot fire and this is a pure tolerance test.
+        rep = {"total_hosts": 99, "countries": 10, "country_host_sum": 99}
+        live = {"total_hosts": 100, "countries": 10, "country_host_sum": 100}
+        rows = compare_facts(rep, live, drift_tolerance=0)
         assert next(x for x in rows if x.field == "total_hosts").verdict == DIVERGE
 
     def test_absent_field_is_missing_not_a_violation(self):
@@ -149,6 +156,72 @@ class TestCompareFacts:
     def test_nothing_comparable_says_so(self):
         overall, _ = summarize(compare_facts({}, {}))
         assert "nothing comparable" in overall
+
+
+class TestPopulationDriftDiscriminator:
+    """ADR 101 addendum — found by running the tool live.
+
+    When every per-country count matches, country resolution provably agrees,
+    so a difference in the aggregate host counts is fleet drift, not a defect.
+    The tool must NOT then say "one side is wrong".
+    """
+
+    def _live(self, **over):
+        base = {
+            "total_hosts": 951, "countries": 72, "country_host_sum": 951,
+            "countryless_by_design": 262, "blank_country_hosts": 19,
+            "top_countries": {"DE": 116, "US": 117, "NL": 99},
+        }
+        base.update(over)
+        return base
+
+    def _reported(self):
+        # The exact live shape observed: per-country identical, aggregates off.
+        return {
+            "total_hosts": 943, "countries": 72, "country_host_sum": 943,
+            "countryless_by_design": 272, "blank_country_hosts": 2,
+            "top_countries": {"DE": 116, "US": 117, "NL": 99},
+        }
+
+    def test_aggregate_diff_with_matching_countries_is_pop_drift(self):
+        rows = compare_facts(self._reported(), self._live(), drift_tolerance=2)
+        agg = {r.field: r.verdict for r in rows
+               if r.field in ("total_hosts", "country_host_sum",
+                              "countryless_by_design", "blank_country_hosts")}
+        assert set(agg.values()) == {POP_DRIFT}
+        # and the overall verdict is NOT the scary one
+        overall, counts = summarize(rows)
+        assert "DIVERGENCE" not in overall
+        assert "resolution agrees" in overall
+        assert counts.get(DIVERGE, 0) == 0
+
+    def test_a_real_per_country_mismatch_stays_divergence(self):
+        # If resolution genuinely diverges (a country count differs), the
+        # discriminator must NOT fire — aggregates stay DIVERGE.
+        live = self._live(top_countries={"DE": 116, "US": 200, "NL": 99})
+        rows = compare_facts(self._reported(), live, drift_tolerance=2)
+        overall, counts = summarize(rows)
+        assert "DIVERGENCE" in overall
+        assert counts.get(DIVERGE, 0) >= 1
+        # the per-country row itself is the divergence
+        us = next(r for r in rows if r.field == "country[US]")
+        assert us.verdict == DIVERGE
+
+    def test_no_per_country_evidence_does_not_downgrade(self):
+        # Absent per-country data is not proof of agreement — a bare total
+        # mismatch stays DIVERGE, the conservative default.
+        rep = {"total_hosts": 900}
+        live = {"total_hosts": 951}
+        rows = compare_facts(rep, live, drift_tolerance=2)
+        assert next(r for r in rows if r.field == "total_hosts").verdict == DIVERGE
+
+    def test_countries_count_change_blocks_the_downgrade(self):
+        # A different distinct-country count is itself a resolution signal, so
+        # agreement cannot be claimed even if the shown top-N happen to match.
+        live = self._live(countries=71)
+        rows = compare_facts(self._reported(), live, drift_tolerance=2)
+        tot = next(r for r in rows if r.field == "total_hosts")
+        assert tot.verdict == DIVERGE
 
 
 class TestCompareReportFactsWire:

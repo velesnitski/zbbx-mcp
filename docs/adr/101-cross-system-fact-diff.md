@@ -98,3 +98,36 @@ appears in the output. 873 → 891.
 - **Running the comparison in CI.** This server is an interactive stdio process,
   not a library the reporting job can import — which is why the reporting side
   asserts its own invariants there and publishes facts for this side to diff.
+
+---
+
+## Addendum (2026-08-11) — population drift is not divergence
+
+Dogfooding the tool on the reporting side's first live `crosscheck.json` exposed
+a real defect **in this tool**: it reported `DIVERGENCE — one side is wrong` and
+told the operator *"check which, rather than assuming the report is stale"* —
+while **every compared per-country count matched exactly** (72 countries, DE 116,
+US 117, …). Only the aggregate counts differed (total 943→951, blank 2→19,
+countryless 272→262).
+
+That is exactly backwards, and it is the cry-wolf ADR 101 was written to prevent.
+When per-country resolution provably agrees, an aggregate-count difference cannot
+be a resolution defect — it is fleet drift or a naming lag between the two runs,
+and "the report is stale" is the *most* likely explanation, not one to dismiss.
+The blind spot was that the tool could not tell *count drift* from *resolution
+divergence*.
+
+The discriminator was already computed and unused: **per-country agreement**. So
+`total_hosts` / `country_host_sum` / `countryless_by_design` / `blank_country_hosts`
+are downgraded from `DIVERGE` to a new `POP_DRIFT` verdict when every compared
+per-country count matches and the distinct-country total matches (`_resolution_agrees`).
+`countries` itself is not downgraded — a change in the distinct-country count is a
+resolution signal. A genuine per-country mismatch, or no per-country evidence at
+all, leaves `DIVERGE` untouched (verified against the observed data:
+943↔951 now reads POP_DRIFT with a "resolution agrees" overall verdict, not
+DIVERGENCE). The tool also now surfaces the **live** blank-country sample, so
+"investigate blank_country_hosts" names hosts you can actually fix.
+
+Lesson, recorded because it is the whole point of the tool: a consistency check
+is only as good as its ability to stay quiet on benign difference. This one
+learned to.

@@ -54,9 +54,20 @@ COUNTRYLESS_PRODUCTS = frozenset({"infrastructure", "monitoring", "unknown", ""}
 # Verdicts.
 MATCH = "MATCH"
 DRIFT = "DRIFT"
+POP_DRIFT = "POP_DRIFT"  # aggregate counts moved but per-country resolution agrees
 DIVERGE = "DIVERGE"
 ADVISORY = "ADVISORY"
 MISSING = "MISSING"
+
+# Aggregate host-population counts. When per-country resolution provably agrees
+# (every compared country matches), a difference in THESE is fleet drift or a
+# naming lag between the two runs — not a resolution defect — so they are
+# downgraded from DIVERGE to POP_DRIFT (ADR 101 addendum). `countries` is NOT
+# here: a change in the DISTINCT-country count is itself a resolution signal.
+_AGGREGATE_FIELDS = frozenset({
+    "total_hosts", "country_host_sum", "countryless_by_design",
+    "blank_country_hosts",
+})
 
 # Fields we can judge, because both sides derive them from the same host list
 # with the same two helpers.
@@ -189,7 +200,43 @@ def compare_facts(
             )
         )
 
+    # Discriminator (ADR 101 addendum, found by dogfooding the tool live): if
+    # EVERY compared per-country count matches and the distinct-country count
+    # matches, country resolution provably agrees between the two sides — so a
+    # difference in the aggregate population counts cannot be a resolution
+    # defect. It is fleet drift or a naming lag between the runs. Downgrading
+    # keeps the tool from crying wolf ("one side is wrong") on exactly the
+    # benign case it exists to distinguish. A per-country mismatch, or no
+    # per-country evidence at all, leaves the DIVERGE verdict untouched.
+    if _resolution_agrees(rows):
+        for r in rows:
+            if r.field in _AGGREGATE_FIELDS and r.verdict == DIVERGE:
+                r.verdict = POP_DRIFT
+                r.note = (
+                    r.note.split(" — ")[0]
+                    + " — but every per-country count matches, so resolution "
+                    "agrees; this is fleet drift / naming lag between the runs, "
+                    "not a defect"
+                )
+
     return rows
+
+
+def _resolution_agrees(rows: list[DiffRow]) -> bool:
+    """True when the two sides provably resolve countries the same way.
+
+    Requires at least one compared per-country count (no evidence is not
+    agreement), every such count matching, and the distinct-country total
+    matching. Scoped to the published top-N, so it cannot certify the long
+    tail — but combined with each side's internal country_host_sum
+    reconciliation it is strong evidence, and it is exactly the signal that
+    separates population drift from a resolution defect. Pure.
+    """
+    country_rows = [r for r in rows if r.field.startswith("country[")]
+    if not country_rows or any(r.verdict != MATCH for r in country_rows):
+        return False
+    countries_row = next((r for r in rows if r.field == "countries"), None)
+    return countries_row is not None and countries_row.verdict == MATCH
 
 
 def summarize(rows: list[DiffRow]) -> tuple[str, dict[str, int]]:
@@ -199,6 +246,11 @@ def summarize(rows: list[DiffRow]) -> tuple[str, dict[str, int]]:
         counts[r.verdict] = counts.get(r.verdict, 0) + 1
     if counts.get(DIVERGE):
         overall = "DIVERGENCE — the two systems disagree beyond drift"
+    elif counts.get(POP_DRIFT):
+        overall = (
+            "country resolution agrees; host population drifted between the "
+            "runs (fleet change / naming lag) — not a defect"
+        )
     elif counts.get(DRIFT):
         overall = "consistent (small drift only)"
     elif counts.get(MATCH):
@@ -287,7 +339,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     "| Field | Reported | Live | Verdict | Note |",
                     "|-------|---------:|-----:|---------|------|",
                 ]
-                _order = {DIVERGE: 0, DRIFT: 1, MISSING: 2, ADVISORY: 3, MATCH: 4}
+                _order = {DIVERGE: 0, POP_DRIFT: 1, DRIFT: 2, MISSING: 3, ADVISORY: 4, MATCH: 5}
                 for r in sorted(rows, key=lambda x: _order.get(x.verdict, 9)):
                     rep = "–" if r.reported is None else r.reported
                     liv = "–" if r.live is None else r.live
@@ -300,16 +352,36 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     parts.append(
                         "\n**Investigate:** "
                         + ", ".join(r.field for r in diverging)
-                        + ". A strict field disagreeing means one side's host "
-                        "population or country resolution is wrong — check "
-                        "which, rather than assuming the report is stale."
+                        + ". A per-country count disagreeing means one side's "
+                        "country resolution is wrong — check which. (Aggregate "
+                        "counts alone are drift; see POP_DRIFT rows.)"
                     )
 
-                sample = reported.get("blank_country_sample") or []
-                if sample and live.get("blank_country_hosts"):
+                pop = [r for r in rows if r.verdict == POP_DRIFT]
+                if pop:
                     parts.append(
-                        f"\n_Both sides see hosts with no derivable country; "
-                        f"reported sample: {', '.join(map(str, sample[:3]))}._"
+                        "\n_Population drift only: every per-country count matched, "
+                        "so both sides resolve countries identically — the "
+                        + ", ".join(r.field for r in pop)
+                        + " difference is fleet change / naming lag between the "
+                        "runs, not a defect. Likely stale facts file; re-publish "
+                        "to confirm._"
+                    )
+
+                # Show BOTH samples when either side has blank-country hosts, so
+                # "investigate blank_country_hosts" is actionable — the live
+                # sample names hosts you can actually fix now.
+                rep_s = reported.get("blank_country_sample") or []
+                live_s = live.get("blank_country_sample") or []
+                if rep_s or live_s:
+                    bits = []
+                    if live_s:
+                        bits.append(f"live: {', '.join(map(str, live_s[:5]))}")
+                    if rep_s:
+                        bits.append(f"reported: {', '.join(map(str, rep_s[:3]))}")
+                    parts.append(
+                        "\n_Hosts with no derivable country (name it in Zabbix "
+                        "inventory or fix the convention) — " + "; ".join(bits) + "._"
                     )
 
                 return "\n".join(parts) + age_note
