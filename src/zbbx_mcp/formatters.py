@@ -251,6 +251,19 @@ def format_host_detail(host: dict, context: dict | None = None) -> str:
         parts.extend(["", "## Templates"])
         parts.extend(f"- {t}" for t in templates)
 
+    # An enrichment block that failed says so. Without this, "could not read"
+    # and "not set" render identically — and the reader has no way to tell a
+    # real absence from a permissions wall (ADR 103).
+    unavailable = ctx.get("_unavailable")
+    if unavailable:
+        parts.extend(["", "## Not shown"])
+        parts.extend(f"- {u}" for u in unavailable)
+        parts.append(
+            "\n_These are missing because a call failed, NOT because the value "
+            "is absent. Check the token's host-group read permission and its "
+            "role's API-method list._"
+        )
+
     return "\n".join(parts)
 
 

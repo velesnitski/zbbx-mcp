@@ -5,6 +5,30 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.16.34] - 2026-08-13
+
+### Fixed — a swallowed enrichment failure looked exactly like an absent value (ADR 103)
+Reported from the field: `get_host` returned no cost for hosts that have one,
+on a non-Super-admin token. The Zabbix rule is simple enough — host cost lives in
+the `{$COST_MONTH}` user macro, so reading it needs `usermacro.get` IN ADDITION
+to host-group read access; a token that lists hosts perfectly can still return
+nothing for macros, because those are separate permissions.
+
+The defect was ours. ADR 099 wrapped each enrichment block in `try/except … pass`
+so a failure could never break the identity lookup — right intent, but `pass`
+made a permission error and "this host has no cost macro" produce byte-identical
+output. Three different situations (not set / may not read / API method revoked)
+rendered the same, and a reader will assume the mundane one.
+
+Enrichment stays best-effort but is no longer silent: failures record into
+`ctx["_unavailable"]` and render under a **Not shown** heading stating they are
+missing because a call FAILED, not because the value is absent — with where to
+look (host-group read permission, role API-method list). Applied to cost/bandwidth
+macros, current traffic and service-check state. README's token section now
+documents the three gates (host-group read, role API methods, Secret macro type)
+and that Super admin bypasses host-group permissions, which is why the same tool
+works for one colleague and not another. +1 test, 895 -> 896.
+
 ## [1.16.33] - 2026-08-11
 
 ### Fixed — compare_report_facts cried wolf on population drift (ADR 101 addendum)

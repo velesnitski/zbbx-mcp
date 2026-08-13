@@ -99,7 +99,37 @@ class TestGetHostEnrichment:
         client = Flaky({"host.get": [BASE]})
         out = run_tool(hosts_mod, "get_host", client, host_id="1")
         assert "# Host: node-ab1" in out
-        assert "Error" not in out
+        # Must not become the tool's error return...
+        assert not out.startswith("Error")
+        # ...but the failure IS disclosed rather than swallowed, so a reader
+        # can tell "could not read" from "not set" (ADR 103).
+        assert "## Not shown" in out
+        assert "usermacro.get" in out
+        assert "Cost/month" not in out
+
+    def test_missing_macro_and_unreadable_macro_look_different(self):
+        """The distinction the silent version destroyed.
+
+        A host with no cost macro and a host whose macros cannot be read both
+        render without a Cost line — so the output must say which happened,
+        or a permissions wall is indistinguishable from a real absence.
+        """
+        no_macro = RecordingClient({"host.get": [BASE], "usermacro.get": []})
+        out_absent = run_tool(hosts_mod, "get_host", no_macro, host_id="1")
+
+        class Denied(RecordingClient):
+            async def call(self, method, params):
+                if method == "usermacro.get":
+                    raise ValueError("Access denied")
+                return await super().call(method, params)
+
+        out_denied = run_tool(hosts_mod, "get_host",
+                              Denied({"host.get": [BASE]}), host_id="1")
+
+        assert "Cost/month" not in out_absent and "Cost/month" not in out_denied
+        assert "## Not shown" not in out_absent      # genuinely not set
+        assert "## Not shown" in out_denied          # could not be read
+        assert out_absent != out_denied
 
 
 class TestCountryInventoryGap:

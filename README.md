@@ -14,6 +14,26 @@ Zabbix MCP server for [Claude Code](https://claude.com/claude-code), [GitHub Cop
 
 In Zabbix UI: **User settings** → **API tokens** → **Create API token**.
 
+The token inherits the permissions of the user that owns it. Three things
+gate what the server can read — and the first two fail *quietly*, returning
+empty results rather than errors:
+
+| Requirement | Where | Symptom if missing |
+|---|---|---|
+| **Read** on the host groups | User group → *Host permissions* | Hosts simply absent — "not found", empty lists |
+| API methods not revoked | User role → *API methods* (5.2+) | The specific tool errors; others keep working |
+| Macro type is not *Secret* | The macro itself | Value shows as `******` |
+
+Notably, **host cost / bandwidth figures come from user macros**
+(`{$COST_MONTH}`, `{$BW_LIMIT}`) and therefore need `usermacro.get` in
+addition to host read access. A token that lists hosts fine can still return
+no cost, because those are two different permissions.
+
+A *Super admin* token bypasses host-group permissions entirely, which is why
+something can work for one colleague and not another. If a field is missing,
+`get_host` now says whether the call **failed** or the value is genuinely
+**not set** — check the "Not shown" section before assuming the data is absent.
+
 ### 2. Install in Claude Code
 
 **Option A — via CLI** (recommended):

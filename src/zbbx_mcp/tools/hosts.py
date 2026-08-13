@@ -55,6 +55,14 @@ async def _host_context(client, host: dict) -> dict:
         ctx["templates"] = [t for t in tnames if t][:6]
 
     # Cost / bandwidth macros.
+    #
+    # A failure here must not break the lookup (ADR 099) — but it must not be
+    # SILENT either. Swallowing it made "you may not read macros" render
+    # identically to "this host has no cost set", which is unfalsifiable from
+    # the output: a reader cannot tell a real zero from a permission wall.
+    # Zabbix returns an empty list (not an error) for hosts the token cannot
+    # see, and an error when the role revokes the API method — both now say so
+    # (ADR 103).
     try:
         macros = await client.call("usermacro.get", {
             "hostids": [hid],
@@ -69,24 +77,31 @@ async def _host_context(client, host: dict) -> dict:
                     ctx["bw_limit"] = float(m["value"])
             except (ValueError, TypeError, KeyError):
                 continue
-    except (httpx.HTTPError, ValueError, KeyError):
-        pass
+    except (httpx.HTTPError, ValueError, KeyError) as e:
+        ctx.setdefault("_unavailable", []).append(
+            f"cost/bandwidth macros — `usermacro.get` failed ({type(e).__name__}); "
+            "the token's role may revoke this API method"
+        )
 
     # Current inbound traffic + service-check state.
     try:
         traffic = await fetch_traffic_map(client, [hid])
         if hid in traffic:
             ctx["traffic_mbps"] = traffic[hid]
-    except (httpx.HTTPError, ValueError, KeyError):
-        pass
+    except (httpx.HTTPError, ValueError, KeyError) as e:
+        ctx.setdefault("_unavailable", []).append(
+            f"current traffic — `item.get` failed ({type(e).__name__})"
+        )
     try:
         status = await fetch_service_status(client, [hid])
         if hid in status:
             ctx["service_status"] = {
                 1: "OK", -1: "PARTIAL", 0: "DOWN",
             }.get(status[hid], "")
-    except (httpx.HTTPError, ValueError, KeyError):
-        pass
+    except (httpx.HTTPError, ValueError, KeyError) as e:
+        ctx.setdefault("_unavailable", []).append(
+            f"service-check state — `item.get` failed ({type(e).__name__})"
+        )
 
     return ctx
 
