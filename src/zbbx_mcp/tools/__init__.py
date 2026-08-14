@@ -52,6 +52,7 @@ from zbbx_mcp.tools import (
     slack,
     telemetry,
     templates,
+    tokens,
     traffic,
     traffic_erosion,
     traffic_shaping,
@@ -190,6 +191,7 @@ ALL_TOOLS: frozenset[str] = frozenset({
     "get_external_ip_history",
     "get_fleet_risk_score",
     "get_geo_traffic_trends",
+    "get_api_tokens",
     "get_global_macros",
     "get_graphs",
     "get_health_assessment",
@@ -307,7 +309,7 @@ def register_all(
         trends_compare, trends_health,
         html_report, geo_traffic, geo_health, executive, predictive, ceo_report, service_brief, analysis,
         web_scenarios, correlation, ip_history, loss_drift, disruption, risk, floods,
-        telemetry, diagnose, triage, check_flaps, crosscheck,
+        telemetry, diagnose, triage, check_flaps, crosscheck, tokens,
     ]
     for module in modules:
         module.register(mcp, resolver, skip=skip)

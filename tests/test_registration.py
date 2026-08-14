@@ -101,6 +101,7 @@ EXPECTED_TOOLS = {
     "get_sla",
     # macros.py
     "get_host_macros",
+    "get_api_tokens",
     "get_global_macros",
     "set_host_macro",
     "set_bulk_macro",

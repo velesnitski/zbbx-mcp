@@ -3,7 +3,7 @@
 [![Tests](https://github.com/velesnitski/zbbx-mcp/actions/workflows/test.yml/badge.svg)](https://github.com/velesnitski/zbbx-mcp/actions/workflows/test.yml)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-yellow.svg)](LICENSE)
-[![Tools: 167](https://img.shields.io/badge/tools-167-brightgreen.svg)](#what-it-does)
+[![Tools: 168](https://img.shields.io/badge/tools-168-brightgreen.svg)](#what-it-does)
 [![Latest release](https://img.shields.io/github/v/release/velesnitski/zbbx-mcp.svg)](https://github.com/velesnitski/zbbx-mcp/releases)
 
 Zabbix MCP server for [Claude Code](https://claude.com/claude-code), [GitHub Copilot](https://github.com/features/copilot), [Codex CLI](https://github.com/openai/codex), [n8n](https://n8n.io), and any MCP-compatible client. Talk to your Zabbix monitoring in natural language.
@@ -91,7 +91,7 @@ You should see `zabbix` listed when Claude starts. Try asking: *"Show current pr
 
 ## What it does
 
-**167 tools**:
+**168 tools**:
 
 | Category | Tools |
 |----------|-------|
@@ -156,7 +156,7 @@ get_traffic_report(country="us")
 
 ## Choosing a tier
 
-The full 167-tool catalog costs ~30k tokens at every session start (the
+The full 168-tool catalog costs ~30k tokens at every session start (the
 LLM has to load every tool's schema). For most sessions you only use a
 subset. `ZABBIX_TIER` ships preset bundles that cut this:
 
@@ -166,7 +166,7 @@ subset. `ZABBIX_TIER` ships preset bundles that cut this:
 | `ops` | 60 | ~9k | Incident response — `core` + correlation, disruption detection, risk scoring, IP history, extended health |
 | `finance` | 49 | ~7k | Cost / billing — `core` + cost imports, audits, provider analysis |
 | `reports` | 65 | ~10k | Executive reporting — `core` + report generators, executive analytics, geo, inventory |
-| `full` | 167 | ~25k | Default — everything (no restriction) |
+| `full` | 168 | ~25k | Default — everything (no restriction) |
 
 `ZABBIX_TIER=ops` saves ~18k tokens per session compared to the default.
 Switch tiers by changing the env var; the server picks it up on restart.

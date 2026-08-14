@@ -5,6 +5,41 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.16.42] - 2026-08-14
+
+### Added — get_api_tokens: the surface a token audit had to go around
+ADR 112. A Zabbix token audit had to bypass this server entirely and call
+token.get by hand, because no tool covered API tokens. What it found is what a
+routine tool would have surfaced without anyone going looking: expired temporary
+tokens still present, several with NO expiry at all (one service token unused
+for over a year), and a token named `test` on a personal account.
+
+Every other object here is watched because it might break. A token is different:
+the finding is its ABSENCE of use — a key nobody has touched in a year is not
+idle capacity, it is an unrevoked credential.
+
+The trap the pure core exists to avoid: Zabbix encodes "never" as 0 in both
+lastaccess and expires_at, and 0 is also a valid timestamp meaning 1970. Treating
+it arithmetically makes a never-used token read as ~19,000 days idle — or, once
+sorted, as the MOST recently used one — and makes a token that never expires read
+as long expired. Both are separate states, pinned by test, because either
+confusion inverts the signal the tool exists for.
+
+Ranked worst-first: expired-but-present, permanent-and-never-used,
+permanent-and-stale, never used, permanent, stale. A disabled token ranks below
+every live one regardless of its other flags — it cannot be used, and ranking it
+on those flags would push real keys off the top of the list.
+
+token.get is Super-admin-only unless a role grants it, so a denied call returns
+"this is a permissions answer, NOT 'there are no tokens'" (ADR 103) — an empty
+token list is otherwise the most reassuring possible output for the least
+trustworthy possible reason. Owner lookup fails softer: a denied user.get still
+lists tokens by id rather than blanking the audit.
+
+Read-only by design; delete_api_token was offered by the task and left out,
+because revoking a credential is not a step to take from a summary table.
+167 -> 168 tools, 951 -> 964 tests.
+
 ## [1.16.41] - 2026-08-14
 
 ### Fixed — the un-judged disclosure asserted a cause it had not checked

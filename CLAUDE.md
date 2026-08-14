@@ -4,7 +4,7 @@ Instructions for Claude Code when working in this repository.
 
 ## Project
 
-Zabbix MCP server — 167 tools across 40+ modules. Python 3.10+, FastMCP framework, async httpx HTTP/2 client.
+Zabbix MCP server — 168 tools across 40+ modules. Python 3.10+, FastMCP framework, async httpx HTTP/2 client.
 
 ## Commands
 
@@ -55,6 +55,7 @@ uv run pytest -k "test_name"               # single test by name
 | `inventory_load.py` | 8 | `get_server_load`, `get_high_cpu_servers`, `get_underloaded_servers`, `get_unknown_providers`, `identify_providers` |
 | `alerts.py` | 2 | `get_alerts`, `get_alert_summary` |
 | `users.py` | 1 | `get_users` |
+| `tokens.py` | 1 | `get_api_tokens` — expiry / last-use / owner audit; ranks by risk, never renders a denied `token.get` as an empty list |
 | `proxies.py` | 1 | `get_proxies` |
 | `maps.py` | 2 | `get_maps`, `get_map_detail` |
 | `media.py` | 2 | `get_media_types`, `get_actions` |

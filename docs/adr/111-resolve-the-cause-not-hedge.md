@@ -16,8 +16,8 @@ judge, and explained why it mattered:
 
 The first time that line was read against real data it was **wrong**. Twenty
 hosts on one dashboard came back un-judged with ~50h of history each; none had
-been rebuilt. They had been provisioned two days earlier — `node-x-de0998`
-added by ansible at 2026-08-12 10:07.
+been rebuilt. They had been provisioned two days earlier, added by ansible in a
+single batch — which the audit log states outright.
 
 Both readings fit the same observation exactly: a short history means the items
 were rebuilt, *or* the host is new. The disclosure picked one and stated it as
