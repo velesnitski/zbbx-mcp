@@ -56,6 +56,7 @@ SHAPED = "shaped"            # dropped AND the peaks piled up at a ceiling
 CAPPED = "capped"            # peaks at a ceiling, but no drop — pre-existing
 DROPPED = "dropped"          # lower peaks that still spread — demand or a block
 NORMAL = "normal"            # peaks spread, no material drop
+NO_BASELINE = "no_baseline"  # nothing to compare against — cannot say
 IDLE = "idle"                # ceiling below the floor — spare/out of rotation
 INSUFFICIENT = "insufficient"  # too few hours to judge
 
@@ -145,11 +146,16 @@ def classify_shaping(
       limit or genuinely constant demand; throughput cannot tell those apart.
     - **dropped** — a material drop whose peaks still spread. The
       ``detect_traffic_drops`` story, restated so the two tools agree.
-    - **normal** — otherwise.
+    - **no_baseline** — the recent window is fine, but there is nothing before
+      it to compare against, so no statement about a fall is possible.
+    - **normal** — otherwise, and only ever against a real baseline.
 
-    With no usable baseline the drop test cannot run, so a host with a ceiling
-    reads *capped* rather than *shaped* — the tool never claims a change it had
-    no way to see.
+    The split between the last two is the point. `normal` is a COMPARATIVE
+    claim; making it without a baseline asserts health from no evidence, which
+    is how a host whose trend history was destroyed reads as healthy. `capped`
+    survives a missing baseline because it is a statement about the recent
+    window alone — a ceiling is visible without knowing what came before, so
+    such a host reads *capped*, never *shaped*.
 
     Pure.
     """
@@ -182,7 +188,8 @@ def classify_shaping(
     )
 
     walled = hit_rate >= min_hit_rate
-    dropped = base_ceiling is not None and drop_pct >= min_drop_pct
+    have_baseline = base_ceiling is not None
+    dropped = have_baseline and drop_pct >= min_drop_pct
 
     if walled and dropped:
         return ShapingVerdict(
@@ -203,6 +210,18 @@ def classify_shaping(
             f"peaks fell {drop_pct:.0f}% to {ceiling:.1f} Mbps but still spread "
             f"({hit_rate:.0%} of active hours at the top) — demand or "
             "reachability, not a cap",
+        )
+    if not have_baseline:
+        # Everything above this point is a recent-window observation and stands
+        # on its own. "normal" is not: it means "compared with before, nothing
+        # changed", and there is no before. Recreating a host's items destroys
+        # its trend history, so this is exactly where a rebuilt host lands —
+        # absent evidence, which must never render as evidence of absence
+        # (ADR 107).
+        return ShapingVerdict(
+            NO_BASELINE, ceiling, hit_rate, hits, active, None, 0.0,
+            f"ceiling {ceiling:.1f} Mbps, but no history before the recent "
+            "window to compare against — a fall here would be invisible",
         )
     return ShapingVerdict(
         NORMAL, ceiling, hit_rate, hits, active, base_ceiling, drop_pct,
@@ -352,6 +371,8 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 cut = now - rec_h * 3600
                 recent: dict[str, list[float]] = {}
                 base: dict[str, list[float]] = {}
+                oldest: dict[str, int] = {}   # first sample per item — how far
+                                              # back this item's history reaches
                 for t in trends:
                     try:
                         clock = int(t["clock"])
@@ -360,11 +381,15 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                         continue
                     (recent if clock >= cut else base).setdefault(
                         t["itemid"], []).append(val)
+                    iid = t["itemid"]
+                    if clock < oldest.get(iid, clock + 1):
+                        oldest[iid] = clock
 
                 # One interface per host: the one with the highest baseline
                 # ceiling, so a spiking idle tunnel can never stand in for the
                 # real uplink (same rule as the acute detector).
                 verdicts: dict[str, ShapingVerdict] = {}
+                history_h: dict[str, int] = {}
                 for hid, items in by_host_items.items():
                     best_iid, best_ceiling = None, -1.0
                     for it in items[:_IFACE_CANDIDATES]:
@@ -375,6 +400,9 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                             best_iid, best_ceiling = iid, c
                     if best_iid is None:
                         continue
+                    history_h[hid] = (
+                        (now - oldest[best_iid]) // 3600 if best_iid in oldest else 0
+                    )
                     verdicts[hid] = classify_shaping(
                         recent.get(best_iid, []), base.get(best_iid, []),
                         min_ceiling_mbps=min_ceiling_mbps,
@@ -403,6 +431,27 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     "means unmeasured, not healthy._" if unexamined else ""
                 )
 
+                # Hosts the tool looked at and could NOT judge. Counting them
+                # in the header is not enough — "2 insufficient" is exactly the
+                # line a reader skips, and a host whose trend history was just
+                # destroyed lands here looking identical to a healthy one. Name
+                # them, with how far back their history actually reaches
+                # (ADR 107).
+                unjudged = sorted(
+                    (host_map.get(hid, {}).get("host", hid), history_h.get(hid, 0))
+                    for hid, v in verdicts.items()
+                    if v.verdict in (INSUFFICIENT, NO_BASELINE)
+                )
+                unjudged_note = (
+                    f"\n\n_{len(unjudged)} host(s) could NOT be judged: "
+                    + ", ".join(f"{n} ({h}h of history)" for n, h in unjudged[:5])
+                    + ("…" if len(unjudged) > 5 else "")
+                    + ". Recreating a host's items destroys its trend history, so a "
+                    "host that just lost its past reads the same as one that never "
+                    "had a problem — this line is the difference._"
+                    if unjudged else ""
+                )
+
                 counts: dict[str, int] = {}
                 for v in verdicts.values():
                     counts[v.verdict] = counts.get(v.verdict, 0) + 1
@@ -419,6 +468,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     f"{len(verdicts)} hosts; {counts.get(SHAPED, 0)} shaped, "
                     f"{counts.get(CAPPED, 0)} capped, {counts.get(DROPPED, 0)} dropped, "
                     f"{counts.get(NORMAL, 0)} normal, {counts.get(IDLE, 0)} idle, "
+                    f"{counts.get(NO_BASELINE, 0)} no-baseline, "
                     f"{counts.get(INSUFFICIENT, 0)} insufficient)\n"
                 )
                 if not flagged:
@@ -426,6 +476,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                         header
                         + "\nNo host is pinned against a throughput ceiling in "
                         "the window."
+                        + unjudged_note
                         + unexamined_note
                         + excluded_test_note(excluded)
                     )
@@ -455,6 +506,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     "lost traffic are counted as `dropped` above and belong to "
                     "`detect_traffic_drops`._"
                 )
-                return "\n".join(parts) + unexamined_note + excluded_test_note(excluded)
+                return ("\n".join(parts) + unjudged_note + unexamined_note
+                        + excluded_test_note(excluded))
             except (httpx.HTTPError, ValueError) as e:
                 return f"Error: {e}"

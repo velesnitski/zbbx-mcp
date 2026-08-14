@@ -16,6 +16,7 @@ from zbbx_mcp.tools.traffic_shaping import (
     DROPPED,
     IDLE,
     INSUFFICIENT,
+    NO_BASELINE,
     NORMAL,
     SHAPED,
     ceiling_hit_rate,
@@ -204,3 +205,58 @@ class TestDiscoveryIsTemplateAgnostic:
         assert "NOT examined" in out
         assert "node-ki1" in out
         assert "unmeasured, not healthy" in out
+
+
+class TestWipedHistoryIsDisclosed:
+    """ADR 107 — a host whose trend history was destroyed must not read healthy.
+
+    Live case: two hosts sitting at a fraction of a sibling's throughput, with
+    their items freshly re-created, so no trend reached back past the recent
+    window. Every comparative detector had nothing to compare against — and
+    said nothing, which reads as "no anomaly".
+    """
+
+    def test_no_baseline_is_not_normal(self):
+        # `normal` means "compared with before, nothing changed". Without a
+        # before, that claim cannot be made at all.
+        v = classify_shaping(VARY, [])
+        assert v.verdict == NO_BASELINE
+        assert v.verdict != NORMAL
+        assert "no history before the recent window" in v.note
+
+    def test_a_ceiling_is_still_reportable_without_a_baseline(self):
+        # `capped` is a recent-window observation and survives the missing
+        # baseline — only the comparative half is withheld.
+        assert classify_shaping(FLAT, []).verdict == CAPPED
+
+    def test_normal_still_requires_a_real_baseline(self):
+        assert classify_shaping(VARY, VARY).verdict == NORMAL
+
+    def test_unjudged_hosts_are_named_with_their_history_length(self):
+        now = int(time.time())
+        # One healthy host with full history; one whose item only has 3 hours.
+        rows = [{"itemid": "1", "clock": str(now - 3600 * (i + 1)),
+                 "value_max": str(v * 1_000_000)} for i, v in enumerate(VARY)]
+        rows += [{"itemid": "1", "clock": str(now - 3600 * (200 + i)),
+                  "value_max": str(v * 1_000_000)} for i, v in enumerate(VARY)]
+        rows += [{"itemid": "2", "clock": str(now - 3600 * (i + 1)),
+                  "value_max": str(9 * 1_000_000)} for i in range(3)]
+        c = RecordingClient({
+            "host.get": [{"hostid": "9", "host": "node-fj1",
+                          "groups": [{"name": "edge"}]},
+                         {"hostid": "8", "host": "node-ki1",
+                          "groups": [{"name": "edge"}]}],
+            "item.get": [{"itemid": "1", "hostid": "9",
+                          "key_": "net.if.in[eth0]", "lastvalue": "5000000"},
+                         {"itemid": "2", "hostid": "8",
+                          "key_": "net.if.in[eth0]", "lastvalue": "9000000"}],
+            "trend.get": rows,
+        })
+        out = run_tool(ts_mod, "detect_traffic_shaping", c,
+                       hours=24, baseline_days=14)
+        assert "could NOT be judged" in out
+        assert "node-ki1" in out
+        assert "of history" in out
+        assert "destroys its trend history" in out
+        # the fully-measured host is judged, so it must not appear in that line
+        assert "node-fj1 (" not in out.split("could NOT be judged")[1]

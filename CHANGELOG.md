@@ -5,6 +5,37 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.16.37] - 2026-08-14
+
+### Fixed — a host whose trend history was destroyed read as "normal"
+ADR 107. Chasing the ADR 105 field report turned up two more hosts running at a
+fraction of a sibling's throughput, each with freshly re-created items, so no
+trend reached back past the recent window.
+
+`classify_shaping` set `base_ceiling = None` for a missing baseline, which makes
+the drop test unevaluable — and then fell through to `return NORMAL`, "peaks
+spread normally". Verified against the previous commit: `classify_shaping(
+varying_series, [])` returns `normal`. That is health asserted from no evidence.
+`normal` is a COMPARATIVE claim, "against what came before, nothing changed",
+and there was no before; a host whose history had just been destroyed rendered
+identically to one that had been fine all along.
+
+New verdict `no_baseline` covers that state. `capped` deliberately still fires
+without a baseline: a ceiling is an observation about the recent window alone
+and needs no past, so only the comparative half is withheld — withhold the
+claims that need history, keep the ones that do not.
+
+The tool also only COUNTED what it could not judge ("2 insufficient") in a
+header line, which is the line a reader skips and never names a host. Hosts that
+could not be judged are now named with how far back their history actually
+reaches — `node-x (3h of history)` — plus why it matters: recreating a host's
+items destroys its trend history, so a host that just lost its past reads the
+same as one that never had a problem.
+
+Same failure the reporting side hit twice (zabbix-reports ADR 0069, then 0073):
+trends belong to the ITEM, so an item rebuild resets the measurement window and
+every comparative detector inherits the blind spot. 925 -> 929 tests.
+
 ## [1.16.36] - 2026-08-14
 
 ### Fixed — an entire Zabbix template was invisible to every traffic tool
