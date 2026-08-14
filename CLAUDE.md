@@ -4,7 +4,7 @@ Instructions for Claude Code when working in this repository.
 
 ## Project
 
-Zabbix MCP server — 166 tools across 40+ modules. Python 3.10+, FastMCP framework, async httpx HTTP/2 client.
+Zabbix MCP server — 167 tools across 40+ modules. Python 3.10+, FastMCP framework, async httpx HTTP/2 client.
 
 ## Commands
 
@@ -62,6 +62,7 @@ uv run pytest -k "test_name"               # single test by name
 | `costs.py` | 4 | `import_server_costs`, `set_bulk_cost`, `import_costs_by_ip`, `get_cost_summary` |
 | `traffic.py` | 5 | `detect_traffic_anomalies`, `detect_traffic_drops`, `get_traffic_report`, `detect_regional_anomalies`, `get_traffic_drop_timeline` |
 | `traffic_erosion.py` | 1 | `detect_traffic_erosion` — multi-week cohort-relative slow-decline detector (the acute `detect_traffic_drops` blind spot) |
+| `traffic_shaping.py` | 1 | `detect_traffic_shaping` — flat-ceiling signature: separates a rate limit from lost demand (hourly `value_max`, not avg) |
 | `trends_health.py` | 3 | `get_health_assessment`, `get_shutdown_candidates`, `get_capacity_planning` |
 | `trends_compare.py` | 3 | `get_trends_batch`, `get_server_dashboard`, `compare_servers` |
 | `geo_traffic.py` | 4 | `detect_regional_anomalies`, `get_geo_traffic_trends`, `get_expansion_report`, `get_regional_density_map` |

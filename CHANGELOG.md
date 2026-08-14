@@ -5,6 +5,42 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.16.35] - 2026-08-14
+
+### Added — detect_traffic_shaping: separate a rate limit from lost demand
+ADR 104. `detect_traffic_drops` (ADR 040) and `detect_traffic_erosion`
+(ADR 091) both answer "is it lower". Neither answers "why", and that is the
+question with a cost attached: **shaped** means open a provider ticket,
+**demand** means do nothing. In an average the two are indistinguishable.
+
+Shaping's fingerprint is not in the level, it is in the shape of the peaks. A
+policer truncates the top of the distribution — every hour that wants more than
+the cap reports exactly the cap, so the busy hours pile up on one value, while
+ordinary demand reaches its maximum once and spreads out below it. The tool
+therefore reads hourly `value_max` and never `value_avg`: a steady load has a
+stable average and still-moving peaks, so averaging erases the only signal that
+separates the two. A wire test asserts `value_max` is requested and `value_avg`
+is not, because that regression would be silent.
+
+The metric is the ceiling **hit rate** — of the hours where the host was
+actually pushing (peak >= 50% of the p95 ceiling), what share sit within 2% of
+it. Verdicts: `shaped` (ceiling fell >=25% AND hit rate >=60%), `capped` (hit
+rate high, no drop), `dropped` (fell but peaks still spread — that is
+`detect_traffic_drops`' story), `normal`, `idle`, `insufficient`. Both halves
+are required for `shaped`, and with no usable baseline a host reads `capped`,
+never `shaped` — the tool does not claim a change it could not observe.
+
+Recorded in the ADR because it looks right and is not: the first metric measured
+the SPREAD of the top quartile of hours. Selecting the largest values compresses
+any distribution, so a perfectly healthy series scored as flat as a shaped one —
+it fired on the first synthetic control tried. The healthy-varying and diurnal
+controls are kept as tests for that reason.
+
+`capped` cannot separate a hard rate limit from genuinely constant demand;
+throughput does not carry that information, so the verdict is worded as an
+observation and listed apart from `shaped`. Added to the `ops` tier (59 -> 60).
+166 -> 167 tools, 896 -> 914 tests.
+
 ## [1.16.34] - 2026-08-13
 
 ### Fixed — a swallowed enrichment failure looked exactly like an absent value (ADR 103)
