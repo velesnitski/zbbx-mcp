@@ -48,7 +48,7 @@ from zbbx_mcp.data import (
     extract_country,
     partition_test_hosts,
 )
-from zbbx_mcp.fetch import TRAFFIC_DIVISOR, is_physical_traffic_in_key
+from zbbx_mcp.fetch import TRAFFIC_DIVISOR, physical_traffic_items
 from zbbx_mcp.resolver import InstanceResolver
 
 _IFACE_CANDIDATES = 3      # top-N interfaces per host — bound the trend fetch
@@ -351,17 +351,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 # calls it "Incoming network traffic" — a name search examines
                 # only one of the two fleets and reports silence for the other
                 # (ADR 105).
-                raw_items = await client.call("item.get", {
-                    "hostids": filtered_ids,
-                    "output": ["itemid", "hostid", "key_", "lastvalue"],
-                    "search": {"key_": "*net.if.in[*"},
-                    "searchWildcardsEnabled": True,
-                    "filter": {"status": "0"},
-                })
-                traffic_items = [
-                    it for it in raw_items
-                    if is_physical_traffic_in_key(it.get("key_", ""))
-                ]
+                traffic_items = await physical_traffic_items(client, filtered_ids)
                 if not traffic_items:
                     return (
                         "No physical-NIC traffic items found for the scope."

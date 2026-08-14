@@ -28,7 +28,7 @@ from zbbx_mcp.data import (
     fold_rows_by_canonical_host,
     host_ip,
 )
-from zbbx_mcp.fetch import to_kbps, to_mbps
+from zbbx_mcp.fetch import physical_traffic_items, to_kbps, to_mbps
 from zbbx_mcp.resolver import InstanceResolver
 
 # Per-host interface shortlist size for detect_traffic_drops. Bounds the
@@ -552,12 +552,10 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 # shortlist still includes its (now-low-but-relatively-highest)
                 # interfaces. Baseline-weighted selection (P4) then runs among
                 # the shortlist.
-                traffic_items = await client.call("item.get", {
-                    "hostids": filtered_ids,
-                    "output": ["itemid", "hostid", "key_", "lastvalue", "value_type"],
-                    "search": {"name": "Incoming network traffic"},
-                    "filter": {"status": "0"},
-                })
+                traffic_items = await physical_traffic_items(
+                    client, filtered_ids,
+                    output=("itemid", "hostid", "key_", "lastvalue", "value_type"),
+                )
                 if not traffic_items:
                     return "No traffic items found."
 

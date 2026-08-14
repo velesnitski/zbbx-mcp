@@ -10,7 +10,7 @@ import httpx
 from zbbx_mcp.classify import classify_host as _classify_host
 from zbbx_mcp.classify import detect_provider, resolve_datacenter
 from zbbx_mcp.data import extract_country, fetch_enabled_hosts, host_ip
-from zbbx_mcp.fetch import to_mbps
+from zbbx_mcp.fetch import physical_traffic_items, to_mbps
 from zbbx_mcp.resolver import InstanceResolver
 from zbbx_mcp.utils import resolve_group_ids
 
@@ -60,17 +60,8 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 hosts = await fetch_enabled_hosts(client, extra_output=["name"])
 
                 hostids = [h["hostid"] for h in hosts]
-                items = await client.call("item.get", {
-                    "hostids": hostids,
-                    "output": ["hostid", "lastvalue", "key_"],
-                    # Wildcards MUST be explicit once searchWildcardsEnabled is
-                    # on: the flag stops Zabbix wrapping the term in %…%, so a
-                    # bare literal becomes an EXACT match and silently returns
-                    # nothing (ADR 094).
-                    "search": {"key_": "*net.if.in[*"},
-                    "searchWildcardsEnabled": True,
-                    "filter": {"status": "0"},
-                })
+                items = await physical_traffic_items(
+                    client, hostids, output=("hostid", "lastvalue", "key_"))
 
                 # Build per-host traffic maps
                 host_phys: dict[str, float] = {}

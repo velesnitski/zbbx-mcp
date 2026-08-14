@@ -10,7 +10,7 @@ import httpx
 from zbbx_mcp.classify import classify_host as _classify_host
 from zbbx_mcp.classify import detect_provider
 from zbbx_mcp.data import KEY_CONNECTIONS, host_ip
-from zbbx_mcp.fetch import to_mbps
+from zbbx_mcp.fetch import physical_traffic_items, to_mbps
 from zbbx_mcp.resolver import InstanceResolver
 from zbbx_mcp.utils import safe_output_path
 
@@ -113,12 +113,8 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                         "output": ["hostid", "lastvalue"],
                         "filter": {"key_": KEY_CONNECTIONS, "status": "0"},
                     }) if KEY_CONNECTIONS else _empty(),
-                    client.call("item.get", {
-                        "hostids": list(all_hostids),
-                        "output": ["hostid", "lastvalue"],
-                        "search": {"name": "Incoming network traffic"},
-                        "filter": {"status": "0"},
-                    }),
+                    physical_traffic_items(
+                        client, list(all_hostids), output=("hostid", "lastvalue")),
                     client.call("usermacro.get", {
                         "hostids": list(all_hostids),
                         "output": ["hostid", "value"],

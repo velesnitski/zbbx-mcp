@@ -156,6 +156,12 @@ async def fetch_enabled_hosts(
 # match nothing here and are therefore excluded — they do not carry the host's
 # inbound traffic and must not dilute it.
 PHYSICAL_IFACE_PREFIXES = ("eth", "eno", "enp", "ens", "bond", "ppp")
+# Wildcards are explicit and the terms are plain literals on purpose: under
+# searchWildcardsEnabled a bare term is an EXACT match and returns nothing
+# (ADR 094), and an f-string built term is invisible to the guard that
+# checks for exactly that mistake.
+TRAFFIC_IN_KEY_SEARCH = "*net.if.in[*"
+TRAFFIC_OUT_KEY_SEARCH = "*net.if.out[*"
 
 
 def is_physical_traffic_in_key(key: str) -> bool:
@@ -175,10 +181,61 @@ def is_physical_traffic_in_key(key: str) -> bool:
     to every traffic tool built on this predicate, reported as nothing rather
     than as unmeasured (ADR 105). Pure.
     """
-    if not key.startswith("net.if.in["):
+    return _is_physical_iface_key(key, "net.if.in[")
+
+
+def is_physical_traffic_out_key(key: str) -> bool:
+    """The outbound twin of :func:`is_physical_traffic_in_key`. Pure."""
+    return _is_physical_iface_key(key, "net.if.out[")
+
+
+def _is_physical_iface_key(key: str, prefix: str) -> bool:
+    if not key.startswith(prefix):
         return False
     iface = key.split("[", 1)[1].rstrip("]").strip().strip('"\'')
     return iface.startswith(PHYSICAL_IFACE_PREFIXES)
+
+
+async def physical_traffic_items(
+    client,
+    hostids,
+    *,
+    direction: str = "in",
+    output: tuple[str, ...] = ("itemid", "hostid", "key_", "lastvalue"),
+) -> list[dict]:
+    """Every physical-NIC traffic item for ``hostids``. The one definition.
+
+    Discovery is by item **key**, never by item **name**. Zabbix's stock
+    *Linux by Zabbix agent* template names these ``Interface enp3s0: Bits
+    received`` while the in-house template names them ``Incoming network
+    traffic on enp3s0``; a name search examines one fleet and reports the other
+    as having no traffic at all (ADR 105 — three hosts with an obvious anomaly
+    returned a clean result).
+
+    Five call sites had each grown their own copy of that name search, so the
+    ADR 105 fix reached only one of them. This function exists so there is a
+    single place that knows how to find a host's traffic items, the same reason
+    :func:`is_physical_traffic_in_key` exists for deciding what counts as
+    physical (ADR 078 / ADR 109).
+
+    ``key_`` is always requested regardless of ``output`` — the filter needs it,
+    and a caller that forgot to ask would silently get everything back.
+    """
+    ids = list(hostids)
+    if not ids:
+        return []
+    want = list(dict.fromkeys((*output, "key_")))
+    items = await client.call("item.get", {
+        "hostids": ids,
+        "output": want,
+        "search": {"key_": (TRAFFIC_IN_KEY_SEARCH if direction == "in"
+                            else TRAFFIC_OUT_KEY_SEARCH)},
+        "searchWildcardsEnabled": True,
+        "filter": {"status": STATUS_ENABLED},
+    })
+    keep = (is_physical_traffic_in_key if direction == "in"
+            else is_physical_traffic_out_key)
+    return [it for it in items or [] if keep(it.get("key_", ""))]
 
 
 def day_label(day_key: str) -> str:
@@ -534,12 +591,8 @@ async def fetch_all_data(
             fallback_in: Any
             fallback_out: Any
             fallback_in, fallback_out = await asyncio.gather(
-                client.call("item.get", {
-                    "hostids": missing_hosts,
-                    "output": ["hostid", "lastvalue"],
-                    "search": {"name": "Incoming network traffic"},
-                    "filter": {"status": STATUS_ENABLED},
-                }),
+                physical_traffic_items(
+                    client, missing_hosts, output=("hostid", "lastvalue")),
                 client.call("item.get", {
                     "hostids": missing_hosts,
                     "output": ["hostid", "lastvalue"],

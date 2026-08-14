@@ -27,7 +27,7 @@ from zbbx_mcp.data import (
     group_by_country,
     host_ip,
 )
-from zbbx_mcp.fetch import to_mbps
+from zbbx_mcp.fetch import physical_traffic_items, to_mbps
 from zbbx_mcp.resolver import InstanceResolver
 
 
@@ -53,12 +53,8 @@ async def _detect_regional_acute(
     }
 
     # One main traffic interface per host (highest current value), bounded.
-    traffic_items = await client.call("item.get", {
-        "hostids": all_ids,
-        "output": ["itemid", "hostid", "lastvalue"],
-        "search": {"name": "Incoming network traffic"},
-        "filter": {"status": "0"},
-    })
+    traffic_items = await physical_traffic_items(
+        client, all_ids, output=("itemid", "hostid", "lastvalue"))
 
     def _lv(it: dict) -> float:
         try:

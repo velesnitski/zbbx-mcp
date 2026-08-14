@@ -5,6 +5,43 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.16.39] - 2026-08-14
+
+### Fixed — eight copies of "find this host's traffic items", one of them blind
+ADR 109. ADR 105 fixed traffic discovery in one tool and listed five other call
+sites still searching by item NAME — blind to Zabbix's stock "Linux by Zabbix
+agent" template, whose items are named "Interface enp3s0: Bits received" rather
+than "Incoming network traffic on enp3s0". The plan was to fix them one at a
+time.
+
+Writing the guard that would stop a sixth copy appearing found THREE MORE the
+list did not know about: analysis.py, geo_health.py, and traffic_shaping.py —
+the tool ADR 105 had just fixed. Those were already key-based so they were not
+blind, but that is eight independent copies of one rule, which is why a fix to
+any one of them reaches only that one. Same drift ADR 078 fixed for the
+physical-NIC predicate, one level up.
+
+fetch.physical_traffic_items is now the single definition and all eight sites
+call it. Discovery is by key, never by name. key_ is always requested
+regardless of the caller's output list, because the filter needs it and a
+caller that forgot would silently get everything back unfiltered.
+is_physical_traffic_out_key was added so the outbound half of the fetch.py
+fallback goes through the same rule rather than a seventh variant. A guard
+fails the build if traffic is searched by name again, or if a raw
+`*net.if.in[*` search reappears outside the helper.
+
+Consolidation weakened an existing guard, and it said so: TestSearchWildcardGuard
+scans INLINE LITERALS for the ADR 094 mistake, and building the helper's term as
+an f-string made the last traffic search invisible to it — its own vacuity check
+caught the drop. Rather than lower a threshold quietly, the terms are module-level
+constants, the floor moved 4 -> 3 with the reason recorded inline, and the lost
+assertion is made directly in the new guard.
+
+Three sites gained a physical-interface filter they never had (geo_traffic,
+dashboard_report, and the fetch.py fallback matched by name and kept
+docker0/tun* alongside real NICs), so their numbers get more accurate — worth
+watching on the first run. 935 -> 943 tests.
+
 ## [1.16.38] - 2026-08-14
 
 ### Fixed — a burst-tolerant policer reported as "not a cap"

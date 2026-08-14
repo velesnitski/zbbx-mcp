@@ -28,7 +28,7 @@ from zbbx_mcp.data import (
     host_ip,
     partition_test_hosts,
 )
-from zbbx_mcp.fetch import TRAFFIC_DIVISOR, is_physical_traffic_in_key
+from zbbx_mcp.fetch import TRAFFIC_DIVISOR, is_physical_traffic_in_key, physical_traffic_items
 from zbbx_mcp.resolver import InstanceResolver
 from zbbx_mcp.uptime import compute_host_uptime, coverage_note, traffic_hours_from_trends
 
@@ -126,17 +126,8 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 # rescued every silent hour, so a host that served for a week
                 # and then hard-died read ~100% instead of ~50%.
                 item_ids = [i["itemid"] for i in service_items]
-                traffic_items = await client.call("item.get", {
-                    "hostids": hostids,
-                    "output": ["itemid", "hostid", "key_"],
-                    # Explicit wildcards — a bare literal under
-                    # searchWildcardsEnabled is an exact match and matches
-                    # nothing, which left the per-hour traffic gate below
-                    # permanently disengaged (ADR 094).
-                    "search": {"key_": "*net.if.in[*"},
-                    "searchWildcardsEnabled": True,
-                    "filter": {"status": "0"},
-                })
+                traffic_items = await physical_traffic_items(
+                    client, hostids, output=("itemid", "hostid", "key_"))
                 traffic_item_host = {
                     i["itemid"]: i["hostid"] for i in traffic_items
                     if is_physical_traffic_in_key(i.get("key_", ""))

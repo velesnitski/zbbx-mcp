@@ -313,7 +313,12 @@ class TestSearchWildcardGuard:
     def test_guard_is_not_vacuous(self):
         # Worthless unless it actually sees the call sites it guards.
         seen = list(iter_call_wildcard_searches())
-        assert len(seen) >= 4, f"scanner found only {len(seen)} wildcard searches"
+        # Was >= 4. Eight traffic-discovery sites collapsed into one helper
+        # (ADR 109), so this scanner legitimately sees one fewer inline
+        # literal — consolidation, not erosion. The wildcard coverage it lost
+        # is asserted directly in TestTrafficDiscoveryGuard below, so the
+        # total is unchanged.
+        assert len(seen) >= 3, f"scanner found only {len(seen)} wildcard searches"
         assert all("*" in term for *_, term in seen)
 
     def test_module_scoped_search_terms_carry_a_wildcard(self):
@@ -574,3 +579,61 @@ class TestDocCountGuard:
     def test_claude_md_count_matches(self):
         claude = (ROOT / "CLAUDE.md").read_text()
         assert f"{self.N} tools" in claude, f"CLAUDE.md header != {self.N}"
+
+
+class TestTrafficDiscoveryGuard:
+    """ADR 109 — traffic items are found by KEY, never by item NAME.
+
+    Item names are template cosmetics: Zabbix's stock *Linux by Zabbix agent*
+    template calls the metric "Interface enp3s0: Bits received" while the
+    in-house template calls it "Incoming network traffic on enp3s0". A name
+    search therefore examines one fleet and reports the other as carrying no
+    traffic at all — three hosts with an obvious anomaly returned a clean
+    result (ADR 105).
+
+    Five call sites had each grown their own copy of that search, so the ADR
+    105 fix reached exactly one of them. They now share
+    ``physical_traffic_items``; this guard is what stops a sixth copy from
+    appearing, since the failure is silent and looks like a clean report.
+    """
+
+    def test_no_item_get_searches_traffic_by_name(self):
+        violations = []
+        for path in sorted(SRC.rglob("*.py")):
+            for lineno, line in enumerate(
+                path.read_text().splitlines(), start=1
+            ):
+                if "Incoming network traffic" in line and '"name"' in line:
+                    violations.append(
+                        f"{path.relative_to(ROOT)}:{lineno} — traffic items "
+                        "searched by item NAME, which misses every host on the "
+                        "stock Linux template. Use "
+                        "fetch.physical_traffic_items(). See ADR 105/109"
+                    )
+        assert not violations, "\n".join(violations)
+
+    def test_discovery_helper_is_the_only_net_if_in_search(self):
+        # A second key-based search would drift from the physical-interface
+        # filter the same way the name searches drifted. One definition.
+        offenders = []
+        for path in sorted(SRC.rglob("*.py")):
+            if path.name == "fetch.py":
+                continue  # the definition itself lives here
+            text = path.read_text()
+            if '"*net.if.in[*"' in text or "'*net.if.in[*'" in text:
+                offenders.append(str(path.relative_to(ROOT)))
+        assert not offenders, (
+            "raw net.if.in discovery outside fetch.physical_traffic_items: "
+            + ", ".join(offenders)
+        )
+
+    def test_the_helper_search_terms_are_wildcard_wrapped(self):
+        # The coverage TestSearchWildcardGuard's scanner cannot give this path
+        # any more: its terms are module constants, not inline literals. Under
+        # searchWildcardsEnabled a term without '*' is an EXACT match and finds
+        # nothing, which would blank every traffic tool at once now that they
+        # all come through here (ADR 094 + 109).
+        from zbbx_mcp.fetch import TRAFFIC_IN_KEY_SEARCH, TRAFFIC_OUT_KEY_SEARCH
+        for term in (TRAFFIC_IN_KEY_SEARCH, TRAFFIC_OUT_KEY_SEARCH):
+            assert term.startswith("*") and term.endswith("*"), term
+            assert "net.if." in term

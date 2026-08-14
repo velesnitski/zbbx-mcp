@@ -602,6 +602,7 @@ class TestKeepActiveOrRecent:
         assert facts["verdict"] != "healthy"
 
 
+from tests.wiretest import RecordingClient  # noqa: E402
 from zbbx_mcp.fetch import is_physical_traffic_in_key  # noqa: E402
 
 
@@ -631,3 +632,65 @@ class TestQuotedInterfaceKeys:
         for key in ('net.if.in["docker0"]', 'net.if.in["tun0"]',
                     'net.if.in["veth0"]', 'net.if.in["lo"]'):
             assert not is_physical_traffic_in_key(key), key
+
+
+class TestPhysicalTrafficItems:
+    """ADR 109 — one definition of "find this host's traffic items"."""
+
+    def _client(self, items):
+        return RecordingClient({"item.get": items})
+
+    def test_searches_by_key_with_explicit_wildcards(self):
+        import asyncio
+
+        from zbbx_mcp.fetch import physical_traffic_items
+        c = self._client([])
+        asyncio.run(physical_traffic_items(c, ["1"]))
+        method, params = c.calls[0]
+        assert method == "item.get"
+        assert params["search"] == {"key_": "*net.if.in[*"}
+        assert params["searchWildcardsEnabled"] is True
+        assert "name" not in params.get("search", {})
+
+    def test_filters_out_virtual_interfaces(self):
+        import asyncio
+
+        from zbbx_mcp.fetch import physical_traffic_items
+        c = self._client([
+            {"itemid": "1", "hostid": "9", "key_": 'net.if.in["enp3s0"]'},
+            {"itemid": "2", "hostid": "9", "key_": "net.if.in[docker0]"},
+            {"itemid": "3", "hostid": "9", "key_": "net.if.in[tun0]"},
+            {"itemid": "4", "hostid": "9", "key_": "net.if.in[eth0]"},
+        ])
+        got = asyncio.run(physical_traffic_items(c, ["9"]))
+        assert {i["itemid"] for i in got} == {"1", "4"}
+
+    def test_key_is_always_requested_even_if_caller_forgets(self):
+        # The filter needs key_; a caller that omitted it would otherwise get
+        # everything back unfiltered.
+        import asyncio
+
+        from zbbx_mcp.fetch import physical_traffic_items
+        c = self._client([])
+        asyncio.run(physical_traffic_items(c, ["1"], output=("hostid", "lastvalue")))
+        assert "key_" in c.calls[0][1]["output"]
+
+    def test_out_direction_uses_the_out_key_and_predicate(self):
+        import asyncio
+
+        from zbbx_mcp.fetch import physical_traffic_items
+        c = self._client([
+            {"itemid": "1", "hostid": "9", "key_": 'net.if.out["eth0"]'},
+            {"itemid": "2", "hostid": "9", "key_": "net.if.out[tun0]"},
+        ])
+        got = asyncio.run(physical_traffic_items(c, ["9"], direction="out"))
+        assert c.calls[0][1]["search"] == {"key_": "*net.if.out[*"}
+        assert [i["itemid"] for i in got] == ["1"]
+
+    def test_no_hostids_issues_no_call(self):
+        import asyncio
+
+        from zbbx_mcp.fetch import physical_traffic_items
+        c = self._client([])
+        assert asyncio.run(physical_traffic_items(c, [])) == []
+        assert c.calls == []

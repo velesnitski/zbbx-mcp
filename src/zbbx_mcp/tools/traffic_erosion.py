@@ -37,7 +37,7 @@ from zbbx_mcp.data import (
     host_ip,
     partition_test_hosts,
 )
-from zbbx_mcp.fetch import TRAFFIC_DIVISOR
+from zbbx_mcp.fetch import TRAFFIC_DIVISOR, physical_traffic_items
 from zbbx_mcp.resolver import InstanceResolver
 
 _IFACE_CANDIDATES = 3     # top-N interfaces per host by current value (bound trend volume)
@@ -301,12 +301,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 # same bound detect_traffic_drops uses: a host has one real
                 # uplink plus many idle svc/tun interfaces, and pulling weeks of
                 # hourly trends for all of them fleet-wide overruns the API.
-                traffic_items = await client.call("item.get", {
-                    "hostids": filtered_ids,
-                    "output": ["itemid", "hostid", "key_", "lastvalue"],
-                    "search": {"name": "Incoming network traffic"},
-                    "filter": {"status": "0"},
-                })
+                traffic_items = await physical_traffic_items(client, filtered_ids)
                 if not traffic_items:
                     return "No traffic items found." + excluded_test_note(excluded)
 
