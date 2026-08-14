@@ -19,9 +19,16 @@ A steady load has a stable average and still has moving peaks; only a cap
 flattens the peaks themselves, and averaging erases the one signal that
 separates the two.
 
-What it cannot do: throughput alone cannot distinguish a hard cap from
-genuinely constant demand. Both are reported as ``capped``, which is why that
-verdict is worded as an observation rather than a diagnosis.
+What it cannot do, both stated rather than hidden:
+
+- Throughput alone cannot distinguish a hard cap from genuinely constant
+  demand. Both report as ``capped``, which is why that verdict is worded as an
+  observation rather than a diagnosis.
+- A **ratcheting** cap — one stepped down more than once inside the recent
+  window — reads ``normal`` until it settles, because no single value holds the
+  point mass yet. That is roughly one run of latency and it resolves itself;
+  splitting the recent window in half and comparing halves would close it, and
+  is worth doing only if it bites in practice (ADR 108).
 
 The pure core (``percentile``, ``ceiling_hit_rate``, ``classify_shaping``) is
 unit tested; the async tool wires real trend data into it.
@@ -93,31 +100,48 @@ def ceiling_hit_rate(
 ) -> tuple[float, float, int, int]:
     """``(hit_rate, ceiling, hits, active_hours)`` for one hourly peak series.
 
-    The hit rate is the share of hours where the host was actually pushing that
-    sit within ``tolerance`` of the ceiling. Clipping produces a point mass
-    there — many hours at one value — while ordinary demand reaches its top
-    once and spreads below it.
+    The ceiling is the **modal point mass** — the value where the most active
+    hours cluster — and the hit rate is that cluster's share. Clipping puts
+    many hours on one value; ordinary demand reaches its top once and spreads
+    below it.
 
-    Rejected alternative, recorded because it looks right and is not: measuring
-    the SPREAD of the top quartile. Selecting the largest values compresses any
-    distribution, so a perfectly healthy series scores as flat as a shaped one
-    — it fired on the first synthetic control tried. The test has to be how
-    MANY hours reach the ceiling, not how tightly the highest few agree.
+    The ceiling is NOT a band around p95, which is the obvious construction and
+    fails on the policer shape that matters most: a token bucket permits an
+    occasional burst above its cap, the burst becomes p95, and the real cap then
+    sits outside the band — hit rate collapses to ~7% and a hard cap reports as
+    "demand or reachability, not a cap". Found by adversarial validation, not by
+    the original tests (ADR 108). p95 still sets the *active* threshold, where
+    an outlier is harmless.
 
-    Only hours at or above ``active_frac`` of the ceiling count, so a quiet
+    Scanning every observed value as a candidate is exact and costs nothing at
+    these sizes (a few hundred hours), so there is no binning artefact to tune.
+    Ties prefer the higher value, so a cap reads as the cap rather than as some
+    trough beneath it.
+
+    Rejected earlier, recorded because it looks right and is not: measuring the
+    SPREAD of the top quartile. Selecting the largest values compresses any
+    distribution, so a perfectly healthy series scores as flat as a shaped one.
+    The test has to be how MANY hours reach the ceiling, not how tightly the
+    highest few agree.
+
+    Only hours at or above ``active_frac`` of the p95 top count, so a quiet
     night — which tops out far below any cap — neither dilutes the rate nor
     fakes one. Pure.
     """
     if not peaks:
         return 0.0, 0.0, 0, 0
-    ceiling = percentile(peaks, 0.95)
-    if ceiling <= 0:
+    top = percentile(peaks, 0.95)
+    if top <= 0:
         return 0.0, 0.0, 0, 0
-    active = [p for p in peaks if p >= ceiling * active_frac]
+    active = [p for p in peaks if p >= top * active_frac]
     if not active:
-        return 0.0, ceiling, 0, 0
-    hits = sum(1 for p in active if abs(p - ceiling) <= ceiling * tolerance)
-    return hits / len(active), ceiling, hits, len(active)
+        return 0.0, top, 0, 0
+    best_ceiling, best_hits = top, 0
+    for cand in sorted(set(active)):
+        n = sum(1 for p in active if abs(p - cand) <= cand * tolerance)
+        if n > best_hits or (n == best_hits and cand > best_ceiling):
+            best_ceiling, best_hits = cand, n
+    return best_hits / len(active), best_ceiling, best_hits, len(active)
 
 
 def classify_shaping(

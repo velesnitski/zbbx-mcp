@@ -7,6 +7,7 @@ controls — a healthy host with varying peaks, and a normal diurnal curve,
 must never read as shaped.
 """
 
+import math
 import time
 
 from tests.wiretest import RecordingClient, run_tool
@@ -260,3 +261,59 @@ class TestWipedHistoryIsDisclosed:
         assert "destroys its trend history" in out
         # the fully-measured host is judged, so it must not appear in that line
         assert "node-fj1 (" not in out.split("could NOT be judged")[1]
+
+
+def _sine(n, lo=50.0, hi=350.0, period=24):
+    """A diurnal curve — the healthy shape the detector must never flag."""
+    return [lo + (hi - lo) * (0.5 * (1 - math.cos(2 * math.pi * i / period)))
+            for i in range(n)]
+
+
+class TestBurstTolerantPolicer:
+    """ADR 108 — found by adversarial validation, not by the original tests.
+
+    A token bucket permits an occasional burst above its cap. That burst
+    becomes p95, the real cap falls outside a band around p95, and the hit
+    rate collapses — so the hardest-capped host of all reported "demand or
+    reachability, not a cap". A confident wrong answer on the exact case the
+    tool exists for.
+    """
+
+    CAP = 120.0
+
+    def _burst(self):
+        clipped = [min(self.CAP, v) for v in _sine(48)]
+        # ~8% overshoot every 11th hour, the token-bucket signature
+        return [v * 1.08 if i % 11 == 0 else v for i, v in enumerate(clipped)]
+
+    def test_burst_tolerant_cap_is_shaped_not_dropped(self):
+        v = classify_shaping(self._burst(), _sine(48))
+        assert v.verdict == SHAPED, v.note
+
+    def test_ceiling_locks_onto_the_cap_not_the_burst(self):
+        # The burst is 129.6; the cap is 120. Reporting 129.6 would also make
+        # every drop_pct against it wrong.
+        rate, ceiling, _, _ = ceiling_hit_rate(self._burst())
+        assert abs(ceiling - self.CAP) < 1.0, ceiling
+        assert rate > 0.6, rate
+
+    def test_hard_cap_still_shaped(self):
+        v = classify_shaping([min(self.CAP, x) for x in _sine(48)], _sine(48))
+        assert v.verdict == SHAPED
+
+    def test_uncapped_diurnal_is_still_normal(self):
+        # The negative control that the modal ceiling must not break: a real
+        # sine spends more time near its extremes, so a naive "most common
+        # value" rule could read the daily peak plateau as a cap.
+        assert classify_shaping(_sine(48), _sine(48)).verdict == NORMAL
+
+    def test_falling_diurnal_is_still_dropped(self):
+        assert classify_shaping([v * 0.35 for v in _sine(48)],
+                                _sine(48)).verdict == DROPPED
+
+    def test_a_lone_spike_cannot_become_the_ceiling(self):
+        # The modal rule is more outlier-robust than p95, not less: a single
+        # freak minute has a cluster of one and always loses.
+        series = _sine(48) + [9999.0]
+        _, ceiling, _, _ = ceiling_hit_rate(series)
+        assert ceiling < 1000.0, ceiling

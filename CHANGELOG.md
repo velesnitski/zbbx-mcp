@@ -5,6 +5,41 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.16.38] - 2026-08-14
+
+### Fixed — a burst-tolerant policer reported as "not a cap"
+ADR 108. An independent adversarial validation of ADR 104 ran controls the
+original tests did not, and found one that failed: a token bucket.
+
+A token bucket permits an occasional burst above its cap. With ~8% overshoot
+every ~11 hours the burst becomes p95, the real cap then sits below the +/-2%
+band around p95, and almost no hour counts as touching the ceiling — hit rate
+~7%, verdict `dropped`: "peaks fell 62% ... but still spread ... demand or
+reachability, not a cap". Reproduced before fixing (48h sine clipped at 120
+Mbps, every 11th hour x1.08, against a 350-peak baseline).
+
+That is the worst failure available to this tool. Burst tolerance is normal
+policer configuration, so the shape most likely to BE a rate limit was the one
+the detector denied, confidently, in the verdict wording.
+
+The ceiling is now the modal point mass — the value where the most active hours
+cluster — found by scanning every observed value as a candidate. p95 no longer
+defines the ceiling; it still sets the active threshold, where an outlier is
+harmless. Scanning every value is exact at these sizes, so there is no bin width
+to tune. Ties prefer the higher value, so a cap reads as the cap and not as a
+trough beneath it. The modal rule is MORE outlier-robust than p95: a lone freak
+minute forms a cluster of one and always loses (pinned by test).
+
+The constraint that shapes the design: a real sine spends more time near its
+extremes, so a naive "most common value" rule could read a healthy daily peak
+plateau as a cap. The uncapped-diurnal control must still read `normal`, and
+does.
+
+`ceiling_mbps` is now the cap rather than the burst, so `drop_pct` measured
+against it is right too. Documented rather than fixed: a RATCHETING cap stepped
+down more than once inside the recent window reads `normal` until it settles —
+about one run of latency, self-resolving. 929 -> 935 tests.
+
 ## [1.16.37] - 2026-08-14
 
 ### Fixed — a host whose trend history was destroyed read as "normal"
