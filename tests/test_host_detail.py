@@ -165,3 +165,68 @@ class TestCountryInventoryGap:
         assert "inventory gap" in note
         assert hosts_mod._inventory_gap_note([{"host": "node-ki1"}], "FJ") == ""
         assert hosts_mod._inventory_gap_note([{"host": "node.fj1"}], "") == ""
+
+
+class TestCostFallbackItem:
+    """ADR 106 — the cost survives a role that revokes `usermacro.get`.
+
+    The monthly figure is published twice: as `{$COST_MONTH}` and as the
+    `Cost_macros_present` item. Reading the item needs only host-group read,
+    so a token that cannot call `usermacro.get` can still answer "what does
+    this host cost" — the question that surfaced the whole ADR 103 thread.
+    """
+
+    def _items(self, cost=None):
+        def handler(params):
+            if (params.get("filter") or {}).get("key_") == "Cost_macros_present":
+                return ([{"itemid": "7", "key_": "Cost_macros_present",
+                          "lastvalue": cost}] if cost is not None else [])
+            return []
+        return handler
+
+    def test_denied_macro_falls_back_to_the_item(self):
+        class Denied(RecordingClient):
+            async def call(self, method, params):
+                if method == "usermacro.get":
+                    raise ValueError("Access denied")
+                return await super().call(method, params)
+        c = Denied({"host.get": [BASE], "item.get": self._items("16")})
+        out = run_tool(hosts_mod, "get_host", c, host_id="1")
+        assert "**Cost/month:** 16" in out
+        assert "via item" in out          # never passed off as the macro
+        assert "## Not shown" in out      # the macro failure is still disclosed
+
+    def test_absent_macro_also_falls_back(self):
+        c = RecordingClient({"host.get": [BASE], "usermacro.get": [],
+                             "item.get": self._items("32.49")})
+        out = run_tool(hosts_mod, "get_host", c, host_id="1")
+        assert "**Cost/month:** 32.49" in out
+        assert "via item" in out
+
+    def test_readable_macro_wins_and_costs_no_extra_call(self):
+        # The fallback must not run on the common path, and a value that came
+        # from the macro must NOT carry the "via item" caveat.
+        c = RecordingClient({
+            "host.get": [BASE],
+            "usermacro.get": [{"macro": "{$COST_MONTH}", "value": "16"}],
+            "item.get": self._items("999"),
+        })
+        out = run_tool(hosts_mod, "get_host", c, host_id="1")
+        assert "**Cost/month:** 16" in out
+        assert "via item" not in out
+        assert not any(
+            (p.get("filter") or {}).get("key_") == "Cost_macros_present"
+            for m, p in c.calls if m == "item.get"
+        )
+
+    def test_no_cost_anywhere_stays_silent(self):
+        c = RecordingClient({"host.get": [BASE], "usermacro.get": [],
+                             "item.get": self._items(None)})
+        out = run_tool(hosts_mod, "get_host", c, host_id="1")
+        assert "Cost/month" not in out
+
+    def test_unparseable_item_value_is_not_guessed(self):
+        c = RecordingClient({"host.get": [BASE], "usermacro.get": [],
+                             "item.get": self._items("n/a")})
+        out = run_tool(hosts_mod, "get_host", c, host_id="1")
+        assert "Cost/month" not in out

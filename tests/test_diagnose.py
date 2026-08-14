@@ -600,3 +600,34 @@ class TestKeepActiveOrRecent:
         )
         assert [p["name"] for p in facts["problems"]] == ["Service down"]
         assert facts["verdict"] != "healthy"
+
+
+from zbbx_mcp.fetch import is_physical_traffic_in_key  # noqa: E402
+
+
+class TestQuotedInterfaceKeys:
+    """ADR 105 — the stock template quotes the interface name.
+
+    Zabbix's own *Linux by Zabbix agent* template emits
+    ``net.if.in["enp3s0"]`` while the in-house template emits
+    ``net.if.in[eth0]``. The shared predicate stripped only ``]``, so the
+    quoted form failed the prefix test and every host on the stock template
+    was invisible to every traffic tool built on it — reported as nothing
+    rather than as unmeasured.
+    """
+
+    def test_quoted_physical_interfaces_are_recognised(self):
+        for key in ('net.if.in["eth0"]', 'net.if.in["enp3s0"]',
+                    'net.if.in["ens18"]', "net.if.in['bond0']"):
+            assert is_physical_traffic_in_key(key), key
+
+    def test_unquoted_still_recognised(self):
+        assert is_physical_traffic_in_key("net.if.in[eth0]")
+
+    def test_quoting_does_not_smuggle_in_virtual_interfaces(self):
+        # The unquoting must not weaken the filter: tunnels, docker bridges
+        # and service veths still have to be excluded, or a host's real
+        # throughput gets summed with loopback-ish noise.
+        for key in ('net.if.in["docker0"]', 'net.if.in["tun0"]',
+                    'net.if.in["veth0"]', 'net.if.in["lo"]'):
+            assert not is_physical_traffic_in_key(key), key

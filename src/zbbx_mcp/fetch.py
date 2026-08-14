@@ -166,11 +166,18 @@ def is_physical_traffic_in_key(key: str) -> bool:
     globbed ``net.if.in[`` and filtered by prefix, while ``diagnose`` matched
     an *exact* hardcoded key list — so the two disagreed about which NICs
     counted, and `detect_traffic_drops` saw traffic that `diagnose_host` did
-    not. Pure.
+    not.
+
+    The interface token is unquoted before the prefix test. Zabbix's stock
+    *Linux by Zabbix agent* template writes ``net.if.in["enp3s0"]`` while the
+    in-house template writes ``net.if.in[eth0]``, and the quoted form used to
+    fail the prefix check — so every host on the stock template was invisible
+    to every traffic tool built on this predicate, reported as nothing rather
+    than as unmeasured (ADR 105). Pure.
     """
     if not key.startswith("net.if.in["):
         return False
-    iface = key.split("[", 1)[1].rstrip("]")
+    iface = key.split("[", 1)[1].rstrip("]").strip().strip('"\'')
     return iface.startswith(PHYSICAL_IFACE_PREFIXES)
 
 

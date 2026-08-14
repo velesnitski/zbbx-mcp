@@ -220,7 +220,12 @@ def format_host_detail(host: dict, context: dict | None = None) -> str:
     if ctx.get("service_status"):
         state.append(f"**Service check:** {ctx['service_status']}")
     if ctx.get("cost_month") is not None:
-        state.append(f"**Cost/month:** {ctx['cost_month']:g}")
+        # A value read from the fallback item says so. It is normally identical
+        # to the macro, but it is a polled snapshot and can lag an edit — so it
+        # is labelled rather than passed off as the macro (ADR 106).
+        src = ctx.get("cost_source")
+        via = f" _(via item `{src}`)_" if src else ""
+        state.append(f"**Cost/month:** {ctx['cost_month']:g}{via}")
     if ctx.get("bw_limit") is not None:
         state.append(f"**BW limit:** {ctx['bw_limit']:g} Mbps")
     if state:

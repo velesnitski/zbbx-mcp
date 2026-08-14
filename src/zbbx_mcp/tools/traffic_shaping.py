@@ -41,7 +41,7 @@ from zbbx_mcp.data import (
     extract_country,
     partition_test_hosts,
 )
-from zbbx_mcp.fetch import TRAFFIC_DIVISOR
+from zbbx_mcp.fetch import TRAFFIC_DIVISOR, is_physical_traffic_in_key
 from zbbx_mcp.resolver import InstanceResolver
 
 _IFACE_CANDIDATES = 3      # top-N interfaces per host — bound the trend fetch
@@ -302,14 +302,28 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 if not filtered_ids:
                     return "No servers match the filter." + excluded_test_note(excluded)
 
-                traffic_items = await client.call("item.get", {
+                # Discover by item KEY, never by item NAME. Zabbix's stock
+                # "Linux by Zabbix agent" template calls this metric
+                # "Interface enp3s0: Bits received" while the in-house template
+                # calls it "Incoming network traffic" — a name search examines
+                # only one of the two fleets and reports silence for the other
+                # (ADR 105).
+                raw_items = await client.call("item.get", {
                     "hostids": filtered_ids,
                     "output": ["itemid", "hostid", "key_", "lastvalue"],
-                    "search": {"name": "Incoming network traffic"},
+                    "search": {"key_": "*net.if.in[*"},
+                    "searchWildcardsEnabled": True,
                     "filter": {"status": "0"},
                 })
+                traffic_items = [
+                    it for it in raw_items
+                    if is_physical_traffic_in_key(it.get("key_", ""))
+                ]
                 if not traffic_items:
-                    return "No traffic items found." + excluded_test_note(excluded)
+                    return (
+                        "No physical-NIC traffic items found for the scope."
+                        + excluded_test_note(excluded)
+                    )
 
                 def _lv(it: dict) -> float:
                     try:
@@ -373,6 +387,22 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                         + excluded_test_note(excluded)
                     )
 
+                # A host that could not be examined must say so. Absent from
+                # the table has to mean "unmeasured", never "healthy" — the
+                # whole reason this bug survived was that it looked like a
+                # clean result (ADR 105).
+                unexamined = sorted(
+                    host_map.get(hid, {}).get("host", hid)
+                    for hid in filtered_ids if hid not in verdicts
+                )
+                unexamined_note = (
+                    f"\n\n_{len(unexamined)} host(s) in scope had no usable "
+                    f"physical-NIC trend data and were NOT examined: "
+                    f"{', '.join(unexamined[:5])}"
+                    f"{'…' if len(unexamined) > 5 else ''}. Absent from this table "
+                    "means unmeasured, not healthy._" if unexamined else ""
+                )
+
                 counts: dict[str, int] = {}
                 for v in verdicts.values():
                     counts[v.verdict] = counts.get(v.verdict, 0) + 1
@@ -396,6 +426,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                         header
                         + "\nNo host is pinned against a throughput ceiling in "
                         "the window."
+                        + unexamined_note
                         + excluded_test_note(excluded)
                     )
 
@@ -424,6 +455,6 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     "lost traffic are counted as `dropped` above and belong to "
                     "`detect_traffic_drops`._"
                 )
-                return "\n".join(parts) + excluded_test_note(excluded)
+                return "\n".join(parts) + unexamined_note + excluded_test_note(excluded)
             except (httpx.HTTPError, ValueError) as e:
                 return f"Error: {e}"

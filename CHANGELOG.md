@@ -5,6 +5,57 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.16.36] - 2026-08-14
+
+### Fixed — an entire Zabbix template was invisible to every traffic tool
+ADR 105. Reported from the field: three hosts with an obvious traffic anomaly,
+and `detect_traffic_shaping` returned "No host is pinned against a throughput
+ceiling". The data was not ambiguous — one ran 70-177 Mbps peaks until a cliff,
+then 1-20 Mbps, a ~98% collapse. The tool had never looked at those hosts, and
+its output gave no hint of that.
+
+Two independent causes, both turning "not measured" into "nothing to report".
+First, `is_physical_traffic_in_key` did `split("[",1)[1].rstrip("]")`, which
+strips the bracket but not the quotes: Zabbix's stock "Linux by Zabbix agent"
+template emits `net.if.in["enp3s0"]`, so the interface token was `"enp3s0"`
+with the quote and failed `startswith(("eth","eno","enp",...))`. Every host on
+the stock template was invisible to every traffic tool built on ADR 078's
+shared predicate. Second, discovery searched item NAME ("Incoming network
+traffic"), which the stock template spells "Interface enp3s0: Bits received".
+
+The predicate now unquotes the token — one fix at ADR 078's single definition
+restores every key-based consumer, and the virtual-interface exclusions are
+pinned by test so the widening cannot smuggle in `docker0`/`tun0`/`veth0`.
+`detect_traffic_shaping` discovers by key (`*net.if.in[*`), never by name:
+item names are template cosmetics, the key is the contract. And a host in scope
+that could not be examined is now NAMED — "absent from this table means
+unmeasured, not healthy" — which is what would have caught both bugs on day
+one, since the result looked clean.
+
+Still name-based and still blind to the stock template: `tools/traffic.py:558`,
+`tools/geo_traffic.py:59`, `tools/dashboard_report.py:119`,
+`tools/traffic_erosion.py:307`, `fetch.py:533`. Listed in ADR 105 rather than
+changed blind — four have their own scoping tests and a wrong move there
+silently changes what the fleet reports.
+
+### Added — cost falls back to an item when `usermacro.get` is revoked
+ADR 106. ADR 103 made a denied macro read visible; it still left the reader
+without the number. The monthly figure turns out to be published twice — as
+`{$COST_MONTH}` and as the `Cost_macros_present` item — and reading an item
+needs only host-group read, not `usermacro.get`, which a role can revoke
+independently. Verified equal to the macro on two hosts (16.00/16 and
+32.49/32.49) before being trusted.
+
+When the macro yields no cost, `get_host` reads the item and renders
+`**Cost/month:** 16 _(via item `Cost_macros_present`)_`. The source is always
+carried: the item is a polled snapshot and can lag a macro edit, so passing it
+off as the macro would make the fallback the next confident wrong answer. The
+ADR 103 "Not shown" disclosure stays even when the fallback succeeds, so the
+role problem does not get papered over by a working number. Only runs on the
+miss path; an unparseable value is skipped, not guessed.
+
+914 -> 925 tests.
+
 ## [1.16.35] - 2026-08-14
 
 ### Added — detect_traffic_shaping: separate a rate limit from lost demand

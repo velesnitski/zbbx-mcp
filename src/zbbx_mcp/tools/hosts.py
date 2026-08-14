@@ -21,6 +21,11 @@ from zbbx_mcp.resolver import InstanceResolver
 from zbbx_mcp.tag_filter import parse_tag_filter
 from zbbx_mcp.utils import resolve_group_ids
 
+# The monthly cost is published twice: as the `{$COST_MONTH}` user macro and
+# as this item. Reading the item needs only host-group read, so it survives a
+# role that revokes `usermacro.get` (ADR 106).
+COST_FALLBACK_KEY = "Cost_macros_present"
+
 
 async def _host_context(client, host: dict) -> dict:
     """Gather the derived + fetched extras for one host (ADR 099).
@@ -82,6 +87,36 @@ async def _host_context(client, host: dict) -> dict:
             f"cost/bandwidth macros — `usermacro.get` failed ({type(e).__name__}); "
             "the token's role may revoke this API method"
         )
+
+    # Fallback: the same figure is published as a plain ITEM, which needs only
+    # host-group read + `item.get` — no `usermacro.get`, the method a role can
+    # revoke independently (ADR 103). Verified equal to the macro on two hosts,
+    # including a decimal value, before being trusted.
+    #
+    # Only runs when the macro produced nothing, so the common path still costs
+    # one call. The source is ALWAYS carried into the output: a substituted
+    # value must never render identically to the real one, or this fallback
+    # becomes the next confident wrong answer — the item is a snapshot and can
+    # lag a macro edit (ADR 106).
+    if ctx.get("cost_month") is None:
+        try:
+            items = await client.call("item.get", {
+                "hostids": [hid],
+                "output": ["itemid", "key_", "lastvalue"],
+                "filter": {"key_": COST_FALLBACK_KEY},
+            })
+            for it in items or []:
+                lv = it.get("lastvalue")
+                if lv in (None, ""):
+                    continue
+                try:
+                    ctx["cost_month"] = float(lv)
+                    ctx["cost_source"] = COST_FALLBACK_KEY
+                except (ValueError, TypeError):
+                    continue
+                break
+        except (httpx.HTTPError, ValueError, KeyError):
+            pass  # already disclosed above; a failed fallback adds no new fact
 
     # Current inbound traffic + service-check state.
     try:

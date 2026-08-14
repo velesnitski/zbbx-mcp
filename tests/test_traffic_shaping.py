@@ -149,3 +149,58 @@ class TestWire:
                        self._client(VARY, VARY), hours=24, baseline_days=14)
         assert "SHAPED" not in out
         assert "No host is pinned" in out
+
+
+class TestDiscoveryIsTemplateAgnostic:
+    """ADR 105 — found in the field: three hosts with an obvious anomaly and
+    the tool said nothing, because it had never looked at them."""
+
+    def _client(self, key):
+        now = int(time.time())
+        rows = [{"itemid": "1", "clock": str(now - 3600 * (i + 1)),
+                 "value_max": str(v * 1_000_000)} for i, v in enumerate(FLAT)]
+        rows += [{"itemid": "1", "clock": str(now - 3600 * (200 + i)),
+                  "value_max": str(v * 1_000_000)} for i, v in enumerate(VARY)]
+        return RecordingClient({
+            "host.get": [{"hostid": "9", "host": "node-fj1",
+                          "groups": [{"name": "edge"}]}],
+            "item.get": [{"itemid": "1", "hostid": "9", "key_": key,
+                          "lastvalue": "5000000"}],
+            "trend.get": rows,
+        })
+
+    def test_discovers_by_key_not_by_item_name(self):
+        # A name search ("Incoming network traffic") matches the in-house
+        # template only; the stock template names the same metric
+        # "Interface enp3s0: Bits received".
+        c = self._client('net.if.in["enp3s0"]')
+        run_tool(ts_mod, "detect_traffic_shaping", c, hours=24, baseline_days=14)
+        item_calls = [p for m, p in c.calls if m == "item.get"]
+        assert item_calls, "no item.get issued"
+        assert "name" not in item_calls[0].get("search", {})
+        assert item_calls[0]["search"]["key_"] == "*net.if.in[*"
+        assert item_calls[0]["searchWildcardsEnabled"] is True
+
+    def test_stock_template_host_is_actually_examined(self):
+        out = run_tool(ts_mod, "detect_traffic_shaping",
+                       self._client('net.if.in["enp3s0"]'),
+                       hours=24, baseline_days=14)
+        assert "SHAPED" in out and "node-fj1" in out
+
+    def test_host_without_usable_items_is_disclosed_not_dropped(self):
+        # The failure mode that hid the bug: a host the tool could not measure
+        # simply vanished, and an empty table read as a clean bill of health.
+        c = RecordingClient({
+            "host.get": [{"hostid": "9", "host": "node-fj1",
+                          "groups": [{"name": "edge"}]},
+                         {"hostid": "8", "host": "node-ki1",
+                          "groups": [{"name": "edge"}]}],
+            "item.get": [{"itemid": "1", "hostid": "9",
+                          "key_": "net.if.in[eth0]", "lastvalue": "5000000"}],
+            "trend.get": [],
+        })
+        out = run_tool(ts_mod, "detect_traffic_shaping", c,
+                       hours=24, baseline_days=14)
+        assert "NOT examined" in out
+        assert "node-ki1" in out
+        assert "unmeasured, not healthy" in out

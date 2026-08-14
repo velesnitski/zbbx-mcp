@@ -29,6 +29,11 @@ Notably, **host cost / bandwidth figures come from user macros**
 addition to host read access. A token that lists hosts fine can still return
 no cost, because those are two different permissions.
 
+If `usermacro.get` is unavailable, `get_host` falls back to the
+`Cost_macros_present` item, which needs only host-group read — so a restricted
+token still gets the figure. It is labelled `_(via item …)_` when it comes from
+there, because the item is a polled snapshot and can lag a macro edit.
+
 A *Super admin* token bypasses host-group permissions entirely, which is why
 something can work for one colleague and not another. If a field is missing,
 `get_host` now says whether the call **failed** or the value is genuinely
