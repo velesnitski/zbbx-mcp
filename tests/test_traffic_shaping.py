@@ -258,7 +258,7 @@ class TestWipedHistoryIsDisclosed:
         assert "could NOT be judged" in out
         assert "node-ki1" in out
         assert "of history" in out
-        assert "destroys its trend history" in out
+        assert "unmeasured, not healthy" in out
         # the fully-measured host is judged, so it must not appear in that line
         assert "node-fj1 (" not in out.split("could NOT be judged")[1]
 
@@ -317,3 +317,57 @@ class TestBurstTolerantPolicer:
         series = _sine(48) + [9999.0]
         _, ceiling, _, _ = ceiling_hit_rate(series)
         assert ceiling < 1000.0, ceiling
+
+
+class TestUnjudgedCauseIsResolved:
+    """ADR 111 — the disclosure used to state a cause it had not checked.
+
+    "Recreating a host's items destroys its trend history" was asserted for
+    every un-judged host. The first time it was read in anger the hosts had
+    simply been provisioned two days earlier: both readings fit the same
+    observation, and one audit call settles it.
+    """
+
+    def test_new_host_is_called_new(self):
+        from zbbx_mcp.tools.traffic_shaping import explain_unjudged
+        why = explain_unjudged(50, 46)
+        assert "simply new" in why and "46h ago" in why
+        assert "rebuilt" not in why
+
+    def test_old_host_with_short_history_is_called_rebuilt(self):
+        from zbbx_mcp.tools.traffic_shaping import explain_unjudged
+        why = explain_unjudged(3, 720)
+        assert "rebuilt" in why and "720h ago" in why
+
+    def test_missing_audit_record_says_unknown_not_either_answer(self):
+        # Audit retention is finite, so an old host simply has no Add record.
+        # That is a third state and must not collapse into "new" or "rebuilt".
+        from zbbx_mcp.tools.traffic_shaping import explain_unjudged
+        why = explain_unjudged(3, None)
+        assert "unknown" in why
+        assert "rebuilt" not in why and "simply new" not in why
+
+    def test_slack_absorbs_the_boundary(self):
+        # A host added exactly as long ago as its history reaches is new; trend
+        # flush timing makes the two differ by an hour or two either way.
+        from zbbx_mcp.tools.traffic_shaping import explain_unjudged
+        assert "simply new" in explain_unjudged(50, 53)
+        assert "rebuilt" in explain_unjudged(50, 200)
+
+    def test_audit_failure_degrades_to_unknown_not_an_error(self):
+        import asyncio
+
+        from zbbx_mcp.tools.traffic_shaping import host_added_hours
+
+        class Boom:
+            async def call(self, method, params):
+                raise ValueError("Access denied")
+        assert asyncio.run(host_added_hours(Boom(), ["1"], 0)) == {}
+
+    def test_no_hostids_issues_no_audit_call(self):
+        import asyncio
+
+        from zbbx_mcp.tools.traffic_shaping import host_added_hours
+        c = RecordingClient({})
+        assert asyncio.run(host_added_hours(c, [], 0)) == {}
+        assert c.calls == []

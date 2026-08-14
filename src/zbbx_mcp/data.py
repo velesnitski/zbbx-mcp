@@ -88,6 +88,7 @@ STATUS_ENABLED = "0"
 # matched zero rows and the features built on them reported "nothing found"
 # rather than failing (ADR 095). Host is 4.
 AUDIT_RESOURCE_HOST = 4
+AUDIT_ACTION_ADD = 0
 AUDIT_ACTION_UPDATE = 1
 # service health check item keys — configurable per deployment
 KEY_service_PRIMARY = os.environ.get("ZABBIX_SERVICE_CHECK_KEY", "")

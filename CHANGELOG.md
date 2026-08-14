@@ -5,6 +5,35 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.16.41] - 2026-08-14
+
+### Fixed — the un-judged disclosure asserted a cause it had not checked
+ADR 111. ADR 107 named the hosts the shaping detector could not judge and
+explained why it mattered: "Recreating a host's items destroys its trend
+history". The first time that line was read against real data it was wrong —
+twenty hosts on one dashboard came back un-judged with ~50h of history each and
+none had been rebuilt; they had been provisioned two days earlier.
+
+Both readings fit the same observation exactly: a short history means the items
+were rebuilt, OR the host is new. The disclosure picked one and stated it as
+fact, which is the defect the ADR it belongs to exists to remove — one level up,
+in the prose instead of the data.
+
+The audit log records host creation (resourcetype=4, action=0), so one
+auditlog.get for the <=5 named hosts answers it outright: "50h of history — host
+added 46h ago, so it is simply new" / "3h of history but host added 720h ago —
+its items were rebuilt" / "age unknown (no Add record in audit retention)".
+
+Three states, not two. Audit retention is finite so an old host legitimately has
+no Add record, and that is "cannot tell" — it must not collapse into either
+answer, which is pinned by test because collapsing it is how the original
+wording went wrong. A 6h slack absorbs the boundary (trend flush timing).
+host_added_hours is best-effort: a failure degrades every host to unknown rather
+than breaking the disclosure it exists to enrich, and no call is made when there
+is nothing to explain.
+
+945 -> 951 tests.
+
 ## [1.16.40] - 2026-08-14
 
 ### Fixed — detect_traffic_drops counted the hosts it could not examine, never named them

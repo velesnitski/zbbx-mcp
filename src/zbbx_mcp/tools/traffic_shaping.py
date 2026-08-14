@@ -43,6 +43,8 @@ import httpx
 
 from zbbx_mcp.classify import classify_host as _classify_host
 from zbbx_mcp.data import (
+    AUDIT_ACTION_ADD,
+    AUDIT_RESOURCE_HOST,
     countries_for_region,
     excluded_test_note,
     extract_country,
@@ -253,6 +255,60 @@ def classify_shaping(
     )
 
 
+async def host_added_hours(client, hostids, now: int) -> dict[str, int]:
+    """``{hostid: hours since the host was ADDED}`` from the audit log.
+
+    A host missing from the result has no Add record inside audit retention,
+    which means *cannot tell* — never *not new*. Callers must keep that third
+    state rather than collapsing it into either answer (ADR 111).
+
+    Best-effort: a failure returns ``{}`` and the caller degrades to "unknown",
+    because this only ever enriches a disclosure and must not break it.
+    """
+    ids = [h for h in hostids if h]
+    if not ids:
+        return {}
+    try:
+        rows = await client.call("auditlog.get", {
+            "output": ["resourceid", "clock"],
+            "filter": {
+                "resourcetype": AUDIT_RESOURCE_HOST,
+                "action": AUDIT_ACTION_ADD,
+                "resourceid": ids,
+            },
+        })
+    except (httpx.HTTPError, ValueError, KeyError):
+        return {}
+    out: dict[str, int] = {}
+    for r in rows or []:
+        rid = str(r.get("resourceid", "") or "")
+        try:
+            clock = int(r["clock"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        age = max(0, (now - clock) // 3600)
+        if rid and (rid not in out or age < out[rid]):
+            out[rid] = age
+    return out
+
+
+def explain_unjudged(history_h: int, added_h: int | None, slack_h: int = 6) -> str:
+    """Why a host has so little history: new, rebuilt, or unknown. Pure.
+
+    The point of ADR 111. The disclosure used to state item recreation as the
+    cause, which was wrong the first time it was read in anger — the hosts had
+    simply been provisioned two days earlier. Both readings fit the same
+    observation, and the audit log settles it, so the tool should answer rather
+    than hedge.
+    """
+    if added_h is None:
+        return f"{history_h}h of history, age unknown (no Add record in audit retention)"
+    if added_h <= history_h + slack_h:
+        return f"{history_h}h of history — host added {added_h}h ago, so it is simply new"
+    return (f"{history_h}h of history but host added {added_h}h ago "
+            "— its items were rebuilt and the earlier history is gone")
+
+
 def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> None:
 
     if "detect_traffic_shaping" not in skip:
@@ -451,18 +507,24 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 # destroyed lands here looking identical to a healthy one. Name
                 # them, with how far back their history actually reaches
                 # (ADR 107).
+                unjudged_ids = [hid for hid, v in verdicts.items()
+                                if v.verdict in (INSUFFICIENT, NO_BASELINE)]
+                # One extra call for at most a handful of names, and it turns a
+                # hedge into an answer: a short history means the items were
+                # rebuilt OR the host is new, and the audit log knows which
+                # (ADR 111). The previous wording asserted "recreated" and was
+                # wrong the first time anyone read it in anger.
+                added = await host_added_hours(client, unjudged_ids, now)
                 unjudged = sorted(
-                    (host_map.get(hid, {}).get("host", hid), history_h.get(hid, 0))
-                    for hid, v in verdicts.items()
-                    if v.verdict in (INSUFFICIENT, NO_BASELINE)
+                    (host_map.get(hid, {}).get("host", hid),
+                     explain_unjudged(history_h.get(hid, 0), added.get(hid)))
+                    for hid in unjudged_ids
                 )
                 unjudged_note = (
-                    f"\n\n_{len(unjudged)} host(s) could NOT be judged: "
-                    + ", ".join(f"{n} ({h}h of history)" for n, h in unjudged[:5])
+                    f"\n\n_{len(unjudged)} host(s) could NOT be judged — "
+                    + "; ".join(f"{n}: {why}" for n, why in unjudged[:5])
                     + ("…" if len(unjudged) > 5 else "")
-                    + ". Recreating a host's items destroys its trend history, so a "
-                    "host that just lost its past reads the same as one that never "
-                    "had a problem — this line is the difference._"
+                    + ". Absent from the table above means unmeasured, not healthy._"
                     if unjudged else ""
                 )
 
