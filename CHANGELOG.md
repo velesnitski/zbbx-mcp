@@ -5,6 +5,38 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.16.40] - 2026-08-14
+
+### Fixed — detect_traffic_drops counted the hosts it could not examine, never named them
+ADR 110. A host collapsed ~98% (70-177 Mbps peaks to 1-20, sustained over a day)
+and the tool returned "No blocks detected". Run live against its group: 25
+analyzed, 17 healthy/diurnal, 8 skipped — and the collapsed host was in neither
+the findings nor any named list.
+
+Two reasons, both ending in silence. It was invisible to discovery, because its
+items come from the stock Linux template and this tool searched by item name
+until ADR 109. And separately, the hosts it DOES skip for absence of data
+(no_history, no_baseline_window — the shape a host has right after its items are
+recreated) collapse into "8 skipped for insufficient/low baseline". Two of the
+three hosts in that incident landed there.
+
+The second reason is the one that matters, because it survives the first being
+fixed: a count reads as reassurance and names nobody, so a host that could not
+be looked at is indistinguishable from one checked and found fine.
+
+Hosts skipped for absence of data are now named, bounded to five plus a count,
+with "Absent from this result means unmeasured, not healthy". Only the two
+no-data reasons are collected — below_floor and healthy are real verdicts
+reached by looking, and sweeping them in would bury the signal in the noise this
+fixes. The note is appended to BOTH exits: a run that found two blocks and could
+not examine a third has to say so, or the disclosure only shows up when nothing
+else does.
+
+Third tool to get this treatment after get_host (ADR 103) and
+detect_traffic_shaping (ADR 107). Each was found in production rather than by a
+test, because the broken version looks exactly like the healthy one.
+943 -> 945 tests.
+
 ## [1.16.39] - 2026-08-14
 
 ### Fixed — eight copies of "find this host's traffic items", one of them blind

@@ -628,22 +628,32 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 skips = {"no_history": 0, "no_baseline_window": 0,
                          "below_floor": 0, "healthy": 0, "low_demand": 0,
                          "agent_down": 0}
+                # A host we could not LOOK at is not a host we found healthy.
+                # The counts alone ("8 skipped") never name anyone, so a
+                # collapse on an unexaminable host is indistinguishable from a
+                # clean run — which is exactly how a 98% drop stayed silent
+                # (ADR 110). Only the two "no data" reasons are collected;
+                # below-floor and healthy are real verdicts, not blind spots.
+                unseen: list[str] = []
                 analyzed = 0
                 candidates: list[dict] = []
                 for hid, ifaces in host_ifaces.items():
                     iid = pick_traffic_interface(ifaces)
                     if iid is None:
                         skips["no_baseline_window"] += 1
+                        unseen.append(host_map.get(hid, {}).get("host", hid))
                         continue
                     t_data = item_trends.get(iid, [])
                     if not t_data:
                         skips["no_history"] += 1
+                        unseen.append(host_map.get(hid, {}).get("host", hid))
                         continue
 
                     recent_recs = [t for t in t_data if int(t["clock"]) >= recent_start]
                     baseline_recs = [t for t in t_data if int(t["clock"]) < recent_start]
                     if not baseline_recs:
                         skips["no_baseline_window"] += 1
+                        unseen.append(host_map.get(hid, {}).get("host", hid))
                         continue
                     analyzed += 1
 
@@ -785,6 +795,18 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 flagged = fold_rows_by_canonical_host(flagged, name_key="host")
                 flagged = flagged[:max_results]
 
+                # Naming the hosts that had NO usable trend data. "8 skipped"
+                # is a number nobody acts on, and it reads as reassurance: a
+                # host whose items were rebuilt yesterday is counted there and
+                # looks exactly like a host that was checked and found fine
+                # (ADR 110).
+                unseen_note = (
+                    f"\n\n_{len(unseen)} host(s) had no usable trend data and were "
+                    f"NOT examined: {', '.join(sorted(unseen)[:5])}"
+                    f"{'…' if len(unseen) > 5 else ''}. Absent from this result means "
+                    "unmeasured, not healthy._" if unseen else ""
+                )
+
                 if not flagged:
                     return (
                         f"No blocks detected (analyzed {analyzed} servers; "
@@ -793,6 +815,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                         f"{skips['agent_down']} agent-down (not a traffic block), "
                         f"{skips['below_floor'] + skips['no_baseline_window'] + skips['no_history']} "
                         "skipped for insufficient/low baseline)."
+                        + unseen_note
                         + excluded_test_note(excluded)
                     )
 
@@ -814,6 +837,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                         f"**{d['drop_pct']:.0f}%** | {d['reason']} |"
                     )
 
-                return "\n".join(parts) + excluded_test_note(excluded)
+                return ("\n".join(parts) + unseen_note
+                        + excluded_test_note(excluded))
             except (httpx.HTTPError, ValueError) as e:
                 return f"Error: {e}"

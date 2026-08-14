@@ -1,5 +1,7 @@
 """Traffic, disruption-wave, and shutdown-headroom tests (split from test_analytics, ADR 074)."""
 
+from tests.wiretest import RecordingClient, run_tool
+from zbbx_mcp.tools import traffic as traffic_mod
 
 
 class TestTrendSanity:
@@ -727,3 +729,54 @@ class TestShutdownCandidateMetricFold:
             ["1", "2", "3"], {}, services,
         )
         assert service == "PARTIAL"
+
+
+class TestUnexaminedHostsAreNamed:
+    """ADR 110 — "8 skipped" is a number nobody acts on.
+
+    Live case: a host collapsed ~98% (70-177 Mbps peaks to 1-20) and
+    `detect_traffic_drops` returned "No blocks detected". It was never
+    examined — its items had been recreated, so it had no baseline — and the
+    only trace was a count folded into "skipped for insufficient/low
+    baseline". A host that could not be looked at read exactly like a host
+    checked and found fine.
+    """
+
+    def _client(self, trends):
+        import time
+        now = int(time.time())
+        return RecordingClient({
+            "host.get": [
+                {"hostid": "9", "host": "node-fj1", "groups": [{"name": "edge"}],
+                 "interfaces": [{"ip": "10.0.0.9"}]},
+                {"hostid": "8", "host": "node-ki1", "groups": [{"name": "edge"}],
+                 "interfaces": [{"ip": "10.0.0.8"}]},
+            ],
+            "item.get": [
+                {"itemid": "1", "hostid": "9", "key_": "net.if.in[eth0]",
+                 "lastvalue": "5000000", "value_type": "3"},
+                {"itemid": "2", "hostid": "8", "key_": "net.if.in[eth0]",
+                 "lastvalue": "5000000", "value_type": "3"},
+            ],
+            "trend.get": trends(now),
+        })
+
+    def test_host_without_trend_history_is_named(self):
+        # node-ki1 (item 2) has no trends at all — the rebuilt-items shape.
+        def trends(now):
+            return [{"itemid": "1", "clock": str(now - 3600 * (i + 1)),
+                     "value_avg": str(50 * 1_000_000)} for i in range(200)]
+        out = run_tool(traffic_mod, "detect_traffic_drops", self._client(trends))
+        assert "NOT examined" in out
+        assert "node-ki1" in out
+        assert "unmeasured, not healthy" in out
+
+    def test_fully_measured_fleet_says_nothing_extra(self):
+        def trends(now):
+            rows = []
+            for iid in ("1", "2"):
+                rows += [{"itemid": iid, "clock": str(now - 3600 * (i + 1)),
+                          "value_avg": str(50 * 1_000_000)} for i in range(200)]
+            return rows
+        out = run_tool(traffic_mod, "detect_traffic_drops", self._client(trends))
+        assert "NOT examined" not in out
