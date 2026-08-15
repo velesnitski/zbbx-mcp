@@ -694,3 +694,66 @@ class TestPhysicalTrafficItems:
         c = self._client([])
         assert asyncio.run(physical_traffic_items(c, [])) == []
         assert c.calls == []
+
+
+class TestAbsenceIsNotAVerdict:
+    """ADR 113 — two tools that made "no data" look like a finding.
+
+    Both were hit in the field on the same morning: a country with nothing
+    measurable was printed as the most alarming state on the board, and a
+    healthy host's traffic ratio read like a fault because the baseline sat in
+    a different part of the daily cycle.
+    """
+
+    def _matrix_rec(self, x_s, k_s, o_s):
+        """The recommendation rule, mirrored from geo_health."""
+        measured = [s for s in (x_s, k_s, o_s) if s != "N/A"]
+        working = []
+        for label, s in (("Proto 1", x_s), ("Proto 2", k_s), ("Proto 3", o_s)):
+            if "OK" in s or "PARTIAL" in s:
+                working.append(label)
+        if not measured:
+            return "NOT MEASURED — no check data"
+        if not working:
+            return "ALL DEGRADED"
+        if len(working) == len(measured) and len(measured) < 3:
+            return (f"OK where measured ({len(measured)}/3), "
+                    f"{3 - len(measured)} unmeasured")
+        if len(working) == 3:
+            return "All protocols OK"
+        return " / ".join(working) + " only"
+
+    def test_no_data_is_not_all_degraded(self):
+        # The live case: a country whose service actually worked was printed
+        # as ALL DEGRADED purely because nothing was measured there.
+        assert self._matrix_rec("N/A", "N/A", "N/A") == "NOT MEASURED — no check data"
+
+    def test_genuine_failure_still_reads_all_degraded(self):
+        assert self._matrix_rec("DOWN (0/2)", "DOWN (0/2)", "DOWN (0/2)") == "ALL DEGRADED"
+
+    def test_partial_measurement_says_where_measured(self):
+        # Two protocols fine, the third unmeasured: claiming "All protocols OK"
+        # would assert something about the one nobody checked.
+        assert self._matrix_rec("OK (2/2)", "OK (2/2)", "N/A") == (
+            "OK where measured (2/3), 1 unmeasured")
+
+    def test_fully_measured_and_fine_is_unchanged(self):
+        assert self._matrix_rec("OK (2/2)", "OK (2/2)", "OK (2/2)") == "All protocols OK"
+
+
+class TestDiagnoseDisclosesItsBaseline:
+    def test_source_says_the_ratio_is_not_an_anomaly_verdict(self):
+        # Pinning the wording, because the missing caveat is what sent a live
+        # investigation down a false path: the baseline is the preceding 24h,
+        # so an off-peak window reads 50-70% on a healthy host.
+        import pathlib
+        src = pathlib.Path("src/zbbx_mcp/tools/diagnose.py").read_text()
+        assert "NOT an anomaly verdict" in src
+        assert "detect_traffic_drops" in src
+        assert "preceding 24h" in src
+
+    def test_source_discloses_canonical_group_aggregation(self):
+        import pathlib
+        src = pathlib.Path("src/zbbx_mcp/tools/diagnose.py").read_text()
+        assert "group_records" in src
+        assert "not this record" in src

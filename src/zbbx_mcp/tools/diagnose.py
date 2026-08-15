@@ -487,6 +487,17 @@ def _render_full_report(
             lines.append(f"- agent.ping = {agent_val} ({state}, last update {age})")
         lines.append("")
         lines.append("### Traffic")
+        # Traffic is read across the whole canonical group, because on a
+        # multi-VIP box it lives on the sub-host interfaces (ADR 049). Asking
+        # about a sub-host therefore returns the BOX's figures, which is right
+        # but was invisible: a sub-host with no traffic items of its own showed
+        # its parent's numbers with nothing saying so (ADR 113).
+        if facts.get("group_records", 1) > 1:
+            lines.append(
+                f"- _Measured across all {facts['group_records']} records of "
+                "this physical host (parent + VIP sub-hosts), not this record "
+                "alone._"
+            )
         base = facts["traffic_baseline_mbps"]
         recent = facts["traffic_recent_mbps"]
         if base is None or recent is None:
@@ -498,6 +509,21 @@ def _render_full_report(
                 f"- Last {traffic_hours}h avg: **{recent:.1f} Mbps**"
                 f" ({pct:.0f}% of baseline)"
             )
+            # The baseline is the 24h immediately BEFORE the recent window, so
+            # it straddles a different part of the daily cycle. A morning
+            # window measured against a baseline containing the previous
+            # evening's peak reads 50-70% on a perfectly healthy host — and it
+            # reads like a verdict. This is a level comparison, not an anomaly
+            # test; the seasonal, same-hour-of-day judgement lives in
+            # detect_traffic_drops, and the two disagreed in the field until
+            # this note existed (ADR 113).
+            if pct < 85:
+                lines.append(
+                    "- _Baseline is the preceding 24h, not the same hour of "
+                    "day, so this ratio is depressed outside peak hours. It is "
+                    "NOT an anomaly verdict — use `detect_traffic_drops` for "
+                    "that; it compares against a seasonal same-hour band._"
+                )
         lines.append("")
         lines.append(f"### IP rotation history (last {rotation_days}d)")
         rots = facts["rotations"]
@@ -784,6 +810,9 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     group_hostids=group_hostids,
                     include_suppressed=include_suppressed,
                 )
+                # How many Zabbix records the figures were read across, so the
+                # report can say when they are the box's and not this record's.
+                facts["group_records"] = len(group_hostids)
                 return _render_full_report(
                     facts,
                     traffic_hours=traffic_hours,

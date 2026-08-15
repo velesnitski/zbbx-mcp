@@ -447,7 +447,15 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     k_s = _status(service2_up, service2_checked)
                     o_s = _status(service3_up, service3_checked)
 
-                    # Recommendation
+                    # Recommendation.
+                    #
+                    # "N/A" means nothing was measured, and it used to fall
+                    # through to ALL DEGRADED because it contains neither "OK"
+                    # nor "PARTIAL" — so a country with no measurable hosts was
+                    # reported as the most alarming state on the board, and a
+                    # country that was genuinely fine read as broken. Absence
+                    # is not a verdict (ADR 113).
+                    measured = [s for s in (x_s, k_s, o_s) if s != "N/A"]
                     working = []
                     if "OK" in x_s or "PARTIAL" in x_s:
                         working.append("Proto 1")
@@ -456,8 +464,16 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     if "OK" in o_s or "PARTIAL" in o_s:
                         working.append("Proto 3")
 
-                    if not working:
+                    if not measured:
+                        rec = "NOT MEASURED — no check data"
+                    elif not working:
                         rec = "ALL DEGRADED"
+                    elif len(working) == len(measured) and len(measured) < 3:
+                        # Everything we could check is fine, and the rest was
+                        # not checked. Listing only the working ones would
+                        # imply the unmeasured protocol is broken.
+                        rec = (f"OK where measured ({len(measured)}/3), "
+                               f"{3 - len(measured)} unmeasured")
                     elif len(working) == 3:
                         rec = "All protocols OK"
                     else:

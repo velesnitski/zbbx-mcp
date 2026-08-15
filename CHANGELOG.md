@@ -5,6 +5,48 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.16.43] - 2026-08-15
+
+### Fixed — the health matrix printed "no data" as ALL DEGRADED
+ADR 113. A live incident was investigated with these tools, and both misled the
+investigation before any real cause was examined.
+
+get_service_health_matrix's `_status()` returns "N/A" when nothing was checked.
+The recommendation then built its working-protocol list by testing `"OK" in s or
+"PARTIAL" in s` — "N/A" contains neither, so the list came back empty and the
+row printed ALL DEGRADED, the most alarming state on the board. In the live run
+roughly a third of the country rows said ALL DEGRADED purely for having no data, and a
+country whose service was confirmed working was among them.
+
+A weaker form sat one branch further down: two protocols fine and the third
+unmeasured rendered as "Proto 1 / Proto 2 only", asserting the third is broken
+when nobody looked.
+
+Now: no measurements at all reads "NOT MEASURED — no check data"; all measured
+ones fine reads "OK where measured (N/3), M unmeasured"; and ALL DEGRADED
+requires evidence — at least one protocol checked and every checked one failing.
+
+### Fixed — diagnose_host's traffic ratio read like a verdict
+Its baseline is the 24h immediately PRECEDING the recent window (ADR 078), so an
+off-peak window is compared against a baseline holding the previous evening's
+peak, and a healthy host reads 50-70% "of baseline" on a weekend morning. Live,
+it reported 68% and 54% on hosts that detect_traffic_drops — seasonal,
+same-hour-of-day, across the whole scope — cleared completely. Two tools in the same
+server disagreed about the same host, and the one reached for first during an
+incident was the wrong one.
+
+The ratio now carries its own caveat below 85%: the baseline is not the same
+hour of day, this is not an anomaly verdict, and detect_traffic_drops is what
+gives one. Also: diagnose_host reads across the whole canonical group because
+multi-VIP traffic lives on sub-host interfaces (ADR 049) — correct, but a
+sub-host with no traffic items of its own showed its parent's numbers with
+nothing saying so. It now discloses when figures span several records.
+
+Not fixed here: a true seasonal band in diagnose_host needs a 7-day trend fetch
+instead of 24h and would change the cost of every bulk diagnosis. Recorded as a
+follow-up rather than done blind; the disclosure removes the harm meanwhile.
+964 -> 970 tests.
+
 ## [1.16.42] - 2026-08-14
 
 ### Added — get_api_tokens: the surface a token audit had to go around
