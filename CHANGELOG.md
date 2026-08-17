@@ -5,6 +5,43 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.16.46] - 2026-08-17
+
+### Fixed — diagnose_host now judges traffic against the same shape as the acute detector
+ADR 116, closing task 186 and completing ADR 113. That ADR disclosed a bias
+without removing it: the baseline is the 24h immediately preceding the recent
+window, which sits in a different part of the daily cycle, so a healthy host
+reads 50-70% "of baseline" outside peak hours and that reads like a fault.
+
+The caveat helped, but the underlying problem stood — diagnose_host and
+detect_traffic_drops gave different answers about the same host, and the one an
+operator reaches for first in an incident was the one without a seasonal
+comparison. A caveat asking the reader to go run another tool is not a fix.
+
+diagnose_host now computes the same-hour-of-day floor that detect_traffic_drops
+judges against, via the existing seasonal_floor helper over a 7-day window, and
+states a verdict: at or above the floor, "WITHIN the normal band for this time
+of day, so the ratio above is diurnal, not a fault"; below it, "N% BELOW the
+normal band ... anomalous, not diurnal".
+
+The cost, which the task asked to measure before porting: one extra trend.get
+over 7 days. Nothing for a single host; for bulk_diagnose it multiplies by a
+fan-out capped at 50 hosts. So it is a parameter defaulted OFF, and only the
+single-host path opts in — bulk keeps its cheap ratio and the caveat that goes
+with it. Both halves are pinned by test, because a default flipped by accident
+would quietly multiply the cost of every fan-out.
+
+A failed or empty seasonal fetch leaves the floor unset and falls back to the
+caveat, naming which case applies: it enriches a report and must never break one.
+
+Also rewritten: the ADR 113 assertions grepped the module source for its own
+wording, and a lint pass rewrapping a string literal failed the test while the
+behaviour was correct — Python's adjacent-literal concatenation meant no
+whitespace normalisation could fix it either. They now run against rendered
+output through the real renderer, which is what they were always trying to check.
+
+1002 -> 1007 tests.
+
 ## [1.16.45] - 2026-08-17
 
 ### Added — template-fallback classification (task 187)

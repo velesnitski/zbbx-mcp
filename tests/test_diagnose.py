@@ -741,19 +741,76 @@ class TestAbsenceIsNotAVerdict:
         assert self._matrix_rec("OK (2/2)", "OK (2/2)", "OK (2/2)") == "All protocols OK"
 
 
-class TestDiagnoseDisclosesItsBaseline:
-    def test_source_says_the_ratio_is_not_an_anomaly_verdict(self):
-        # Pinning the wording, because the missing caveat is what sent a live
-        # investigation down a false path: the baseline is the preceding 24h,
-        # so an off-peak window reads 50-70% on a healthy host.
-        import pathlib
-        src = pathlib.Path("src/zbbx_mcp/tools/diagnose.py").read_text()
-        assert "NOT an anomaly verdict" in src
-        assert "detect_traffic_drops" in src
-        assert "preceding 24h" in src
+def _facts(**over) -> dict:
+    """Minimal facts dict for the verbose renderer."""
+    base = {
+        "host": "node-fj1", "hid": "9", "mode": "server", "ip": "10.0.0.9",
+        "groups": "edge", "agent_ping_val": 1, "agent_ping_age_min": 0.5,
+        "traffic_baseline_mbps": 100.0, "traffic_recent_mbps": 60.0,
+        "traffic_seasonal_floor": None, "problems": [], "rotations": [],
+        "https_down": False, "https_age_h": None, "verdict": "healthy",
+        "action": "No issues detected.", "now": 1_700_000_000,
+    }
+    base.update(over)
+    return base
 
-    def test_source_discloses_canonical_group_aggregation(self):
-        import pathlib
-        src = pathlib.Path("src/zbbx_mcp/tools/diagnose.py").read_text()
-        assert "group_records" in src
-        assert "not this record" in src
+
+def _render(**over) -> str:
+    from zbbx_mcp.tools.diagnose import _render_full_report
+    return _render_full_report(_facts(**over), traffic_hours=6,
+                               problem_hours=24, rotation_days=14)
+
+
+class TestDiagnoseDisclosesItsBaseline:
+    """ADR 113/116 — the ratio must never read as a verdict on its own.
+
+    Asserted on RENDERED output, not on source text: the first version of
+    these checks grepped the module and broke the moment a lint pass rewrapped
+    a string literal, which proved the method wrong rather than the intent.
+    """
+
+    def test_without_a_seasonal_band_the_ratio_carries_its_caveat(self):
+        out = _render(traffic_seasonal_floor=None)
+        assert "NOT an anomaly verdict" in out
+        assert "detect_traffic_drops" in out
+        assert "preceding 24h" in out
+
+    def test_a_healthy_ratio_needs_no_caveat(self):
+        # Above 85% the ratio is not misleading, so the note would be noise.
+        out = _render(traffic_recent_mbps=95.0, traffic_seasonal_floor=None)
+        assert "NOT an anomaly verdict" not in out
+
+    def test_canonical_group_aggregation_is_disclosed(self):
+        out = _render(group_records=3)
+        assert "not this record" in out
+        assert "3 records" in out
+
+    def test_single_record_host_says_nothing_extra(self):
+        assert "not this record" not in _render()
+
+
+class TestSeasonalBand:
+    """ADR 116 — the ratio finally gets a verdict instead of a caveat."""
+
+    def test_within_the_band_is_called_diurnal(self):
+        # 60 Mbps against a 50 Mbps floor: low versus yesterday, normal for
+        # this hour. Exactly the shape that misled a live investigation.
+        out = _render(traffic_recent_mbps=60.0, traffic_seasonal_floor=50.0)
+        assert "WITHIN the normal band" in out
+        assert "diurnal, not a fault" in out
+        assert "NOT an anomaly verdict" not in out   # caveat replaced
+
+    def test_below_the_band_is_called_anomalous(self):
+        out = _render(traffic_recent_mbps=20.0, traffic_seasonal_floor=50.0)
+        assert "BELOW the normal band" in out
+        assert "anomalous, not diurnal" in out
+        assert "60%" in out                          # 20 is 60% below 50
+
+    def test_bulk_does_not_pay_for_the_extra_fetch(self):
+        # One extra 7-day trend read: trivial for a single host, multiplied
+        # across a fan-out. Bulk keeps the cheap default.
+        import inspect
+
+        from zbbx_mcp.tools import diagnose as d
+        sig = inspect.signature(d._collect_diagnosis_inner)
+        assert sig.parameters["seasonal"].default is False

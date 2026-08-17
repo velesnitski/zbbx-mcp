@@ -23,6 +23,7 @@ from datetime import datetime, timezone
 
 import httpx
 
+from zbbx_mcp.anomaly import seasonal_floor
 from zbbx_mcp.country import resolve_country
 from zbbx_mcp.data import (
     AUDIT_ACTION_UPDATE,
@@ -43,6 +44,9 @@ from zbbx_mcp.tools.ip_history import parse_ip_changes
 # Width of the baseline window, in hours. It always sits immediately *before*
 # the recent window (ADR 078).
 _BASELINE_SPAN_HOURS = 24
+# Width of the seasonal comparison window. Matches what the acute traffic
+# detector uses, so both tools judge a host against the same shape.
+_SEASONAL_DAYS = 7
 
 
 def _traffic_windows(now: int, traffic_hours: int) -> tuple[int, int, int]:
@@ -296,6 +300,7 @@ async def _collect_diagnosis_inner(
     group_hostids: list[str] | None = None,
     include_suppressed: bool = False,
     now: int | None = None,
+    seasonal: bool = False,
 ) -> dict:
     """Gather diagnosis facts for one host given pre-fetched ``host_record`` + ``items``.
 
@@ -336,6 +341,7 @@ async def _collect_diagnosis_inner(
 
     # Server-mode-only data
     traffic_baseline = traffic_recent = None
+    traffic_seasonal_floor: float | None = None
     agent_ping_val: int | None = None
     agent_ping_age_min: float | None = None
     rotations: list[dict] = []
@@ -369,6 +375,37 @@ async def _collect_diagnosis_inner(
             traffic_baseline, traffic_recent = _carrier_traffic_mbps(
                 trends_base, trends_recent
             )
+
+            # Seasonal band (ADR 116). The baseline above is the 24h directly
+            # before the recent window, so it sits in a different part of the
+            # daily cycle and a healthy host reads 50-70% of it off-peak —
+            # which reads like a fault. This second, wider fetch gives the
+            # same-hour-of-day floor `detect_traffic_drops` judges against, so
+            # the two tools stop disagreeing about the same host (ADR 113).
+            #
+            # It costs one extra 7-day trend read, which is nothing for a
+            # single host and multiplies across a bulk fan-out — hence
+            # opt-out, defaulted off for bulk.
+            if seasonal:
+                try:
+                    seas = await client.call("trend.get", {
+                        "itemids": iids,
+                        "time_from": now - _SEASONAL_DAYS * 86400,
+                        "time_till": recent_from,
+                        "output": ["itemid", "clock", "value_avg"],
+                        "limit": len(iids) * 24 * (_SEASONAL_DAYS + 1),
+                    })
+                    points = []
+                    for r in seas or []:
+                        try:
+                            points.append(
+                                (int(r["clock"]), to_mbps(r["value_avg"])))
+                        except (KeyError, TypeError, ValueError):
+                            continue
+                    traffic_seasonal_floor = seasonal_floor(
+                        points, (now // 3600) % 24)
+                except (httpx.HTTPError, ValueError, KeyError):
+                    traffic_seasonal_floor = None   # stays "not measured"
 
         # Agent ping across the whole box: items may span several VIP records
         # (ADR 049), so pick the freshest reading — a stale sub-host record
@@ -445,6 +482,7 @@ async def _collect_diagnosis_inner(
         "agent_ping_age_min": agent_ping_age_min,
         "traffic_baseline_mbps": traffic_baseline,
         "traffic_recent_mbps": traffic_recent,
+        "traffic_seasonal_floor": traffic_seasonal_floor,
         "problems": problems,
         "rotations": rotations,
         "https_down": https_down,
@@ -517,12 +555,34 @@ def _render_full_report(
             # test; the seasonal, same-hour-of-day judgement lives in
             # detect_traffic_drops, and the two disagreed in the field until
             # this note existed (ADR 113).
-            if pct < 85:
+            floor = facts.get("traffic_seasonal_floor")
+            if floor is not None:
+                # The real verdict: measured against the same hour of day over
+                # a week, which is what makes it comparable to
+                # detect_traffic_drops instead of contradicting it (ADR 116).
+                if recent >= floor:
+                    lines.append(
+                        f"- Seasonal floor for this hour (7d): "
+                        f"**{floor:.1f} Mbps** — recent is WITHIN the normal "
+                        "band for this time of day, so the ratio above is "
+                        "diurnal, not a fault."
+                    )
+                else:
+                    short = (1 - recent / floor) * 100 if floor > 0 else 0
+                    lines.append(
+                        f"- Seasonal floor for this hour (7d): "
+                        f"**{floor:.1f} Mbps** — recent is **{short:.0f}% BELOW "
+                        "the normal band** for this time of day. This is "
+                        "anomalous, not diurnal."
+                    )
+            elif pct < 85:
+                # No seasonal data (too little history, or the fetch failed).
+                # Say which, rather than let the bare ratio read as a verdict.
                 lines.append(
-                    "- _Baseline is the preceding 24h, not the same hour of "
-                    "day, so this ratio is depressed outside peak hours. It is "
-                    "NOT an anomaly verdict — use `detect_traffic_drops` for "
-                    "that; it compares against a seasonal same-hour band._"
+                    "- _No seasonal band available for this hour, so the ratio "
+                    "above is measured against the preceding 24h and is "
+                    "depressed outside peak hours. It is NOT an anomaly "
+                    "verdict — `detect_traffic_drops` gives one._"
                 )
         lines.append("")
         lines.append(f"### IP rotation history (last {rotation_days}d)")
@@ -809,6 +869,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     rotation_days=rotation_days,
                     group_hostids=group_hostids,
                     include_suppressed=include_suppressed,
+                    seasonal=True,   # single host: one extra read is nothing
                 )
                 # How many Zabbix records the figures were read across, so the
                 # report can say when they are the box's and not this record's.
