@@ -5,6 +5,43 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.16.45] - 2026-08-17
+
+### Added — template-fallback classification (task 187)
+ADR 115, mirroring the reporting side's ADR 0080. A host can sit only in a mixed
+host group whose members belong to several products. The group then classifies
+it as infrastructure and it disappears from every product-scoped view —
+availability, unit economics, per-country facts — while carrying production
+traffic and a monthly bill. Mapping the group to any one product is wrong by
+construction, because the group really does hold more than one family.
+
+What separates them is the template: the deploy's own statement of what the
+machine runs. When a host's groups classify to a non-serving product
+(infrastructure/monitoring/unknown) and one of its templates is in an
+operator-supplied allow-list, the implied product group is prepended to the
+host's groups inside fetch_enabled_hosts, so every downstream classify_host()
+call site sees it without a signature change. The original group is kept — the
+evidence survives.
+
+Groups always win when they answer. The template is consulted only for a host
+the groups declined to classify and can never override a real product group;
+that rule is what makes this safe and it is pinned by test.
+
+Configuration rather than a constant: the reporting side hardcodes its
+allow-list, but this server is public and not single-tenant, so a hardcoded
+template-to-product table would leak deployment specifics and be wrong for
+everyone else. ZABBIX_TEMPLATE_PRODUCT_MAP holds it, accepting JSON or
+`tpl:group,tpl2:group2`. Unset — the default — disables the feature completely
+including the extra selectParentTemplates on the host fetch, so an unconfigured
+deployment pays nothing. Malformed input disables rather than half-applies.
+
+Worth knowing: without a product map the fallback is inert, because
+classify_host then answers with each host's own first group name and nothing is
+ever non-serving. That is correct, and pinned by test — it looked like a bug the
+first time the tests hit it.
+
+988 -> 1002 tests.
+
 ## [1.16.44] - 2026-08-17
 
 ### Added — detect_dead_protocols: the blind spot behind "UP if any protocol answers"

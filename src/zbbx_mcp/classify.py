@@ -110,6 +110,75 @@ def get_product_map() -> dict[str, tuple]:
     return _PRODUCT_MAP
 
 
+# A host whose groups classify to one of these is not making a product claim —
+# it is either infrastructure or unclassified. Only such a host is eligible for
+# the template fallback below; a real product group always wins.
+NON_SERVING_PRODUCTS = frozenset({"infrastructure", "monitoring", "unknown"})
+
+_TEMPLATE_PRODUCT_MAP: dict[str, str] | None = None
+
+
+def get_template_product_map() -> dict[str, str]:
+    """``{template name: product-group name}`` from the environment.
+
+    Empty by default, which disables template-fallback classification
+    entirely — including the extra ``selectParentTemplates`` on the host
+    fetch, so an unconfigured deployment pays nothing for it.
+
+    This is configuration rather than a hardcoded table on purpose. The
+    sibling reporting pipeline can hardcode its own allow-list because it is
+    private and single-tenant; this server is neither, so which template
+    implies which product belongs to the operator, next to the product map
+    (ADR 115).
+
+    Accepts JSON (``{"tpl": "group"}``) or ``tpl:group,tpl2:group2``.
+    """
+    global _TEMPLATE_PRODUCT_MAP
+    if _TEMPLATE_PRODUCT_MAP is not None:
+        return _TEMPLATE_PRODUCT_MAP
+    raw = os.environ.get("ZABBIX_TEMPLATE_PRODUCT_MAP", "").strip()
+    out: dict[str, str] = {}
+    if raw:
+        try:
+            if raw.startswith("{"):
+                out = {str(k): str(v)
+                       for k, v in json.loads(raw).items() if k and v}
+            else:
+                for pair in raw.split(","):
+                    if ":" in pair:
+                        k, v = pair.split(":", 1)
+                        if k.strip() and v.strip():
+                            out[k.strip()] = v.strip()
+        except (json.JSONDecodeError, AttributeError, TypeError, ValueError):
+            out = {}
+    _TEMPLATE_PRODUCT_MAP = out
+    return out
+
+
+def template_product_group(
+    groups: list[dict], templates: list[dict]
+) -> str | None:
+    """The product group a host's TEMPLATE implies, or None.
+
+    Returns a group name only when the host's groups do not already answer.
+    A template is the deploy's own statement of what a machine runs, which is
+    the one signal that separates families sharing a mixed group — but it is
+    weaker evidence than an explicit product group, so groups win whenever
+    they classify to anything serving (ADR 115).
+    """
+    tmap = get_template_product_map()
+    if not tmap:
+        return None
+    product, _tier = classify_host(groups)
+    if (product or "").lower() not in NON_SERVING_PRODUCTS:
+        return None
+    for t in templates or []:
+        mapped = tmap.get(str(t.get("name", "")))
+        if mapped:
+            return mapped
+    return None
+
+
 def classify_host(groups: list[dict]) -> tuple[str, str]:
     """Classify a host into (product, tier) based on its groups.
 

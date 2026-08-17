@@ -98,6 +98,7 @@ uv run pytest -k "test_name"               # single test by name
 | `ZABBIX_CONNECTIONS_KEY` | Connection count item key |
 | `ZABBIX_BILLING_RENAMES` | Billing name translations (`old1:new1,old2:new2`) |
 | `ZABBIX_PRODUCT_MAP` | JSON file mapping host groups to products |
+| `ZABBIX_TEMPLATE_PRODUCT_MAP` | Template → product-group allow-list (`{"tpl":"group"}` or `tpl:group,…`); rescues hosts a mixed group left non-serving. Unset = disabled, ADR 115 |
 | `ZABBIX_HIDE_PRODUCTS` | Comma-separated products to hide from reports |
 | `ZABBIX_TRAFFIC_UNIT` | Set `bytes` if net.if.in returns bytes/sec (default: bits/sec) |
 | `ZABBIX_COMPACT` / `ZABBIX_COMPACT_TOOLS` | Token optimization |

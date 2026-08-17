@@ -124,8 +124,16 @@ async def fetch_enabled_hosts(
         "filter": {"status": STATUS_ENABLED},
         "sortfield": "host",
     }
+    # Template-fallback classification (ADR 115). Only fetched when the
+    # operator has configured a template→product mapping AND groups are being
+    # read at all — the fallback compares the two, so one without the other
+    # buys nothing and the extra payload is pure cost.
+    from zbbx_mcp.classify import get_template_product_map
+    want_templates = bool(groups and get_template_product_map())
     if groups:
         params["selectGroups"] = ["name"]
+    if want_templates:
+        params["selectParentTemplates"] = ["name"]
     if interfaces:
         params["selectInterfaces"] = ["ip"]
     if inventory:
@@ -135,6 +143,27 @@ async def fetch_enabled_hosts(
     result = await client.call("host.get", params)
     if not isinstance(result, list):
         result = []
+
+    if want_templates:
+        # Prepend the implied product group so every downstream
+        # classify_host() call site sees it without a signature change —
+        # ~50 of them here, same one-place seam the reporting side uses.
+        # A host that already sits in a real product group is untouched
+        # (`template_product_group` returns None), so this can only ever
+        # rescue a host the groups left as infrastructure or unknown.
+        from zbbx_mcp.classify import template_product_group
+        injected = 0
+        for h in result:
+            g = template_product_group(
+                h.get("groups", []) or [], h.get("parentTemplates", []) or [])
+            if g:
+                h["groups"] = [{"name": g}, *(h.get("groups", []) or [])]
+                injected += 1
+        if injected:
+            logging.getLogger("zbbx_mcp").info(
+                "template-fallback reclassified %d host(s) that their groups "
+                "left non-serving (ADR 115)", injected,
+            )
 
     if exclude_test:
         from zbbx_mcp.classify import is_test_host
