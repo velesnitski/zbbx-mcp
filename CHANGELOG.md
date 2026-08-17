@@ -5,6 +5,50 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.16.48] - 2026-08-17
+
+### Added — peer-relative detection for a host capped from birth
+ADR 118, closing task 188 with one correction to its premise.
+
+A node was reported as under-performing and every tool said it was fine:
+diagnose_host healthy at 99% of its own baseline, no drop, no erosion, shaping
+normal. All four were correct and all four were useless for the same reason —
+they are before/after comparisons, and this host had no "before". It ramped from
+idle straight into a ceiling on the hour it entered service and never exceeded
+it. A host capped from birth never falls, so nothing looking for a fall can see
+it.
+
+Against peers sharing its country, product, provider and interface: hourly peaks
+bounded at ~37 Mbps for five days while three identical siblings peaked at
+363-408, and during busy hours its hourly MINIMUM sat at 34-36 — demand pressing
+against a boundary, not demand failing to arrive. Average-to-peak 0.82 against
+0.37-0.41 for the siblings: the curve was flattened, not scaled.
+
+Correction to the task: it assumed such hosts are visible as `capped` and
+proposed refining that verdict's wording. Measured against the real series,
+ceiling_hit_rate returns 54% against a 60% gate, so the verdict is `normal` and
+no refinement of `capped` would ever have fired. The gate was the problem, not
+the wording. The task's rejection of widening the tolerance stands and is
+respected — ADR 108's modal point-mass already absorbs cap wobble and a wider
+band would erode the negative controls.
+
+New: a cohort pass costing no extra fetch. swing_ratio = (p95-p10)/p95 over
+active hours; a host serving real demand swings with the daily curve, a host held
+at a limit cannot, whatever the morphology of the limit. classify_peer_cap
+requires BOTH a swing materially below the country x product cohort median AND a
+ceiling materially below the cohort's peak level. That second condition is the
+saturation guard: a host flat at or above peer level is running at capacity,
+which is healthy utilisation, not a limit. Declines rather than guesses with
+fewer than three peers, or when the whole cohort is flat.
+
+Renders on both exits — a peer-capped host is normally `normal` by the ceiling
+test, so gating the section on the existing flagged list would have hidden
+exactly the case it exists for.
+
+The verdict states what was measured — flat and below peers — and stops.
+Whether the limit is provider policy, a tc rule or a misprovisioned plan is not
+visible in throughput. 1017 -> 1024 tests.
+
 ## [1.16.47] - 2026-08-17
 
 ### Fixed/Added — uptime coverage disclosure and a shadow per-protocol score

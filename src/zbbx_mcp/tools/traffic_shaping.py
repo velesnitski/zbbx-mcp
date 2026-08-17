@@ -38,6 +38,7 @@ from __future__ import annotations
 
 import time as _time
 from dataclasses import dataclass
+from statistics import median
 
 import httpx
 
@@ -66,6 +67,7 @@ CAPPED = "capped"            # peaks at a ceiling, but no drop — pre-existing
 DROPPED = "dropped"          # lower peaks that still spread — demand or a block
 NORMAL = "normal"            # peaks spread, no material drop
 NO_BASELINE = "no_baseline"  # nothing to compare against — cannot say
+PEER_CAPPED = "peer capped"  # flat AND below its cohort — likely a limit
 IDLE = "idle"                # ceiling below the floor — spare/out of rotation
 INSUFFICIENT = "insufficient"  # too few hours to judge
 
@@ -460,6 +462,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 # real uplink (same rule as the acute detector).
                 verdicts: dict[str, ShapingVerdict] = {}
                 history_h: dict[str, int] = {}
+                host_peaks: dict[str, list[float]] = {}   # chosen recent peaks
                 for hid, items in by_host_items.items():
                     best_iid, best_ceiling = None, -1.0
                     for it in items[:_IFACE_CANDIDATES]:
@@ -473,6 +476,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     history_h[hid] = (
                         (now - oldest[best_iid]) // 3600 if best_iid in oldest else 0
                     )
+                    host_peaks[hid] = recent.get(best_iid, [])
                     verdicts[hid] = classify_shaping(
                         recent.get(best_iid, []), base.get(best_iid, []),
                         min_ceiling_mbps=min_ceiling_mbps,
@@ -500,6 +504,42 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     f"{'…' if len(unexamined) > 5 else ''}. Absent from this table "
                     "means unmeasured, not healthy._" if unexamined else ""
                 )
+
+                # Cohort pass (ADR 118). The hit-rate test above needs a
+                # point mass, so a shaper with jitter slips under it — the live
+                # case measured 54% against a 60% gate and read `normal`. A
+                # host held at a limit cannot swing with the daily curve
+                # whatever its morphology, so compare its swing against peers
+                # that share a country and product. Costs no extra fetch.
+                cohorts: dict[tuple, list[str]] = {}
+                for hid in verdicts:
+                    h = host_map.get(hid, {})
+                    prod, _tier = _classify_host(h.get("groups", []))
+                    cohorts.setdefault(
+                        (extract_country(h.get("host", "")), prod or ""), []
+                    ).append(hid)
+                swings: dict[str, float] = {}
+                ceilings: dict[str, float] = {}
+                for hid, peaks in host_peaks.items():
+                    s = swing_ratio(peaks)
+                    if s is not None:
+                        swings[hid] = s
+                        ceilings[hid] = percentile(peaks, 0.95)
+                peer_capped: dict[str, str] = {}
+                for members in cohorts.values():
+                    for hid in members:
+                        if hid not in swings:
+                            continue
+                        if verdicts[hid].verdict in (IDLE, INSUFFICIENT, NO_BASELINE):
+                            continue   # already withheld — do not overrule
+                        peers = [m for m in members if m != hid and m in swings]
+                        ok, why = classify_peer_cap(
+                            swings[hid], ceilings[hid],
+                            [swings[m] for m in peers],
+                            [ceilings[m] for m in peers],
+                        )
+                        if ok:
+                            peer_capped[hid] = why
 
                 # Hosts the tool looked at and could NOT judge. Counting them
                 # in the header is not enough — "2 insufficient" is exactly the
@@ -545,13 +585,44 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     f"{counts.get(CAPPED, 0)} capped, {counts.get(DROPPED, 0)} dropped, "
                     f"{counts.get(NORMAL, 0)} normal, {counts.get(IDLE, 0)} idle, "
                     f"{counts.get(NO_BASELINE, 0)} no-baseline, "
-                    f"{counts.get(INSUFFICIENT, 0)} insufficient)\n"
+                    f"{counts.get(INSUFFICIENT, 0)} insufficient, "
+                    f"{len(peer_capped)} peer-capped)\n"
                 )
+
+                # Built once and shown on BOTH exits. A peer-capped host is
+                # usually `normal` by the ceiling test — that is the whole
+                # point — so gating this on `flagged` would hide exactly the
+                # case it was added for (ADR 118).
+                peer_block = ""
+                if peer_capped:
+                    pb = [
+                        "\n**Flat AND below their cohort — likely an applied "
+                        "limit:**\n",
+                        "| Server | Country | Why |",
+                        "|--------|---------|-----|",
+                    ]
+                    for hid, why in sorted(
+                        peer_capped.items(),
+                        key=lambda kv: host_map.get(kv[0], {}).get("host", ""),
+                    )[:max_results]:
+                        h = host_map.get(hid, {})
+                        pb.append(
+                            f"| {h.get('host', hid)} | "
+                            f"{extract_country(h.get('host', ''))} | {why} |"
+                        )
+                    pb.append(
+                        "\n_No before/after can find these: a host capped from "
+                        "the day it entered service never falls, so every drop "
+                        "and erosion detector reads it as healthy. Only the "
+                        "comparison with peers shows it._"
+                    )
+                    peer_block = "\n".join(pb)
                 if not flagged:
                     return (
                         header
-                        + "\nNo host is pinned against a throughput ceiling in "
-                        "the window."
+                        + ("\nNo host is pinned against a throughput ceiling in "
+                           "the window." if not peer_block else "")
+                        + peer_block
                         + unjudged_note
                         + unexamined_note
                         + excluded_test_note(excluded)
@@ -559,6 +630,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
 
                 parts = [
                     header,
+                    peer_block,
                     "| Server | Country | Ceiling | Was | Drop | At ceiling | Verdict |",
                     "|--------|---------|--------:|----:|-----:|-----------:|---------|",
                 ]
@@ -586,3 +658,78 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                         + excluded_test_note(excluded))
             except (httpx.HTTPError, ValueError) as e:
                 return f"Error: {e}"
+
+
+_MIN_PEERS = 3            # below this, "flatter than the cohort" is not a claim
+_SWING_MARGIN = 0.5       # host swing must be <= this share of the cohort's
+_CEILING_MARGIN = 0.6     # ...and its ceiling <= this share of the cohort's
+_COHORT_FLAT_SWING = 0.2  # a cohort this flat has nothing to compare against
+
+
+def swing_ratio(peaks: list[float], *, active_frac: float = _ACTIVE_FRAC) -> float | None:
+    """``(p95 - p10) / p95`` over the active hours, or None. Pure.
+
+    How much a host's hourly peaks move across the day. A host serving real
+    demand swings with the diurnal curve; a host held at a limit cannot, so its
+    swing collapses regardless of *where* the limit sits.
+
+    This is the discriminator the hit rate cannot be: ``ceiling_hit_rate`` asks
+    "is there a point mass", which needs a hard clip, and a shaper with jitter
+    spreads its mass wider than the tolerance. Swing asks "was this curve
+    flattened", which holds for any bounded morphology (ADR 118).
+    """
+    if not peaks:
+        return None
+    top = percentile(peaks, 0.95)
+    if top <= 0:
+        return None
+    active = [p for p in peaks if p >= top * active_frac]
+    if len(active) < _MIN_ACTIVE_H:
+        return None
+    lo = percentile(active, 0.10)
+    return max(0.0, (top - lo) / top)
+
+
+def classify_peer_cap(
+    host_swing: float | None,
+    host_ceiling: float,
+    peer_swings: list[float],
+    peer_ceilings: list[float],
+    *,
+    min_peers: int = _MIN_PEERS,
+    swing_margin: float = _SWING_MARGIN,
+    ceiling_margin: float = _CEILING_MARGIN,
+) -> tuple[bool, str]:
+    """``(is_peer_capped, reason)`` for one host against its cohort. Pure.
+
+    Two conditions, and BOTH are required:
+
+    - the host's curve is materially flatter than its peers', and
+    - its ceiling sits materially **below** the peer level.
+
+    The second is the saturation guard, and it is what keeps this honest. A host
+    flat *at or above* peer level is running at capacity — healthy utilisation,
+    not a limit. Only a host that is flat AND low has been held back.
+
+    Declines when there are too few peers, or when the whole cohort is flat:
+    "flatter than everyone" means nothing if everyone is flat, and asserting a
+    cap there would be a verdict built from no contrast (ADR 118).
+    """
+    if host_swing is None or len(peer_swings) < min_peers:
+        return False, "too few peers to compare"
+    cohort_swing = median(peer_swings)
+    if cohort_swing < _COHORT_FLAT_SWING:
+        return False, "whole cohort is flat — nothing to compare against"
+    if host_swing > cohort_swing * swing_margin:
+        return False, "swing is within the cohort's range"
+    if not peer_ceilings:
+        return False, "no peer ceilings"
+    cohort_ceiling = median(peer_ceilings)
+    if cohort_ceiling <= 0 or host_ceiling > cohort_ceiling * ceiling_margin:
+        # Flat at or near peer level = saturated, which is healthy.
+        return False, "ceiling is at peer level — saturation, not a limit"
+    return True, (
+        f"swing {host_swing:.0%} vs cohort {cohort_swing:.0%} and ceiling "
+        f"{host_ceiling:.1f} vs cohort {cohort_ceiling:.1f} Mbps — flat AND "
+        "below peers"
+    )

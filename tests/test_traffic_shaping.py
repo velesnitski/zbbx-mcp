@@ -371,3 +371,78 @@ class TestUnjudgedCauseIsResolved:
         c = RecordingClient({})
         assert asyncio.run(host_added_hours(c, [], 0)) == {}
         assert c.calls == []
+
+
+class TestPeerCap:
+    """ADR 118 — a host capped from birth, which no before/after can find.
+
+    Live case: a node bounded at ~37 Mbps since the hour it entered service,
+    beside identical siblings peaking at 363-408. Every self-comparison read it
+    healthy (99% of its own baseline), and the ceiling test measured a 54% hit
+    rate against a 60% gate — because a shaper with jitter spreads its point
+    mass wider than the tolerance. Its swing is what gives it away.
+    """
+
+    # The real hourly value_max series from that host.
+    CAPPED = [32.55, 32.04, 34.27, 34.18, 35.68, 36.10, 35.96, 36.90, 36.49,
+              36.63, 36.62, 37.47, 37.02, 37.16, 37.04, 37.27, 37.18, 37.47,
+              37.26, 37.35, 35.59, 34.17, 33.09, 32.04, 32.16, 32.43, 34.22,
+              34.07, 35.49, 36.39, 36.18, 37.05, 36.95, 36.90, 37.08]
+
+    def _swinging(self, peak=400.0, trough=150.0, n=35):
+        return [trough + (peak - trough) * (0.5 * (1 - math.cos(2 * math.pi * i / 24)))
+                for i in range(n)]
+
+    def test_the_ceiling_test_alone_does_not_catch_it(self):
+        # Pins the gap that motivated this: 54% against a 60% gate.
+        from zbbx_mcp.tools.traffic_shaping import ceiling_hit_rate
+        rate, _, _, _ = ceiling_hit_rate(self.CAPPED)
+        assert rate < 0.6
+        assert classify_shaping(self.CAPPED, self._swinging()).verdict != CAPPED
+
+    def test_swing_collapses_on_a_capped_host(self):
+        from zbbx_mcp.tools.traffic_shaping import swing_ratio
+        capped = swing_ratio(self.CAPPED)
+        healthy = swing_ratio(self._swinging())
+        assert capped is not None and healthy is not None
+        assert capped < 0.2 < healthy
+
+    def test_flat_and_below_peers_is_peer_capped(self):
+        from zbbx_mcp.tools.traffic_shaping import classify_peer_cap, swing_ratio
+        s = swing_ratio(self._swinging())
+        ok, why = classify_peer_cap(
+            swing_ratio(self.CAPPED), 37.4, [s] * 3, [400.0] * 3)
+        assert ok
+        assert "flat AND below peers" in why
+
+    def test_flat_AT_peer_level_is_saturation_not_a_cap(self):
+        # The load-bearing guard. A host pinned at capacity is healthy
+        # utilisation; calling that a provider limit would be a false positive
+        # on the busiest hosts in the fleet.
+        from zbbx_mcp.tools.traffic_shaping import classify_peer_cap, swing_ratio
+        s = swing_ratio(self._swinging())
+        ok, why = classify_peer_cap(0.05, 400.0, [s] * 3, [400.0] * 3)
+        assert not ok
+        assert "saturation" in why
+
+    def test_a_flat_cohort_yields_no_verdict(self):
+        # "Flatter than everyone" means nothing when everyone is flat.
+        from zbbx_mcp.tools.traffic_shaping import classify_peer_cap
+        ok, why = classify_peer_cap(0.05, 30.0, [0.06] * 3, [400.0] * 3)
+        assert not ok
+        assert "cohort is flat" in why
+
+    def test_too_few_peers_yields_no_verdict(self):
+        from zbbx_mcp.tools.traffic_shaping import classify_peer_cap, swing_ratio
+        s = swing_ratio(self._swinging())
+        ok, why = classify_peer_cap(swing_ratio(self.CAPPED), 37.4, [s], [400.0])
+        assert not ok
+        assert "too few peers" in why
+
+    def test_a_swinging_host_below_peers_is_not_capped(self):
+        # Merely having less demand is not a cap — the curve still swings.
+        from zbbx_mcp.tools.traffic_shaping import classify_peer_cap, swing_ratio
+        small = self._swinging(peak=40.0, trough=15.0)
+        s = swing_ratio(self._swinging())
+        ok, _ = classify_peer_cap(swing_ratio(small), 40.0, [s] * 3, [400.0] * 3)
+        assert not ok
