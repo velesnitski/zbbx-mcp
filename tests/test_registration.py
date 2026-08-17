@@ -159,6 +159,7 @@ EXPECTED_TOOLS = {
     "set_bulk_cost",
     "fill_cost_median",
     "detect_check_flaps",
+    "detect_dead_protocols",
     "detect_cost_anomalies",
     "export_cost_audit",
     "import_from_xlsx",

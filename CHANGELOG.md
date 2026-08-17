@@ -5,6 +5,45 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.16.44] - 2026-08-17
+
+### Added — detect_dead_protocols: the blind spot behind "UP if any protocol answers"
+ADR 114, closing task 178(c). A user report of "connects, but no internet" was
+investigated with the existing tools and every one of them said the host was
+fine: agent reachable, traffic symmetric and normal for the hour, all protocol
+checks green, no problems.
+
+The actual finding took a scope test. One protocol check read 0 on every host
+queried across a whole product fleet — several countries, several providers —
+and had done so for a full day. Not one alert had fired, and none could have,
+because availability is "any protocol answers" and the others were healthy.
+
+Two choices come from that incident rather than from the reports-side original.
+
+Discovery walks every `*check*` item instead of the three configured
+ZABBIX_SERVICE*_CHECK_KEY values, because the check that was down is not one of
+them — a detector scoped to configured keys would have reported the fleet
+perfectly healthy, which is exactly what everything else did. nft.* firewall
+assertions and non-uint items are excluded: not reachability, and a 0/1 verdict
+on a string-valued check is meaningless.
+
+Results group by CHECK with a denominator. As per-host rows the live case is
+hundreds of lines nobody reads; as one row — dead on N of N judged hosts — it is
+a platform outage with a single owner, and the ratio is what separates "this box
+is broken" from "this protocol is down everywhere". The denominator counts hosts
+where the check could be JUDGED, not where it failed; counting failures alone
+would make every key read 100% dead and destroy the only number that matters.
+
+Verdict order is deliberate: too young first (a verdict from two samples is an
+artefact), then host dark (a machine entirely down is the SLA's finding), then
+died vs never up — kept apart because they need different actions: died is a
+regression with a timestamp to match to a deploy, never-up is a provisioning
+gap. Un-judged hosts are named, not dropped. value_max not value_avg (ADR 0048).
+
+The tool deliberately alerts nothing and changes no verdict; changing the
+availability definition is a separate decision with its own re-baseline.
+168 -> 169 tools, 970 -> 988 tests.
+
 ## [1.16.43] - 2026-08-15
 
 ### Fixed — the health matrix printed "no data" as ALL DEGRADED

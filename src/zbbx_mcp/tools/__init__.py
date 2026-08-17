@@ -16,6 +16,7 @@ from zbbx_mcp.tools import (
     crosscheck,
     dashboard_report,
     dashboards,
+    dead_protocols,
     diagnose,
     discovery,
     disruption,
@@ -138,6 +139,7 @@ ALL_TOOLS: frozenset[str] = frozenset({
     "delete_maintenance",
     "delete_trigger",
     "detect_check_flaps",
+    "detect_dead_protocols",
     "detect_cost_anomalies",
     "detect_disruption_wave",
     "detect_loss_drift",
@@ -309,7 +311,7 @@ def register_all(
         trends_compare, trends_health,
         html_report, geo_traffic, geo_health, executive, predictive, ceo_report, service_brief, analysis,
         web_scenarios, correlation, ip_history, loss_drift, disruption, risk, floods,
-        telemetry, diagnose, triage, check_flaps, crosscheck, tokens,
+        telemetry, diagnose, triage, check_flaps, crosscheck, tokens, dead_protocols,
     ]
     for module in modules:
         module.register(mcp, resolver, skip=skip)
