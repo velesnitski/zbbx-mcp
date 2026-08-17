@@ -91,12 +91,12 @@ class TestGroupByCountry:
 
 class TestHostIp:
     def test_extracts_ip(self):
-        h = {"interfaces": [{"ip": "1.2.3.4"}]}
-        assert host_ip(h) == "1.2.3.4"
+        h = {"interfaces": [{"ip": "192.0.2.4"}]}
+        assert host_ip(h) == "192.0.2.4"
 
     def test_skips_loopback(self):
-        h = {"interfaces": [{"ip": "127.0.0.1"}, {"ip": "5.6.7.8"}]}
-        assert host_ip(h) == "5.6.7.8"
+        h = {"interfaces": [{"ip": "127.0.0.1"}, {"ip": "192.0.2.8"}]}
+        assert host_ip(h) == "192.0.2.8"
 
     def test_no_interfaces(self):
         assert host_ip({}) == ""

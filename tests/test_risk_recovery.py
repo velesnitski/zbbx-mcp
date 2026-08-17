@@ -9,12 +9,12 @@ class TestExternalIpHistoryParsing:
         from zbbx_mcp.tools.ip_history import parse_ip_changes
 
         details = (
-            '[["update", "interfaces.42.ip", "1.2.3.4", "5.6.7.8"],'
+            '[["update", "interfaces.42.ip", "192.0.2.4", "192.0.2.8"],'
             ' ["update", "host.name", "old", "new"],'
             ' ["update", "interfaces.42.port", "10050", "10050"]]'
         )
         out = parse_ip_changes(details)
-        assert out == [("1.2.3.4", "5.6.7.8")]
+        assert out == [("192.0.2.4", "192.0.2.8")]
 
     def test_dict_shape_picks_ip_updates(self):
         from zbbx_mcp.tools.ip_history import parse_ip_changes
@@ -26,7 +26,7 @@ class TestExternalIpHistoryParsing:
         from zbbx_mcp.tools.ip_history import parse_ip_changes
 
         # Renames that touch the field but leave the value equal must be skipped.
-        details = '[["update", "interfaces.42.ip", "1.2.3.4", "1.2.3.4"]]'
+        details = '[["update", "interfaces.42.ip", "192.0.2.4", "192.0.2.4"]]'
         assert parse_ip_changes(details) == []
 
     def test_non_ip_field_ignored(self):

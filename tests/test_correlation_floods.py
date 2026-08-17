@@ -281,7 +281,7 @@ class TestOutageClusterGroupingV2:
     def test_unknown_level_is_empty(self):
         from zbbx_mcp.tools.correlation import _group_key
 
-        assert _group_key("subnet8", ip="1.2.3.4") == ""
+        assert _group_key("subnet8", ip="192.0.2.4") == ""
 
     def test_auto_levels_constant_is_narrowest_first(self):
         from zbbx_mcp.tools.correlation import _AUTO_LEVELS

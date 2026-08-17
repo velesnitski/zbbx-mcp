@@ -5,6 +5,51 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.16.49] - 2026-08-17
+
+### Added — a mutation guard, and fixtures treated as published data
+ADR 119. Two questions the suite could not answer about itself.
+
+Does it pin anything? A green run proves the tests execute, not that they hold
+behaviour down. Three defects in a single day were all of that shape: a
+threshold that let the real case through, a ported rule that scored a fully dead
+protocol as perfect, and a name that silently shadowed a dict.
+
+Off-the-shelf mutation testing re-runs the whole suite per mutant — hours for a
+thousand tests, which cannot share a CI job. So the question is narrowed rather
+than the rigour: mutate only the pure functions where the decisions live, and
+check each mutant against oracles stated in the guard itself. No subprocess, no
+suite re-run, ~0.7s for 51 mutants across three modules. Operators are semantic
+— comparison flips, and/or swaps, constant doubling, boolean negation — and a
+mutant that passes every oracle is reported with its exact function, line and
+mutation. Site counts are pinned per target rather than floored: a drop means a
+branch was deleted and the guard silently got easier, a rise means new decisions
+arrived with no oracle.
+
+It found a gap on its first run, in its own oracles: two mutants of the score
+clamp survived, and killing them required a PARTIAL uptime case, because with
+full-uptime protocols a doubled scale saturates back to 100 and every other
+assertion still holds.
+
+Is the fixture data synthetic? Fixture data must be synthetic, and the
+existing fleet-data guard covered only the docs — tests/ was never in scope.
+Now two layers. Structural and always on: fixture addresses must come from the
+private, special-purpose or RFC 5737 documentation ranges, because "is this IP
+real?" invites an argument and "is it from a documentation range?" does not. The
+four conventional dummies present were migrated to 192.0.2.x / 198.51.100.x, and
+the fleet-magnitude patterns now cover tests/ as well.
+
+Deployment-specific and configured outside the repo: real hostnames, product
+names and protocol names cannot be listed in a public guard because the list
+cannot be enumerated here. They live in ZBBX_SENSITIVE_STRINGS (file path or
+inline list) and are enforced whenever it is set; unset, the test skips LOUDLY
+rather than passing silently, since a guard that quietly does nothing reads
+green. When it fires it names the offending files but never the term — this
+output can land in a public CI log.
+
+Both guards exempt their own files, which must carry deliberately invalid
+samples to prove they are not vacuous. 1024 -> 1035 tests, 1 skipped by design.
+
 ## [1.16.48] - 2026-08-17
 
 ### Added — peer-relative detection for a host capped from birth

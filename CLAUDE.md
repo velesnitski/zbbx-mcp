@@ -104,6 +104,7 @@ uv run pytest -k "test_name"               # single test by name
 | `ZABBIX_COMPACT` / `ZABBIX_COMPACT_TOOLS` | Token optimization |
 | `ZABBIX_RESPONSE_BUDGET` | Max chars per response (default: 6000) |
 | `ZABBIX_READ_ONLY` | Disable write operations |
+| `ZBBX_SENSITIVE_STRINGS` | Optional deny-list (file path or inline `a,b,c`) of deployment-specific terms that must never appear in fixtures. Enforced by the fixture guard when set; skipped loudly when unset. Never commit the list — ADR 119 |
 
 ## Adding a new tool
 

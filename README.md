@@ -180,6 +180,7 @@ specific tools you don't want.
 | `ZABBIX_URL` | Yes | Zabbix server URL (e.g., `https://zabbix.example.com`) |
 | `ZABBIX_TOKEN` | Yes | Zabbix API token |
 | `ZABBIX_READ_ONLY` | No | Set to `true` to disable write operations |
+| `ZBBX_SENSITIVE_STRINGS` | No | Deny-list (file path or inline `a,b,c`) of deployment-specific terms that must not appear in test fixtures. Enforced by the fixture guard when set, skipped loudly when unset. Keep the list outside this repo (ADR 119) |
 | `DISABLED_TOOLS` | No | Comma-separated tool names to disable |
 | `ZABBIX_TIER` | No | Preset bundle: `core` / `ops` / `finance` / `reports` / `full` (default: `full`). See "Choosing a tier" below |
 | `ZABBIX_ALLOW_HTTP` | No | Set to `1` to allow non-HTTPS connections |
