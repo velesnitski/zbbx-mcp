@@ -156,3 +156,74 @@ def retention_too_short(min_clock_seen, now, requested_seconds):
         return False
     covered = max(0, now - int(min_clock_seen))
     return covered < 2 * requested_seconds
+
+
+# A host measured over fewer hours than this cannot be read as a
+# window-length availability figure. Matches the reporting side's floor so
+# the two agree about what "too little coverage" means.
+LOW_COVERAGE_HOURS = 48
+
+
+def low_coverage_hosts(rows, *, floor: int = LOW_COVERAGE_HOURS) -> list[str]:
+    """Names of hosts whose measured window is shorter than ``floor``. Pure.
+
+    Trends belong to the ITEM, so recreating a host's check items restarts its
+    measured history. Such a host's percentage is honest about the hours it
+    has and about nothing else — 100% over 19h is not a month of perfection,
+    and it must not read as one (ADR 117).
+
+    ``rows`` is the rendered row list; each needs ``host`` and ``hours``.
+    """
+    out = []
+    for r in rows:
+        try:
+            hours = int(r.get("hours") or 0)
+        except (TypeError, ValueError):
+            continue
+        if 0 < hours < floor:
+            out.append(str(r.get("host", "?")))
+    return sorted(out)
+
+
+def protocol_score(per_proto: dict) -> tuple[float | None, int]:
+    """``(mean uptime over DEPLOYED protocols, deployed count)``. Pure.
+
+    The availability rule is "up if any protocol answers", which pins almost
+    every host at exactly 100% and so cannot rank hosts or show a protocol
+    dying. This scores the mean across the protocols a host actually runs, so
+    one dead protocol out of three costs it about a third.
+
+    **Deployed means the protocol produced measured hours** (``total > 0``) —
+    i.e. the host has that check and it recorded data. A protocol the host
+    does not run at all has no item, no trends, ``total == 0``, and is
+    excluded, so no host is punished for a protocol it was never meant to run.
+
+    This deliberately DIVERGES from the sibling implementation, which defines
+    deployed as "answered at least once in the window". That rule excludes a
+    protocol that is measured and fully dead — exactly the case this score
+    exists to surface. Under it, a host with three protocols and one dead all
+    window scores 100%, because the dead one is dropped from the mean instead
+    of counted as zero. Caught by the first synthetic case tried; pinned by
+    test below (ADR 117).
+
+    A freshly provisioned check that has not come up yet does score zero here.
+    That is the honest reading — it is a check on a live host returning
+    nothing — and such a host has a short window anyway, which the
+    low-coverage disclosure names separately.
+
+    ``per_proto`` maps a protocol name to ``{"up": hours, "total": hours}``.
+    Returns ``(None, 0)`` when nothing is measured — no verdict, not a zero.
+    """
+    pcts = []
+    for d in (per_proto or {}).values():
+        try:
+            total = int(d.get("total") or 0)
+            up = int(d.get("up") or 0)
+        except (TypeError, ValueError):
+            continue
+        if total <= 0:
+            continue          # no item / no data → not provisioned here
+        pcts.append(max(0.0, min(100.0, up / total * 100.0)))
+    if not pcts:
+        return None, 0
+    return sum(pcts) / len(pcts), len(pcts)

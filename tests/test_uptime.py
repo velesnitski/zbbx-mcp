@@ -189,3 +189,79 @@ class TestTrafficHoursFromTrends:
         rows = [(NOW, "0"), (NOW, "9000000"),          # idle + busy NIC same hour
                 ("bad", "1"), (NOW - 1 * HOUR, None)]  # junk skipped
         assert traffic_hours_from_trends(rows, 1_000_000) == {NOW // HOUR}
+
+
+class TestLowCoverage:
+    """ADR 117 — a percentage measured over hours is not a period figure."""
+
+    def test_short_window_host_is_named(self):
+        from zbbx_mcp.uptime import low_coverage_hosts
+        rows = [{"host": "node-a", "hours": 19}, {"host": "node-b", "hours": 400}]
+        assert low_coverage_hosts(rows) == ["node-a"]
+
+    def test_zero_hours_is_not_low_coverage_but_unmeasured(self):
+        # 0 hours means nothing was measured at all, which is a different
+        # state — the row already renders no percentage for it.
+        from zbbx_mcp.uptime import low_coverage_hosts
+        assert low_coverage_hosts([{"host": "node-a", "hours": 0}]) == []
+
+    def test_boundary_is_inclusive_of_the_floor(self):
+        from zbbx_mcp.uptime import LOW_COVERAGE_HOURS, low_coverage_hosts
+        rows = [{"host": "at-floor", "hours": LOW_COVERAGE_HOURS},
+                {"host": "under", "hours": LOW_COVERAGE_HOURS - 1}]
+        assert low_coverage_hosts(rows) == ["under"]
+
+    def test_unparseable_hours_are_skipped_not_guessed(self):
+        from zbbx_mcp.uptime import low_coverage_hosts
+        assert low_coverage_hosts([{"host": "x", "hours": "?"}]) == []
+
+
+class TestProtocolScore:
+    """ADR 117 — the shadow score that can see a dead protocol.
+
+    `up-if-any` pins nearly every host at exactly 100%, so it can neither rank
+    hosts nor show a protocol dying behind healthy siblings.
+    """
+
+    def test_all_protocols_healthy_is_100(self):
+        from zbbx_mcp.uptime import protocol_score
+        score, n = protocol_score({"a": {"up": 100, "total": 100},
+                                   "b": {"up": 100, "total": 100}})
+        assert score == 100.0 and n == 2
+
+    def test_one_dead_protocol_of_three_costs_a_third(self):
+        # THE case. The sibling rule — deployed means "answered at least once"
+        # — drops the dead protocol from the mean and returns 100%, which is
+        # exactly what this score exists to prevent. Caught by the first
+        # synthetic case tried.
+        from zbbx_mcp.uptime import protocol_score
+        score, n = protocol_score({"a": {"up": 100, "total": 100},
+                                   "b": {"up": 0, "total": 100},
+                                   "c": {"up": 100, "total": 100}})
+        assert n == 3
+        assert 66.0 < score < 67.0
+
+    def test_a_protocol_the_host_does_not_run_is_not_counted(self):
+        # No item, no trends, total == 0 — excluded, so a host is never
+        # punished for a protocol it was never meant to run.
+        from zbbx_mcp.uptime import protocol_score
+        score, n = protocol_score({"a": {"up": 100, "total": 100},
+                                   "b": {"up": 0, "total": 0}})
+        assert score == 100.0 and n == 1
+
+    def test_nothing_measured_is_no_verdict_not_zero(self):
+        from zbbx_mcp.uptime import protocol_score
+        assert protocol_score({}) == (None, 0)
+        assert protocol_score({"a": {"up": 0, "total": 0}}) == (None, 0)
+
+    def test_partial_uptime_averages(self):
+        from zbbx_mcp.uptime import protocol_score
+        score, n = protocol_score({"a": {"up": 50, "total": 100},
+                                   "b": {"up": 100, "total": 100}})
+        assert score == 75.0 and n == 2
+
+    def test_score_is_clamped_to_a_sane_range(self):
+        # Defensive: a bad up/total pair must not produce 300%.
+        from zbbx_mcp.uptime import protocol_score
+        score, _ = protocol_score({"a": {"up": 300, "total": 100}})
+        assert score == 100.0

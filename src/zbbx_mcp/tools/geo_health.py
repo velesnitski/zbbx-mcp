@@ -30,7 +30,13 @@ from zbbx_mcp.data import (
 )
 from zbbx_mcp.fetch import TRAFFIC_DIVISOR, is_physical_traffic_in_key, physical_traffic_items
 from zbbx_mcp.resolver import InstanceResolver
-from zbbx_mcp.uptime import compute_host_uptime, coverage_note, traffic_hours_from_trends
+from zbbx_mcp.uptime import (
+    compute_host_uptime,
+    coverage_note,
+    low_coverage_hosts,
+    protocol_score,
+    traffic_hours_from_trends,
+)
 
 
 async def _noop_list() -> list:
@@ -230,10 +236,16 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     elif service1_pct is not None and service1_pct < 90:
                         overall = "DEGRADED"
 
+                    # Shadow per-protocol score (ADR 117): the mean across
+                    # the protocols this host actually runs. Reported
+                    # alongside — it changes no verdict until the series
+                    # proves out.
+                    pscore, pdeployed = protocol_score(hu)
                     rows.append({
                         "host": hostname, "country": ctry,
                         "service1": service1_pct, "service2": service2_pct,
                         "overall": overall, "hours": service1_data["total"],
+                        "pscore": pscore, "pdeployed": pdeployed,
                     })
 
                 # `or 100` treated a real 0.0% as "no data": a fully-dead host
@@ -292,6 +304,36 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                         down = sum(1 for r in cs if r["overall"] == "DOWN")
                         parts.append(f"| {ctry} | {len(cs)} | {avg_x} | {down} |")
 
+                # Per-host coverage. coverage_note() above is computed from
+                # the EARLIEST sample anywhere in the scope, so one long-lived
+                # host makes it report the most optimistic possible coverage
+                # for everyone — the same fleet-extremum mistake ADR 113 found
+                # in the health matrix. This names the hosts whose own window
+                # is too short for their percentage to mean what the period
+                # label says (ADR 117).
+                low_cov = low_coverage_hosts(rows)
+                if low_cov:
+                    parts.append(
+                        f"\n⚠ {len(low_cov)} host(s) measured over <48h — their "
+                        f"% is not a {period} figure: "
+                        f"{', '.join(low_cov[:5])}"
+                        f"{'…' if len(low_cov) > 5 else ''}. Trends belong to "
+                        "the item, so recreating a host's checks restarts its "
+                        "history."
+                    )
+                # Shadow score summary: how far the per-protocol view diverges
+                # from the up-if-any view, without changing any verdict.
+                scored = [r for r in rows if r.get("pscore") is not None]
+                if scored:
+                    worst = min(scored, key=lambda r: r["pscore"])
+                    pinned = sum(1 for r in scored if r["pscore"] >= 99.95)
+                    parts.append(
+                        f"\n_Shadow per-protocol score (ADR 117, no verdict "
+                        f"changed): {pinned}/{len(scored)} hosts at 100% across "
+                        f"every protocol they run; worst {worst['host']} at "
+                        f"{worst['pscore']:.1f}% over {worst['pdeployed']} "
+                        "protocol(s). `up-if-any` cannot show this._"
+                    )
                 parts.append(coverage_note(min_clock, _now, now - time_from))
                 return "\n".join(p for p in parts if p) + excluded_test_note(excluded)
             except (httpx.HTTPError, ValueError) as e:

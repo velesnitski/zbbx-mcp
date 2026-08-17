@@ -5,6 +5,45 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.16.47] - 2026-08-17
+
+### Fixed/Added — uptime coverage disclosure and a shadow per-protocol score
+ADR 117, closing tasks 178(a) and 185, and recording a decision on 178(b).
+
+Coverage was disclosed from the wrong extremum. coverage_note() computes it from
+the earliest sample ANYWHERE in scope, so one long-lived host makes the note
+report the most optimistic possible coverage for everyone, and a host whose own
+window is a day says nothing. Same fleet-extremum mistake ADR 113 found in the
+health matrix — there max(window), here min(clock), both picking the single most
+flattering host. Hosts under 48h are now named, with the reason: trends belong to
+the item, so recreating a host's checks restarts its history.
+
+The shadow per-protocol score is added alongside the existing figures, changing
+no verdict, sort order or threshold. "Up if any protocol answers" pins nearly
+every host at exactly 100%, so it can neither rank hosts nor show a protocol
+dying behind healthy siblings.
+
+Its specification said deployed = "answered at least once in the window". That
+rule is wrong for this purpose and the first synthetic case tried exposed it: a
+host with three protocols and one dead for the ENTIRE window scores 100%,
+because the dead protocol is dropped from the mean instead of counted as zero —
+the exact case the score exists to surface. Deployed now means the protocol
+produced measured hours (total > 0); a protocol the host does not run has no
+item and no trends and is excluded, so nobody is punished for a protocol they
+were never meant to run, while a measured protocol that never answered scores
+zero.
+
+Carry-forward (178(b)) is deliberately NOT ported. On the reporting side it
+exists to stop a rebuilt host inflating a traffic-weighted fleet mean by about
+half the error budget. This tool has no such number — per-host rows, and a
+per-country MEDIAN, which is exactly the statistic a single short-window outlier
+cannot move. Implementing it would substitute an unmeasured value into a number
+that does not need protecting and take a cross-repo dependency on the sibling
+pipeline's snapshot to do it. Closed by decision rather than left to be
+re-raised; if this tool ever grows a weighted aggregate the argument changes.
+
+1007 -> 1017 tests.
+
 ## [1.16.46] - 2026-08-17
 
 ### Fixed — diagnose_host now judges traffic against the same shape as the acute detector
