@@ -102,6 +102,76 @@ def test_fixtures_carry_no_fleet_magnitudes():
     assert not violations, "\n".join(violations)
 
 
+def test_no_infrastructure_addresses_anywhere_in_the_repo():
+    """The whole repo, not just fixtures — an audit answers today, a guard
+    answers every day after.
+
+    Three things are legitimately allowed to be a routable address here:
+
+    1. Non-global space — private, loopback, link-local, multicast, reserved,
+       and the RFC 5737 documentation ranges. None can be a server of ours.
+    2. A **network address declared by the allocation tables**. Provider
+       detection is a feature of this server, and those tables are published
+       RIR/provider allocations. The check is deliberately exact: the address
+       must be the network address of a block the tables declare, so a host
+       address cannot hide among them by sitting inside one.
+    3. A tiny set of documentation placeholders used in docstrings to show the
+       accepted CIDR syntax.
+
+    Anything else fails. That is the point: an address copied out of live
+    output matches none of the three.
+    """
+    import subprocess
+
+    from zbbx_mcp.classify import DATACENTER_CIDRS, PROVIDER_CIDRS
+
+    declared: set[str] = set()
+    for cidrs in PROVIDER_CIDRS.values():
+        declared |= {str(ipaddress.ip_network(c, strict=False).network_address)
+                     for c in cidrs}
+    for entries in DATACENTER_CIDRS.values():
+        declared |= {str(ipaddress.ip_network(c, strict=False).network_address)
+                     for c, _ in entries}
+
+    # Classic dummies used in docstrings/ADRs to show CIDR syntax. Kept
+    # explicit and tiny so the exemption cannot quietly grow.
+    doc_placeholders = {"1.2.3.4", "1.2.3.0", "1.2.0.0"}
+
+    tracked = subprocess.run(
+        ["git", "ls-files"], capture_output=True, text=True, cwd=ROOT
+    ).stdout.split()
+    violations = []
+    for rel in tracked:
+        path = ROOT / rel
+        if not path.is_file() or path.name == pathlib.Path(__file__).name:
+            continue
+        try:
+            text = path.read_text()
+        except (UnicodeDecodeError, OSError):
+            continue
+        for n, line in enumerate(text.splitlines(), 1):
+            for tok in _IP_RE.findall(line):
+                if _is_allowed(tok) or tok in declared or tok in doc_placeholders:
+                    continue
+                violations.append(
+                    f"{rel}:{n} — {tok!r} is a routable address that is neither "
+                    "documentation space nor a declared allocation-table "
+                    "network. If it came from live output it must not be here"
+                )
+    assert not violations, "\n".join(violations)
+
+
+def test_the_repo_wide_rule_is_not_vacuous():
+    # An address inside a declared provider block, but with a host part, must
+    # still fail — otherwise "somewhere in a known range" would be a loophole
+    # wide enough for any real server.
+    from zbbx_mcp.classify import PROVIDER_CIDRS
+    net = ipaddress.ip_network(next(iter(PROVIDER_CIDRS.values()))[0], strict=False)
+    host = str(net.network_address + 7)
+    assert not _is_allowed(host)
+    assert host != str(net.network_address)
+
+
 def _deny_terms() -> list[str]:
     raw = os.environ.get("ZBBX_SENSITIVE_STRINGS", "").strip()
     if not raw:

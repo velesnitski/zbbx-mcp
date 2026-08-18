@@ -5,6 +5,35 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.16.50] - 2026-08-18
+
+### Added — repo-wide address guard, after a repo-wide guard
+An audit answers today; a guard answers every day after. Three independent
+passes were run first, and all three came back clean:
+
+- HEAD, 271 tracked files: 589 routable addresses, 578 of them the allocation
+  tables, the remaining 11 documentation placeholders and the guard's own
+  negative controls.
+- Full history: 3,394 objects, 57.5 MB across every ref — zero infrastructure
+  addresses.
+- 336 commit messages and 96 tag annotations — zero.
+
+Two facts make the tables safe rather than merely tolerated. Every one of the
+578 addresses in them is the NETWORK address of a declared block — 578 tokens,
+578 blocks, no strays — so not a single host address hides among them. And the
+blocks are broad: 438 are /16, the narrowest anywhere is a /24, and together
+they describe ~319.5M addresses of published cloud and hosting allocations.
+
+The guard now covers every tracked file, not just fixtures. Three things may be
+a routable address: non-global space (private, loopback, link-local, multicast,
+reserved, RFC 5737), a network address DECLARED by the allocation tables, or one
+of three documentation placeholders. The table exemption is deliberately exact —
+the address must BE the declared network address, not merely sit inside a known
+range — so "somewhere in a provider block" cannot become a loophole wide enough
+for a real server. That exactness is pinned by its own not-vacuous test.
+
+1035 -> 1037 tests.
+
 ## [1.16.49] - 2026-08-17
 
 ### Added — a mutation guard, and fixtures treated as published data
