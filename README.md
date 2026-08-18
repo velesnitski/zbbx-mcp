@@ -180,6 +180,7 @@ specific tools you don't want.
 | `ZABBIX_URL` | Yes | Zabbix server URL (e.g., `https://zabbix.example.com`) |
 | `ZABBIX_TOKEN` | Yes | Zabbix API token |
 | `ZABBIX_READ_ONLY` | No | Set to `true` to disable write operations |
+| `ZABBIX_DATACENTER_CIDRS` | No | Datacenter ranges as `{"Provider": [["198.51.100.0/24", "City, CC"], …]}`, inline JSON or a path to a JSON file. Searched before the built-in table, most-specific-first; unusable input disables the override rather than half-applying. Unset = built-in table only (ADR 122) |
 | `ZBBX_SENSITIVE_STRINGS` | No | Deny-list (file path or inline `a,b,c`) of identifiers that must not appear in test fixtures. Enforced by the fixture guard when set, skipped loudly when unset (ADR 119) |
 | `DISABLED_TOOLS` | No | Comma-separated tool names to disable |
 | `ZABBIX_TIER` | No | Preset bundle: `core` / `ops` / `finance` / `reports` / `full` (default: `full`). See "Choosing a tier" below |

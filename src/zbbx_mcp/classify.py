@@ -354,13 +354,54 @@ _DC_NETS: list[tuple[str, str, _IpNet]] = sorted(
 )
 
 
+_EXTRA_DC_NETS: list[tuple[str, str, _IpNet]] | None = None
+
+
+def get_extra_dc_nets() -> list[tuple[str, str, _IpNet]]:
+    """Datacenter ranges from ``ZABBIX_DATACENTER_CIDRS``, searched first.
+
+    Accepts ``{"Provider": [["a.b.c.d/n", "City, CC"], ...]}`` as inline JSON
+    or a path to a JSON file, and is consulted ahead of the built-in table,
+    most-specific-first.
+
+    Unusable input disables the override rather than half-applying it: a
+    partial merge resolves some addresses against configured data and others
+    against the built-in table, with nothing in the output saying which
+    (ADR 120).
+    """
+    global _EXTRA_DC_NETS
+    if _EXTRA_DC_NETS is not None:
+        return _EXTRA_DC_NETS
+    raw = os.environ.get("ZABBIX_DATACENTER_CIDRS", "").strip()
+    nets: list[tuple[str, str, _IpNet]] = []
+    if raw:
+        try:
+            if os.path.isfile(raw):
+                with open(raw) as fh:
+                    data = json.load(fh)
+            else:
+                data = json.loads(raw)
+            for prov, entries in dict(data).items():
+                for cidr, city in entries:
+                    nets.append((str(prov), str(city),
+                                 ipaddress.ip_network(str(cidr), strict=False)))
+        except (json.JSONDecodeError, OSError, TypeError, ValueError, AttributeError):
+            nets = []
+    nets.sort(key=lambda x: -x[2].prefixlen)
+    _EXTRA_DC_NETS = nets
+    return nets
+
+
 def resolve_datacenter(ip_str: str) -> tuple[str, str]:
     """Resolve IP to (provider, datacenter_city). Returns ("Unknown", "") on failure."""
     try:
         addr = ipaddress.ip_address(ip_str)
     except ValueError:
         return "Unknown", ""
-    # Try specific datacenter mapping first
+    # Configured ranges first, then the built-in table
+    for provider, city, network in get_extra_dc_nets():
+        if addr in network:
+            return provider, city
     for provider, city, network in _DC_NETS:
         if addr in network:
             return provider, city

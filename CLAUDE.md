@@ -105,6 +105,7 @@ uv run pytest -k "test_name"               # single test by name
 | `ZABBIX_RESPONSE_BUDGET` | Max chars per response (default: 6000) |
 | `ZABBIX_READ_ONLY` | Disable write operations |
 | `ZABBIX_PROVIDER_CIDRS` | Provider → CIDR map (inline JSON or a file path) searched before the generated table, most-specific-first. **This is where accurate detection comes from** — the built-in table resolves little of any specific deployment. Draft one with `scripts/bootstrap_provider_overrides.py`. Unset = generated table only, ADR 120 |
+| `ZABBIX_DATACENTER_CIDRS` | Datacenter ranges as `{"Provider": [["cidr", "City, CC"], …]}` (inline JSON or a file path), searched before the built-in table, most-specific-first. Unset = built-in only, ADR 122 |
 | `ZBBX_SENSITIVE_STRINGS` | Optional deny-list (file path or inline `a,b,c`) of identifiers that must not appear in fixtures. Enforced by the fixture guard when set; skipped loudly when unset — ADR 119 |
 
 ## Adding a new tool
