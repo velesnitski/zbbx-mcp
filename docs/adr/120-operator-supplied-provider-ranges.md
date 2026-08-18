@@ -15,8 +15,8 @@ them.
 **It cannot be complete.** There is no registry of every hosting provider, and
 allocations move between them. Any hand-built list is a snapshot of whatever
 its authors happened to know, and it starts going stale the day it ships. The
-table covered a small share of routed IPv4 space, so most addresses resolved to
-`Other`.
+table covered a small share of routed IPv4 space, so most addresses resolved
+to `Other`.
 
 **A wrong entry does not fail loudly.** An address in a mistaken range is not
 reported as unknown — it is attributed to the wrong provider, confidently, in
@@ -51,10 +51,10 @@ address to an AS that does not announce it. Truncating to the largest blocks
 costs coverage but likewise cannot introduce a wrong answer. Every failure mode
 of the generator is "resolves to `Other`", never "resolves to the wrong name".
 
-Result: **a substantially broader table**, a larger share of routed IPv4 space, up from
-a smaller table. All previous providers and ranges are retained;
-probe addresses drawn from the old table resolve identically and
-the 4 that changed are the corrections above.
+Result: a substantially broader table, and a substantially larger share of
+routed IPv4 space that resolves to a name. Every provider and every range the
+previous table carried is retained; probe addresses drawn from it resolve
+identically apart from the corrections above.
 
 Display names are pinned (`KEEP_NAMES`) so reports keep saying `Vultr` and
 `Linode` rather than following whatever string the routing dataset carries this
@@ -78,11 +78,11 @@ packaging defect.
 
 ## Consequences
 
-- Coverage grows substantially, and correctness is now a property of a
-  public dataset rather than of a maintainer's recollection.
+- Coverage grows substantially, and correctness becomes a property of a public
+  dataset rather than of a maintainer's recollection.
 - The table is refreshed by re-running a script, not by editing source.
-- `classify.py` gets shorter; the data lives in the package as
-  JSON and ships in the wheel.
+- `classify.py` gets shorter; the data lives in the package as JSON and ships
+  in the wheel.
 - `DATACENTER_CIDRS` is still hand-maintained and still inline. It has the same
   shape and the same exposure to the same defect; worth the same treatment, but
   it is smaller and not urgent.

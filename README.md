@@ -185,7 +185,7 @@ specific tools you don't want.
 | `ZABBIX_TIER` | No | Preset bundle: `core` / `ops` / `finance` / `reports` / `full` (default: `full`). See "Choosing a tier" below |
 | `ZABBIX_ALLOW_HTTP` | No | Set to `1` to allow non-HTTPS connections |
 | `ZABBIX_PRODUCT_MAP` | No | JSON file path or inline JSON mapping host groups to products |
-| `ZABBIX_PROVIDER_CIDRS` | No | Provider → CIDR map for `detect_provider`, as inline JSON (`{"Provider": ["198.51.100.0/24"]}`) or a path to a JSON file. Searched before the generated table (a substantially broader table, see `scripts/gen_provider_cidrs.py`), most-specific-first; unusable input disables the override rather than half-applying. Unset = generated table only (ADR 120) |
+| `ZABBIX_PROVIDER_CIDRS` | No | Provider → CIDR map for `detect_provider`, as inline JSON (`{"Provider": ["198.51.100.0/24"]}`) or a path to a JSON file. Searched before the generated table (see `scripts/gen_provider_cidrs.py`), most-specific-first; unusable input disables the override rather than half-applying. Unset = generated table only (ADR 120) |
 | `ZABBIX_TEMPLATE_PRODUCT_MAP` | No | Template → product-group allow-list (`{"tpl":"group"}` or `tpl:group,…`). Rescues a host whose only group is mixed and classifies non-serving; groups always win when they answer. Unset = disabled (ADR 115) |
 | `SLACK_WEBHOOK_URL` | No | Slack webhook URL for `send_slack_message` / `send_slack_report` |
 | `SENTRY_DSN` | No | Sentry DSN for error tracking — just set the env var, SDK is included |

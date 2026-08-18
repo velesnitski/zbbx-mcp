@@ -28,10 +28,10 @@ Aggregation preserves the exact address set and truncation only drops coverage,
 so every failure mode is "resolves to Other" rather than "resolves to the wrong
 name".
 
-a substantially broader table, a larger share of routed IPv4 space, than before
- All previous providers and ranges are
-retained; probes drawn from the old table resolve identically, and
-the 4 that changed are the corrections above. Display names are pinned so
+The table is substantially broader, and a substantially larger share of routed
+IPv4 space now resolves to a name. Every provider and every range the previous
+table carried is retained; probes drawn from it resolve identically apart from
+the corrections above. Display names are pinned so
 reports keep saying Vultr and Linode, and regeneration unions with the file on
 disk so a narrower cutoff cannot silently drop an operator.
 
