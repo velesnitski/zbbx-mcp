@@ -26,11 +26,36 @@ Add `ZABBIX_DATACENTER_CIDRS`, mirroring ADR 120's mechanism exactly:
 - Unparseable input disables the override rather than half-applying it. A
   partial merge resolves some addresses against configured data and others
   against the built-in table, with nothing in the output saying which.
-- Unset, behaviour is unchanged.
+- Unset, no city is reported — see below.
 
-The built-in table stays as the default. Nothing about it is asserted to be
-wrong here; the change is that a deployment can now correct or extend it
-without waiting for a release.
+The built-in table is **emptied**. A city mapping is deployment-specific, and
+a table compiled into the package is both incomplete for any given deployment
+and impossible to correct without a release. Unconfigured, `resolve_datacenter`
+reports the provider and no city — an honest partial answer rather than a
+guessed one.
+
+`scripts/bootstrap_datacenter_ranges.py` drafts the file from a deployment's
+own inventory. Many providers encode the facility in reverse DNS, so it groups
+addresses into `/24` blocks, looks up one PTR per block, and proposes a city
+when the name carries a known code. Unmatched blocks are marked `UNKNOWN` for a
+human to fill in, and the script writes a draft rather than the live file
+because a wrong city is reported as confidently as a right one.
+
+## Low coverage is disclosed
+
+Emptying the table creates a quieter problem: with nothing configured every
+city is blank, and a blank column reads as "location unknown" rather than "not
+set up". The same already applied to providers — a large `Other` count looks
+like a finding when it is usually missing configuration, and a table of counts
+cannot distinguish the two.
+
+So both say which it is. `provider_coverage_note` fires when under 80% of
+addresses resolved, and names either the setup script or, when an override is
+already configured, the tool that proposes additions.
+`datacenter_coverage_note` fires when no mapping exists at all.
+
+This is the rule the rest of the codebase follows for absent values: an
+unmeasured quantity must never render as though it were measured.
 
 ## Consequences
 
@@ -39,9 +64,11 @@ without waiting for a release.
   detection, then `("Other", "")`.
 - The city half of the answer becomes configurable independently of the
   provider half, which already was.
-- `DATACENTER_CIDRS` remains hand-maintained. Generating it would need a
-  geolocation dataset rather than routing data, which brings a licensing
-  question for a package that ships its data; not attempted here.
+- An unconfigured install loses datacenter cities entirely. That is the
+  intended trade: the shipped table could only ever be right for whoever wrote
+  it, and the bootstrap script rebuilds a deployment-specific one in a step.
+- Reverse DNS is a hint, not a source of truth. The script's code table is a
+  starting point and its output needs review before use.
 
 ## Verification
 

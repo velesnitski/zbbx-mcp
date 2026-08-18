@@ -10,6 +10,7 @@ from zbbx_mcp.classify import (
 )
 from zbbx_mcp.classify import (
     detect_provider,
+    provider_coverage_note,
 )
 from zbbx_mcp.data import (
     TRAFFIC_IN_KEYS,
@@ -498,6 +499,10 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()):
                     parts.append(f"| {key} | {' | '.join(row)} |")
 
                 total = sum(provider_totals.values())
+                unresolved = provider_totals.get("Other", 0) + provider_totals.get("Unknown", 0)
+                note = provider_coverage_note(total - unresolved, total)
+                if note:
+                    parts.append("\n" + note)
                 return f"**Provider Summary: {total} servers**\n\n" + "\n".join(parts)
             except (httpx.HTTPError, ValueError) as e:
                 return f"Error: {e}"

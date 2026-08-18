@@ -335,12 +335,9 @@ def detect_provider(ip_str: str) -> str:
     return "Other"
 
 
-# Maps specific CIDR ranges to datacenter cities. More specific ranges
-# override broader provider ranges. Built from provider allocation docs.
-
 # Datacenter city ranges. Empty by default: this mapping is deployment
 # specific, so it is supplied through ZABBIX_DATACENTER_CIDRS rather than
-# compiled in (ADR 122).
+# compiled in (ADR 122). Draft one with scripts/bootstrap_datacenter_ranges.py.
 DATACENTER_CIDRS: dict[str, list[tuple[str, str]]] = {}
 
 # Pre-compile datacenter networks (most specific first)
@@ -352,6 +349,39 @@ _DC_NETS: list[tuple[str, str, _IpNet]] = sorted(
     ],
     key=lambda x: -x[2].prefixlen,
 )
+
+
+def provider_coverage_note(resolved: int, total: int) -> str:
+    """One line when provider coverage is poor, empty when it is not.
+
+    A large `Other` count looks like a finding. Usually it is missing
+    configuration, and the two are indistinguishable in a table of counts —
+    so say which it is, and name the thing that fixes it.
+    """
+    if total <= 0 or resolved / total >= 0.8:
+        return ""
+    missing = total - resolved
+    if get_extra_provider_nets():
+        return (f"_{missing} of {total} addresses matched no known range. "
+                "Extend `ZABBIX_PROVIDER_CIDRS` to cover them — "
+                "`identify_providers` proposes entries from reverse DNS._")
+    return (f"_{missing} of {total} addresses matched no known range. The "
+            "built-in table is a generic default; set `ZABBIX_PROVIDER_CIDRS` "
+            "for accurate detection — `identify_providers` proposes entries, "
+            "or run `scripts/bootstrap_provider_overrides.py`._")
+
+
+def datacenter_coverage_note() -> str:
+    """One line when no datacenter mapping is available, empty otherwise.
+
+    With nothing configured every city is blank, which reads as "unknown
+    location" rather than "not set up".
+    """
+    if get_extra_dc_nets() or DATACENTER_CIDRS:
+        return ""
+    return ("_No datacenter mapping configured, so no city is reported. Set "
+            "`ZABBIX_DATACENTER_CIDRS` — draft one with "
+            "`scripts/bootstrap_datacenter_ranges.py`._")
 
 
 _EXTRA_DC_NETS: list[tuple[str, str, _IpNet]] | None = None

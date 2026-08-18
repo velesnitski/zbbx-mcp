@@ -168,7 +168,7 @@ fixed headings (`## Problem`, `## Decision`, `## Test approach`,
 | [120](120-operator-supplied-provider-ranges.md) | Provider ranges are generated from routing data, not curated | A hand-maintained table cannot be complete and a wrong range does not fail loudly — two entries had been attributing addresses to AWS that belong to MIT and to Google Cloud. Now derived from the public prefix-to-AS dataset by a script anyone can re-run, giving substantially broader coverage. Every generator failure mode is `Other`, never a wrong name. `ZABBIX_PROVIDER_CIDRS` overrides it all. |
 
 
-| [122](122-configured-datacenter-ranges.md) | Datacenter ranges are configurable | `resolve_datacenter` used a fixed table where a mistaken entry names a city confidently rather than surfacing as unknown. `ZABBIX_DATACENTER_CIDRS` mirrors ADR 120: `[["cidr", "City, CC"], ...]` inline or from a file, searched first, most-specific-first, unusable input disabling rather than half-applying. Not generated — routing data answers which AS announces a prefix, a different question from where the address is. |
+| [122](122-configured-datacenter-ranges.md) | Datacenter ranges are configurable | `resolve_datacenter` used a fixed table where a mistaken entry names a city confidently rather than surfacing as unknown. `ZABBIX_DATACENTER_CIDRS` mirrors ADR 120: `[["cidr", "City, CC"], ...]` inline or from a file, searched first, most-specific-first, unusable input disabling rather than half-applying. The built-in table is emptied: a city mapping is deployment-specific and cannot be corrected without a release. `scripts/bootstrap_datacenter_ranges.py` drafts one from reverse DNS, which commonly encodes the facility. |
 
 ## Writing a new ADR
 
