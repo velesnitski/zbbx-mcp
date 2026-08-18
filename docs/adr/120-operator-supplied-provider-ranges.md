@@ -76,10 +76,31 @@ table and logs a warning. The server keeps running and every address answers
 `Other` — honest rather than wrong — instead of taking the process down over a
 packaging defect.
 
+## Measured coverage, and why the override is not optional
+
+The built-in table covers far more of *routed IPv4 space* than the hand-made
+one did. Measured against a **real deployment**, it resolves almost none of it.
+
+The two are consistent. Selecting the largest blocks of the largest autonomous
+systems maximises address space, but a fleet sits on specific blocks that are
+rarely among any AS's biggest, and often on mid-tier providers that never enter
+the ranking at all. Raising the per-AS cut-off does not fix this: multiplying
+the table's size several times over moved coverage by a few percent.
+
+So the built-in table is a *starting point that resolves the obvious*, not a
+substitute for operator data. `scripts/bootstrap_provider_overrides.py` drafts
+the override file from a deployment's own inventory: it reads every host
+address, keeps what the table cannot name, groups those into `/16` blocks and
+emits a placeholder per block. Naming them needs a human — only the operator
+can look up who announces a block — but the discovery is automated.
+
 ## Consequences
 
-- Coverage grows substantially, and correctness becomes a property of a public
-  dataset rather than of a maintainer's recollection.
+- Coverage of routed address space grows substantially, and correctness becomes
+  a property of a public dataset rather than of a maintainer's recollection.
+- **Accurate detection for any specific deployment comes from the override**,
+  not from the shipped table. That is the design, now measured rather than
+  assumed.
 - The table is refreshed by re-running a script, not by editing source.
 - `classify.py` gets shorter; the data lives in the package as JSON and ships
   in the wheel.
