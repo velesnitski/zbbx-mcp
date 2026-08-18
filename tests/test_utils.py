@@ -28,7 +28,7 @@ class TestFormatResults:
 
 class TestExtractCountry:
     def test_nl(self):
-        assert extract_country("srv-nl01") == "NL"
+        assert extract_country("srv-nl0999") == "NL"
 
     def test_de(self):
         assert extract_country("srv-de3") == "DE"

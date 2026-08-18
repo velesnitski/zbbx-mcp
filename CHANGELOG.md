@@ -2316,10 +2316,9 @@ New `anomaly.py` pure helpers (24 unit tests):
     where the geography genuinely overlaps.
   - CAPITAL_COORDS adds capital lat / lon for every country not
     previously listed.
-- **Comment placeholder cleanup.** A comment in
-  `costs_import.py` used a concrete example rather than a generic
-  placeholder; replaced
-  with generic `parent-a a-b`.
+- **Comment placeholder cleanup.** The compound-hostname example in
+  `costs_import.py` was concrete; replaced with the generic
+  `parent-a a-b`, which carries the same example value.
 
 No tool added or removed; tool count and behaviour unchanged. 393
 tests pass; ruff + mypy + sensitive scan all clean.

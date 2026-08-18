@@ -237,7 +237,7 @@ class TestResolveDatacenter:
 
 class TestExtractCountry:
     def test_standard_patterns(self):
-        assert extract_country("srv-nl01") == "NL"
+        assert extract_country("srv-nl0999") == "NL"
         assert extract_country("srv-de3") == "DE"
         assert extract_country("srv-us0999") == "US"
 
