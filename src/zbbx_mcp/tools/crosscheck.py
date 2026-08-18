@@ -80,6 +80,75 @@ _STRICT_FIELDS = (
 )
 
 
+def adapt_reported_facts(raw: dict) -> tuple[dict, list[str]]:
+    """Normalise a published facts file to the field names judged here.
+
+    The reporting side publishes a per-country snapshot keyed by country code
+    with a ``_meta`` block, not the flat field names this tool judges. Without
+    a translation every run reports "nothing comparable" — truthfully, but the
+    check then never compares anything, which is worse than a wrong answer
+    because it looks like a pass.
+
+    Only quantities with provably identical definitions are mapped. The
+    reporting side's server count scopes differently from a host count here,
+    so it is deliberately NOT mapped onto ``total_hosts``; it is returned as a
+    note instead. Pure.
+    """
+    if "_meta" not in raw:
+        return raw, []                       # already flat, or an unknown shape
+    meta = raw.get("_meta") or {}
+    per_country = {k: v for k, v in raw.items()
+                   if k != "_meta" and isinstance(v, dict)}
+    out: dict = {}
+    notes: list[str] = []
+
+    # Same definition on both sides: how many distinct countries resolved.
+    if "total_countries" in meta:
+        out["countries"] = meta["total_countries"]
+    elif per_country:
+        out["countries"] = len(per_country)
+
+    if "total_servers" in meta:
+        notes.append(
+            f"reported total_servers={meta['total_servers']} is not compared: "
+            "it scopes to servers, not to the host population counted here")
+    return out, notes
+
+
+def internal_consistency(raw: dict) -> list[str]:
+    """Contradictions inside the published facts, independent of live data.
+
+    A file that disagrees with itself cannot be reconciled against anything,
+    and the disagreement is visible without querying Zabbix at all — so it is
+    worth saying before any comparison is attempted. Pure.
+    """
+    if "_meta" not in raw:
+        return []
+    meta = raw.get("_meta") or {}
+    per_country = {k: v for k, v in raw.items()
+                   if k != "_meta" and isinstance(v, dict)}
+    out: list[str] = []
+
+    total = meta.get("total_servers")
+    summed = sum(int(v.get("servers", 0) or 0) for v in per_country.values())
+    if isinstance(total, int) and per_country and total != summed:
+        out.append(f"`_meta.total_servers` is {total} but the per-country "
+                   f"blocks sum to {summed} — the file disagrees with itself")
+
+    declared = meta.get("total_countries")
+    if isinstance(declared, int) and per_country and declared != len(per_country):
+        out.append(f"`_meta.total_countries` is {declared} but there are "
+                   f"{len(per_country)} country blocks")
+
+    up = sum(int(v.get("vpn_up", 0) or 0) for v in per_country.values())
+    tot = sum(int(v.get("vpn_total", 0) or 0) for v in per_country.values())
+    if tot and up > tot:
+        out.append(f"availability numerator exceeds its denominator "
+                   f"({up} up of {tot}) — any percentage derived from this "
+                   "file can exceed 100%")
+    return out
+
+
 @dataclass
 class DiffRow:
     """One compared quantity."""
@@ -308,6 +377,12 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 if not isinstance(reported, dict):
                     return "Facts file must contain a JSON object."
 
+                # Contradictions inside the file are visible without any live
+                # data, and a file that disagrees with itself cannot be
+                # reconciled against anything.
+                self_notes = internal_consistency(reported)
+                reported, scope_notes = adapt_reported_facts(reported)
+
                 age_note = ""
                 try:
                     age_h = (_time.time() - os.path.getmtime(resolved)) / 3600
@@ -383,6 +458,13 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                         "\n_Hosts with no derivable country (name it in Zabbix "
                         "inventory or fix the convention) — " + "; ".join(bits) + "._"
                     )
+
+                if self_notes:
+                    parts.append("\n**The published facts disagree with "
+                                 "themselves** (visible without live data):")
+                    parts += [f"- {n}" for n in self_notes]
+                if scope_notes:
+                    parts += ["\n_" + n + "._" for n in scope_notes]
 
                 return "\n".join(parts) + age_note
             except (httpx.HTTPError, ValueError, OSError, json.JSONDecodeError) as e:

@@ -2,6 +2,7 @@ import time as _time
 
 import httpx
 
+from zbbx_mcp.classify import configuration_summary
 from zbbx_mcp.data import (
     canonical_host_name,
     collapse_dependent_problems,
@@ -201,6 +202,11 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                         msg += "\n".join(lines)
                 except (httpx.HTTPError, ValueError):
                     pass  # no token API / no permission — connection is still fine
+
+                # What the optional maps are set to. They are optional, so an
+                # unconfigured server answers normally — just less precisely,
+                # in ways that read as findings rather than gaps (ADR 122).
+                msg += configuration_summary()
 
                 return msg
             except (httpx.HTTPError, ValueError) as e:

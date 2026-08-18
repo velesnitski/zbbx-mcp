@@ -131,3 +131,31 @@ DIVERGENCE). The tool also now surfaces the **live** blank-country sample, so
 Lesson, recorded because it is the whole point of the tool: a consistency check
 is only as good as its ability to stay quiet on benign difference. This one
 learned to.
+
+## Addendum (2026-08-18) — the check had never compared anything
+
+`compare_report_facts` judged the field names `total_hosts`, `countries`,
+`country_host_sum`, `countryless_by_design`, `blank_country_hosts`. The
+reporting side publishes a per-country snapshot with a `_meta` block:
+`total_servers`, `total_countries`, and one entry per country code. The names
+never aligned, so every run returned *"nothing comparable"*.
+
+That output was truthful and the tool behaved as designed. It is still the
+worst possible failure for a safety net: a check that compares nothing reads
+exactly like a check that found nothing wrong.
+
+`adapt_reported_facts` translates the published shape. Only quantities with
+provably identical definitions are mapped — the distinct-country count is,
+and the server count is deliberately **not** mapped onto the host count,
+because they scope to different populations and pairing them would
+manufacture a disagreement from two correct numbers.
+
+`internal_consistency` reports contradictions inside the published file, which
+need no live data at all. Run against the current snapshot it found two: the
+declared total disagrees with the sum of its own per-country blocks, and the
+availability numerator exceeds its denominator — meaning a percentage over
+100% is derivable from the published figures.
+
+The lesson generalises past this tool: **a verifier that returns "nothing to
+check" needs to be as loud as one that fails.** Silence and success must not
+look the same.

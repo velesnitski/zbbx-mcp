@@ -351,6 +351,42 @@ _DC_NETS: list[tuple[str, str, _IpNet]] = sorted(
 )
 
 
+def configuration_summary() -> str:
+    """What the optional maps are set to, and what is lost when they are not.
+
+    The maps are optional, so an unconfigured server starts and answers
+    normally — it just answers less precisely, in ways that look like findings
+    rather than gaps. Reporting them where connection is first checked makes
+    that visible on contact instead of on inspection.
+    """
+    rows: list[tuple[str, str]] = []
+
+    pmap = get_product_map()
+    rows.append(("ZABBIX_PRODUCT_MAP",
+                 f"set — {len(pmap)} group mappings" if pmap else
+                 "not set — group names are used as product names"))
+
+    extra = get_extra_provider_nets()
+    builtin = sum(len(v) for v in PROVIDER_CIDRS.values())
+    rows.append(("ZABBIX_PROVIDER_CIDRS",
+                 f"set — {len(extra)} ranges, ahead of {builtin} built-in" if extra else
+                 f"not set — {builtin} generic built-in ranges only; most "
+                 "addresses will read 'Other'"))
+
+    dc = get_extra_dc_nets()
+    rows.append(("ZABBIX_DATACENTER_CIDRS",
+                 f"set — {len(dc)} ranges" if dc else
+                 "not set — no datacenter city is reported"))
+
+    width = max(len(k) for k, _ in rows)
+    lines = ["\n\nConfiguration"]
+    lines += [f"  {k.ljust(width)}  {v}" for k, v in rows]
+    if not extra or not dc:
+        lines.append("  → build_provider_overrides / build_datacenter_overrides "
+                     "draft these from this Zabbix")
+    return "\n".join(lines)
+
+
 def provider_coverage_note(resolved: int, total: int) -> str:
     """One line when provider coverage is poor, empty when it is not.
 
