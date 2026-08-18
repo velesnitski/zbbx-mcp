@@ -161,31 +161,36 @@ class TestProviderDetection:
         assert detect_provider("") == "Unknown"
 
     def test_prefix_length_wins(self):
-        """More specific CIDR must win over broader one — verified across DB."""
+        """A more specific range must win over a broader one.
+
+        Constructed, not discovered. Whether the shipped table happens to
+        contain an overlapping pair is a property of a generated dataset that
+        changes every time it is regenerated — it is not a property of this
+        rule. Building the overlap explicitly tests the rule itself.
+        """
         import ipaddress
-        # Find any pair where a smaller prefix is contained in a larger one
-        nets = [
-            (prov, ipaddress.ip_network(c, strict=False))
-            for prov, cidrs in PROVIDER_CIDRS.items()
-            for c in cidrs
-        ]
-        found_pair = False
-        for i, (p1, n1) in enumerate(nets):
-            for p2, n2 in nets[i + 1:]:
-                if p1 == p2 or n1.prefixlen == n2.prefixlen:
-                    continue
-                more_specific = n1 if n1.prefixlen > n2.prefixlen else n2
-                broader = n2 if n1.prefixlen > n2.prefixlen else n1
-                specific_prov = p1 if n1.prefixlen > n2.prefixlen else p2
-                if more_specific.subnet_of(broader):
-                    hosts = list(more_specific.hosts()) if more_specific.prefixlen < 31 else [more_specific.network_address]
-                    ip = str(hosts[len(hosts) // 3])
-                    assert detect_provider(ip) == specific_prov
-                    found_pair = True
-                    break
-            if found_pair:
-                break
-        assert found_pair, "Database must contain at least one overlapping pair"
+
+        from zbbx_mcp import classify as classify_mod
+        saved = classify_mod._PROVIDER_NETS
+        try:
+            pair = [("Broad", ipaddress.ip_network("198.51.100.0/24")),
+                    ("Narrow", ipaddress.ip_network("198.51.100.8/29"))]
+            classify_mod._PROVIDER_NETS = sorted(pair, key=lambda x: -x[1].prefixlen)
+            assert detect_provider("198.51.100.9") == "Narrow"
+            assert detect_provider("198.51.100.200") == "Broad"
+        finally:
+            classify_mod._PROVIDER_NETS = saved
+
+    def test_builtin_table_is_ordered_most_specific_first(self):
+        """The ordering IS the mechanism.
+
+        `detect_provider` returns the first match, so if this ordering ever
+        regresses, an address inside two ranges silently resolves to the
+        broader one — a wrong provider name, reported confidently.
+        """
+        from zbbx_mcp.classify import _PROVIDER_NETS
+        lengths = [net.prefixlen for _, net in _PROVIDER_NETS]
+        assert lengths == sorted(lengths, reverse=True)
 
     def test_all_providers_have_cidrs(self):
         for prov, cidrs in PROVIDER_CIDRS.items():

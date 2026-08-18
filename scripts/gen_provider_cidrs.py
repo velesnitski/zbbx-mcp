@@ -52,6 +52,11 @@ OUT = pathlib.Path(__file__).resolve().parent.parent / "src" / "zbbx_mcp" / "dat
 # Display names pinned for reporting. These are the names the tools print, so
 # they are held stable rather than tracking whatever string the routing dataset
 # happens to carry for the same operator this month.
+#
+# Restricted to household-name global cloud, CDN and backbone brands. A pinned
+# name is a hand-made choice, and a hand-made list of NON-obvious providers
+# would say something about whoever made it. Everything else keeps whatever
+# name the routing dataset carries.
 KEEP_NAMES = {
     "AMAZON": "AWS", "AMAZON-02": "AWS", "AMAZON-AES": "AWS",
     "MICROSOFT-CORP-MSN-AS-BLOCK": "Azure",
@@ -66,8 +71,7 @@ KEEP_NAMES = {
     "SCALEWAY": "Scaleway", "LEASEWEB": "Leaseweb", "LEASEWEB-USA": "Leaseweb",
     "AKAMAI-LINODE-AP": "Linode", "LINODE": "Linode",
     "TENCENT-NET-AP": "Tencent Cloud", "ALIBABA-CN-NET": "Alibaba Cloud",
-    "M247": "M247", "PSYCHZ": "Psychz", "MELBIKOMAS": "Melbicom",
-    "RACKSPACE": "Rackspace", "GODADDY": "GoDaddy", "UNIFIEDLAYER-AS-1": "Unified Layer",
+    "RACKSPACE": "Rackspace", "GODADDY": "GoDaddy",
     "SOFTLAYER": "SoftLayer", "IBM": "IBM Cloud",
     "CONTABO": "Contabo", "IONOS-AS": "IONOS", "NETCUP-AS": "netcup",
     "COGENT-174": "Cogent", "GTT-BACKBONE": "GTT", "LEVEL3": "Level3",
@@ -130,6 +134,9 @@ def main() -> int:
     ap.add_argument("--top", type=int, default=400)
     ap.add_argument("--per-as", type=int, default=4)
     ap.add_argument("--src", type=pathlib.Path)
+    ap.add_argument("--union", action="store_true",
+                    help="merge with the existing file instead of replacing it; "
+                         "off by default so the output stays purely mechanical")
     args = ap.parse_args()
 
     src = args.src
@@ -165,10 +172,16 @@ def main() -> int:
             if str(net) not in bucket:
                 bucket.append(str(net))
 
-    # Union with whatever is already on disk. Regenerating must never silently
-    # drop an operator that a previous run or a narrower cutoff had resolved —
-    # losing an entry turns a correct answer into "Other" with no signal.
-    if OUT.exists():
+    # Union with whatever is already on disk — OFF by default.
+    #
+    # Unioning preserves coverage across a narrower cutoff, but it also means
+    # the shipped file is "mechanical selection PLUS whatever was there before",
+    # and the carried-over part is recoverable by diffing against a fresh run.
+    # A hand-assembled subset says something about whoever assembled it, so the
+    # default is a pure mechanical selection: reproducible by anyone, carrying
+    # no choices. Deployment-specific ranges belong in ZABBIX_PROVIDER_CIDRS,
+    # which is never published (ADR 120).
+    if args.union and OUT.exists():
         for name, cidrs in json.loads(OUT.read_text()).items():
             bucket = table.setdefault(name, [])
             for cidr in cidrs:
