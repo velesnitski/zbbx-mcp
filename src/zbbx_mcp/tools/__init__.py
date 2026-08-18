@@ -6,6 +6,7 @@ from zbbx_mcp.tools import (
     analysis,
     audit,
     availability,
+    bootstrap,
     ceo_report,
     check_flaps,
     configuration,
@@ -68,6 +69,8 @@ from zbbx_mcp.tools import (
 # Tools that modify data — blocked in read-only mode
 WRITE_TOOLS = frozenset({
     "acknowledge_problem",
+    "build_datacenter_overrides",
+    "build_provider_overrides",
     "bulk_acknowledge",
     "rank_problem_cause",
     # Host CRUD
@@ -120,6 +123,8 @@ ALL_TOOLS: frozenset[str] = frozenset({
     "analyze_server_roles",
     "audit_external_ips",
     "audit_host_ips",
+    "build_datacenter_overrides",
+    "build_provider_overrides",
     "bulk_acknowledge",
     "bulk_diagnose",
     "check_connection",
@@ -312,6 +317,7 @@ def register_all(
         html_report, geo_traffic, geo_health, executive, predictive, ceo_report, service_brief, analysis,
         web_scenarios, correlation, ip_history, loss_drift, disruption, risk, floods,
         telemetry, diagnose, triage, check_flaps, crosscheck, tokens, dead_protocols,
+        bootstrap,
     ]
     for module in modules:
         module.register(mcp, resolver, skip=skip)

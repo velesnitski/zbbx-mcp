@@ -4,7 +4,7 @@ Instructions for Claude Code when working in this repository.
 
 ## Project
 
-Zabbix MCP server — 169 tools across 40+ modules. Python 3.10+, FastMCP framework, async httpx HTTP/2 client.
+Zabbix MCP server — 171 tools across 40+ modules. Python 3.10+, FastMCP framework, async httpx HTTP/2 client.
 
 ## Commands
 
@@ -84,6 +84,7 @@ uv run pytest -k "test_name"               # single test by name
 | `html_report.py` | 1 | `generate_html_report` (HTML, dark theme) |
 | `dashboard_report.py` | 2 | `export_dashboard`, `classify_external_ips` |
 | `check_flaps.py` | 1 | `detect_check_flaps` — minute-level flap matrix: prober-noise subtraction, TEST-check split, chronic-but-triggerless ranking |
+| `bootstrap.py` | 2 | `build_provider_overrides`, `build_datacenter_overrides` — draft the deployment-specific range files ADR 120/122 expect, named from reverse DNS; write a draft for review, never the live file |
 | `crosscheck.py` | 1 | `compare_report_facts` — diff a sibling reporting pipeline's published facts against live Zabbix; judges only provably-identical definitions (ADR 101) |
 | `triage.py` | 1 | `triage_slack_alert` — resolve an alert line's host, re-query live Zabbix, verdict (read-only); pure core in `alert_triage.py` |
 
@@ -104,8 +105,8 @@ uv run pytest -k "test_name"               # single test by name
 | `ZABBIX_COMPACT` / `ZABBIX_COMPACT_TOOLS` | Token optimization |
 | `ZABBIX_RESPONSE_BUDGET` | Max chars per response (default: 6000) |
 | `ZABBIX_READ_ONLY` | Disable write operations |
-| `ZABBIX_PROVIDER_CIDRS` | Provider → CIDR map (inline JSON or a file path) searched before the generated table, most-specific-first. **This is where accurate detection comes from** — the built-in table resolves little of any specific deployment. Draft one with `scripts/bootstrap_provider_overrides.py`. Unset = generated table only, ADR 120 |
-| `ZABBIX_DATACENTER_CIDRS` | Datacenter ranges as `{"Provider": [["cidr", "City, CC"], …]}` (inline JSON or a file path), most-specific-first. **The built-in table is empty** — unset means no city is reported. Draft one with `scripts/bootstrap_datacenter_ranges.py`, ADR 122 |
+| `ZABBIX_PROVIDER_CIDRS` | Provider → CIDR map (inline JSON or a file path) searched before the generated table, most-specific-first. **This is where accurate detection comes from** — the built-in table resolves little of any specific deployment. Draft one with the `build_provider_overrides` tool. Unset = generated table only, ADR 120 |
+| `ZABBIX_DATACENTER_CIDRS` | Datacenter ranges as `{"Provider": [["cidr", "City, CC"], …]}` (inline JSON or a file path), most-specific-first. **The built-in table is empty** — unset means no city is reported. Draft one with the `build_datacenter_overrides` tool, ADR 122 |
 | `ZBBX_SENSITIVE_STRINGS` | Optional deny-list (file path or inline `a,b,c`) of identifiers that must not appear in fixtures. Enforced by the fixture guard when set; skipped loudly when unset — ADR 119 |
 
 ## Adding a new tool

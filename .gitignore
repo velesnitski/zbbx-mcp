@@ -37,3 +37,7 @@ tasks.md
 # package.
 tests/test_hostname_guard.py
 docs/adr/121-hostname-examples-allow-list.md
+
+# Deployment-specific range files (ADR 120 / 122). They describe real
+# infrastructure and must never be committed.
+*.local.json

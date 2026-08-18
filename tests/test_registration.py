@@ -32,6 +32,8 @@ EXPECTED_TOOLS = {
     "get_problem_detail",
     "get_problem_age_buckets",
     "acknowledge_problem",
+    "build_datacenter_overrides",
+    "build_provider_overrides",
     "bulk_acknowledge",
     "rank_problem_cause",
     "triage_slack_alert",
