@@ -15,6 +15,7 @@ import functools
 import json
 import logging
 import os
+import re
 import sys
 import time
 import uuid
@@ -164,13 +165,67 @@ def setup_sentry() -> None:
 _SENSITIVE_PATTERNS = ("token", "secret", "password", "dsn", "key", "auth", "credential")
 
 
+# Anything address- or machine-shaped, redacted before an event leaves the
+# process. Sentry is a third party: an error string that merely *mentions* a
+# host is infrastructure disclosure, and error strings quote host names and
+# addresses constantly ("connect to X failed", "no items on Y").
+#
+# Deliberately over-broad. Redacting a value that turned out to be harmless
+# costs a little debugging detail; missing one ships infrastructure to a
+# service outside this system. The trade is not symmetric.
+_IP_RE = re.compile(r"\b\d{1,3}(?:\.\d{1,3}){3}\b|\b(?:[0-9a-fA-F]{1,4}:){2,}[0-9a-fA-F]{0,4}\b")
+_HOSTISH_RE = re.compile(r"\b[a-z][a-z0-9]*(?:-[a-z0-9]+)+\b", re.IGNORECASE)
+_CC_NUM_RE = re.compile(r"\b[a-z]{2}\d{2,6}\b", re.IGNORECASE)
+
+
+def _deny_terms() -> tuple[str, ...]:
+    """Deployment-specific terms from ZBBX_SENSITIVE_STRINGS, if configured.
+
+    The same list the fixture guard uses (ADR 119). One configured list, two
+    enforcement points: it keeps terms out of the repo, and out of Sentry.
+    """
+    raw = os.environ.get("ZBBX_SENSITIVE_STRINGS", "").strip()
+    if not raw:
+        return ()
+    try:
+        if os.path.isfile(raw):
+            with open(raw) as fh:
+                lines = fh.read().splitlines()
+        else:
+            lines = raw.split(",")
+    except OSError:
+        return ()
+    return tuple(t.strip() for t in lines if t.strip() and not t.strip().startswith("#"))
+
+
 def _scrub_value(val: str) -> str:
-    """Redact sensitive patterns from a string value."""
+    """Redact sensitive content from a string bound for Sentry."""
     lower = val.lower()
     for pat in _SENSITIVE_PATTERNS:
         if pat in lower:
+            return "[REDACTED]"          # a credential: drop the whole string
+    for term in _deny_terms():
+        if term.lower() in lower:
             return "[REDACTED]"
-    return val
+    # Addresses and machine-shaped names are replaced in place, so the shape of
+    # the error survives for debugging while the identifiers do not.
+    val = _IP_RE.sub("[IP]", val)
+    val = _HOSTISH_RE.sub(
+        lambda m: m.group(0) if m.group(0).lower() in _HOSTISH_ALLOW else "[HOST]",
+        val)
+    # Compound host names put the sibling in a bare trailing token with no
+    # hyphen ("<parent> xx0000"), so the rule above misses exactly the half
+    # that identifies the machine. Two letters then digits is narrow enough to
+    # leave sha256 / http2 / utf8 alone.
+    return _CC_NUM_RE.sub("[HOST]", val)
+
+
+# Ordinary hyphenated words that appear in error text and name nothing.
+_HOSTISH_ALLOW = frozenset({
+    "read-only", "not-found", "rate-limit", "time-out", "timed-out",
+    "json-rpc", "content-type", "user-agent", "max-results", "e-mail",
+    "well-known", "up-to-date", "self-signed", "multi-instance",
+})
 
 
 def _scrub_event(event: dict, hint: dict) -> dict:

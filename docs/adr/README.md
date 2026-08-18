@@ -170,6 +170,8 @@ fixed headings (`## Problem`, `## Decision`, `## Test approach`,
 
 | [122](122-configured-datacenter-ranges.md) | Datacenter ranges are configurable | `resolve_datacenter` used a fixed table where a mistaken entry names a city confidently rather than surfacing as unknown. `ZABBIX_DATACENTER_CIDRS` mirrors ADR 120: `[["cidr", "City, CC"], ...]` inline or from a file, searched first, most-specific-first, unusable input disabling rather than half-applying. The built-in table is emptied: a city mapping is deployment-specific and cannot be corrected without a release. `scripts/bootstrap_datacenter_ranges.py` drafts one from reverse DNS, which commonly encodes the facility. |
 
+| [123](123-error-reports-are-an-egress-channel.md) | An error report is an egress channel | Sentry scrubbing covered credential words only, so `connect to <address> failed` and `host <name> unreachable` left the process verbatim — found from a real report whose text embedded a live address. Addresses and machine-shaped names are now replaced in place, credentials and configured deny-list terms drop the whole string. Deliberately over-broad: the trade is not symmetric. |
+
 ## Writing a new ADR
 
 1. Pick the next number (`ls docs/adr/*.md | wc -l` + 1).
