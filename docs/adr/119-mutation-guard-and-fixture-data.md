@@ -14,13 +14,12 @@ threshold that let the real case through, a ported rule that scored a fully
 dead protocol as perfect, and a name that silently shadowed a dict. Two were
 caught by a synthetic control written by hand; one by luck.
 
-**Is the fixture data synthetic?** Fixture data must be synthetic. The
-recurring mistake is not carelessness in prose — it is *copying from live
-output*: a hostname, an address or a check key gets pasted out of an
-investigation into a fixture, where it looks like scaffolding and reads like
-infrastructure. It has happened more than once, and the existing fleet-data
-guard covered only `CHANGELOG`, `README`, `CLAUDE.md` and the ADRs. `tests/`
-was never in scope.
+**Is the fixture data synthetic?** A fixture carrying an address from some real
+network is a portability bug waiting to happen: it can collide with a host the
+test runner can actually reach, it makes the result depend on where the suite
+runs, and it dates the moment that network is renumbered. Addresses in tests
+should be *obviously* invented. The existing docs guard covered only
+`CHANGELOG`, `README`, `CLAUDE.md` and the ADRs — `tests/` was never in scope.
 
 ## Decision
 
@@ -49,27 +48,25 @@ assertion still holds. That case is now an oracle.
 
 ### Fixture data guard
 
-Two layers, because the halves are not equally expressible in a public repo.
+Two layers, because one half is universal and the other is per-deployment.
 
 **Structural, always on.** Addresses in fixtures must come from the private,
 special-purpose or RFC 5737 documentation ranges. A bright line beats a
-judgement call: *"is this IP real?"* invites an argument, *"is it from a
-documentation range?"* does not — and an address carried in from elsewhere fails
-instantly either way. The four conventional dummies already present were
-migrated to `192.0.2.x` / `198.51.100.x`. Multicast and reserved ranges are
+judgement call: *"is this address real?"* invites an argument, *"is it from a
+documentation range?"* does not. The four conventional dummies already present
+were migrated to `192.0.2.x` / `198.51.100.x`. Multicast and reserved ranges are
 allowed because they can never be a host address and fixtures use them as
-invalid-input samples. The fleet-magnitude patterns now cover `tests/` too.
+invalid-input samples. The magnitude patterns now cover `tests/` too.
 
-**Deployment-specific, configured outside the repo.** Real hostnames, product
-names and protocol names cannot be listed in a public guard — the list would
-itself be the leak. They live in `ZBBX_SENSITIVE_STRINGS` (a file path, or an
-inline comma-separated list) and are enforced whenever it is set. Unset, the
-test **skips loudly** rather than passing silently, because a guard that
-quietly does nothing is worse than none: it reads green.
+**Configurable, per deployment.** Identifiers specific to whoever runs this
+server cannot be enumerated in the package itself. They come from
+`ZBBX_SENSITIVE_STRINGS` (a file path, or an inline comma-separated list) and
+are enforced whenever it is set. Unset, the test **skips loudly** rather than
+passing silently, because a guard that quietly does nothing is worse than none:
+it reads green.
 
-When it fires it names the offending **files but never the term**, since this
-output can land in a public CI log — echoing the term would republish exactly
-what the guard exists to keep out.
+When it fires it names the offending **files but never the term** — CI output
+is not a place to repeat a configured term back.
 
 Both guards exempt their own files. Each must contain deliberately invalid
 samples to prove it is not vacuous, and scanning them would make every guard

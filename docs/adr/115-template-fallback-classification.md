@@ -32,9 +32,9 @@ group. That is the rule that makes this safe, and it is pinned by test.
 
 ### Configuration, not a constant
 
-The reporting side hardcodes its allow-list. This server cannot: it is public
-and not single-tenant, so a hardcoded template-to-product table would both leak
-deployment specifics and be wrong for everyone else. `ZABBIX_TEMPLATE_PRODUCT_MAP`
+The reporting side can hardcode its allow-list because it serves exactly one
+deployment. This server cannot: a hardcoded template-to-product table here
+would be right for one deployment and wrong for every other. `ZABBIX_TEMPLATE_PRODUCT_MAP`
 holds it instead, next to `ZABBIX_PRODUCT_MAP`, accepting JSON or
 `tpl:group,tpl2:group2`.
 

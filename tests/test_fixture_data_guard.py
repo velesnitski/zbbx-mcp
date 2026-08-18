@@ -1,22 +1,19 @@
-"""Test fixtures are published data too (ADR 119).
+"""Fixture data must be synthetic (ADR 119).
 
-Fixture data must be synthetic. The recurring mistake is not
-carelessness in prose — it is *carrying data in from elsewhere*: a hostname, an address
-or a check key gets pasted out of an investigation into a fixture, where it
-looks like scaffolding and reads like infrastructure. It has happened more than
-once, and the existing fleet-data guard never covered `tests/` at all.
+A fixture that carries an address from some real network is a portability bug
+waiting to happen: it can collide with a host the test runner can actually
+reach, it makes the test depend on where it runs, and it dates the moment that
+network is renumbered. Addresses in tests should be *obviously* invented.
 
-Two layers, because the two halves are not equally expressible in a public repo:
+Two layers:
 
 1. **Structural, always on.** Addresses must come from the private or
-   documentation ranges. A bright line beats a judgement call — "is this IP
-   real?" invites an argument, "is it from RFC 5737?" does not, and an address
-   carried in from elsewhere fails instantly either way.
+   documentation ranges. A bright line beats a judgement call — "is this
+   address real?" invites an argument, "is it from RFC 5737?" does not.
 
-2. **Deployment-specific, configured outside the repo.** Real hostnames,
-   product names and protocol names cannot be listed in a public guard: the
-   package cannot enumerate them. They live in an environment variable and are
-   enforced whenever it is present.
+2. **Configurable, per deployment.** Identifiers that are specific to whoever
+   runs this server cannot be enumerated in the package itself, so the terms
+   come from an environment variable and are enforced whenever it is set.
 """
 
 from __future__ import annotations
@@ -48,8 +45,8 @@ _ALLOWED_NETS = [
         "127.0.0.0/8", "169.254.0.0/16", "0.0.0.0/8",
         "192.0.2.0/24", "198.51.100.0/24", "203.0.113.0/24",
         # Multicast, reserved and broadcast. These can never be a host's
-        # address, so they cannot be a leak — and fixtures legitimately use
-        # them as invalid-input samples and as netmasks.
+        # address, and fixtures legitimately use them as invalid-input
+        # samples and as netmasks.
         "224.0.0.0/4", "240.0.0.0/4",
     )
 ]
@@ -89,9 +86,9 @@ def test_the_address_rule_would_actually_reject_something():
 
 
 def test_fixtures_carry_no_fleet_magnitudes():
-    # The class TestFleetDataGuard covers for docs. A comment quoting an
-    # estate's scale leaks identically from a test file, and `tests/` was
-    # never in that guard's scope.
+    # TestFleetDataGuard applies the same rule to docs. A comment in a test
+    # file quotes scale exactly as a doc does, and `tests/` was never in that
+    # guard's scope.
     violations = []
     for path in TESTS:
         for n, line in enumerate(path.read_text().splitlines(), 1):
@@ -103,8 +100,7 @@ def test_fixtures_carry_no_fleet_magnitudes():
 
 
 def test_no_infrastructure_addresses_anywhere_in_the_repo():
-    """The whole repo, not just fixtures — an audit answers today, a guard
-    answers every day after.
+    """The whole repo, not just fixtures.
 
     Three things are legitimately allowed to be a routable address here:
 
@@ -118,8 +114,8 @@ def test_no_infrastructure_addresses_anywhere_in_the_repo():
     3. A tiny set of documentation placeholders used in docstrings to show the
        accepted CIDR syntax.
 
-    Anything else fails. That is the point: an address copied out of live
-    output matches none of the three.
+    Anything else fails. An invented address always matches one of the three;
+    an address carried in from somewhere else matches none.
     """
     import subprocess
 
@@ -156,7 +152,7 @@ def test_no_infrastructure_addresses_anywhere_in_the_repo():
                 violations.append(
                     f"{rel}:{n} — {tok!r} is a routable address that is neither "
                     "documentation space nor a declared allocation-table "
-                    "network. If it came from live output it must not be here"
+                    "network. Fixture addresses must be from RFC 5737"
                 )
     assert not violations, "\n".join(violations)
 
@@ -182,7 +178,7 @@ def _deny_terms() -> list[str]:
 
 
 def test_deployment_deny_list_is_enforced_when_configured():
-    """Layer two, for the strings a public guard cannot name.
+    """Layer two, for identifiers the package itself cannot enumerate.
 
     Skips *loudly* when unconfigured rather than passing silently — a guard
     that quietly does nothing is worse than no guard, because it reads green.
@@ -199,9 +195,8 @@ def test_deployment_deny_list_is_enforced_when_configured():
         haystack = path.read_text().lower()
         for term in terms:
             if term.lower() in haystack:
-                # The term is deliberately not echoed: this output can land in
-                # a public CI log, which would republish exactly what the
-                # guard exists to keep out.
+                # The term is deliberately not echoed — CI output is not a
+                # place to repeat a configured term back.
                 violations.add(f"{path.name} — contains a denied term")
     assert not violations, "\n".join(sorted(violations))
 

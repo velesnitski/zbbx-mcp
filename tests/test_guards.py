@@ -392,18 +392,17 @@ class TestOutputFieldGuard:
 
 
 class TestFleetDataGuard:
-    """ADR 079 — public docs must not carry deployment magnitudes.
+    """ADR 079 — documentation describes scale qualitatively.
 
-    Documentation ages with the system it describes. Prose can
-    drift into quoting one run's numbers (host counts, subnet spreads,
-    regional footprints). The pre-push sensitive scan is a *string* deny-list,
-    so numbers and ISO country codes are invisible to it by construction; this
-    guard covers the class the scan cannot see.
+    Prose written while working against a running system tends to absorb that
+    run's numbers — how many hosts a tool scanned, how many subnets it spanned,
+    which regions appeared. Those are one execution's output, not facts about
+    this codebase: they date immediately, they cannot be verified by a reader,
+    and the argument they illustrate reads the same without them.
 
     Deliberately scoped to *observed* magnitudes. Configured thresholds and
     caps ("capped at 50 hosts per call", "fires when >=5 hosts on >=3 distinct
-    /24s") are design facts about this codebase, not descriptions of anyone's
-    estate, and must keep passing.
+    /24s") ARE design facts about this codebase and must keep passing.
     """
 
     DOCS = [ROOT / "CHANGELOG.md", ROOT / "README.md", ROOT / "CLAUDE.md"]
@@ -437,13 +436,13 @@ class TestFleetDataGuard:
                     if m:
                         violations.append(
                             f"{path.relative_to(ROOT)}:{n} — {m.group(0)!r} looks like "
-                            f"{why}; keep real fleet magnitudes out of the public repo"
+                            f"{why}; describe scale qualitatively instead"
                         )
         assert not violations, "\n".join(violations)
 
     def test_no_country_footprint_lists(self):
-        # Two or more ISO-2 codes in a row ("XX / YY") describes where an estate
-        # actually runs. A lone code is fine — it appears as a parameter.
+        # Two or more ISO-2 codes in a row ("XX / YY") is a run's output, not
+        # a design fact. A lone code is fine — it appears as a parameter.
         iso2 = self._iso2()
         seq = re.compile(r"\b([A-Z]{2})\b\s*[/,]\s*\b([A-Z]{2})\b")
         violations = []

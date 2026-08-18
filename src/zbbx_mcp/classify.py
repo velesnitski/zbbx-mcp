@@ -7,8 +7,11 @@ from __future__ import annotations
 
 import ipaddress
 import json
+import logging
 import os
 import re
+
+_log = logging.getLogger(__name__)
 
 __all__ = [
     "classify_host", "detect_provider", "resolve_datacenter", "PROVIDER_CIDRS",
@@ -225,116 +228,35 @@ def unmapped_group_counts(
 
 
 
-PROVIDER_CIDRS: dict[str, list[str]] = {
-    "A2 Hosting": ["68.66.192.0/18", "206.72.192.0/18"],
-    "Akamai": ["23.32.0.0/11", "95.100.0.0/15", "104.64.0.0/10", "184.24.0.0/13"],
-    "AlexHost": ["5.181.0.0/16"],
-    "Alibaba Cloud": ["39.96.0.0/12", "47.88.0.0/14", "47.92.0.0/14", "101.132.0.0/14", "120.24.0.0/13"],
-    "Aruba.it": ["95.110.0.0/16", "89.46.0.0/16"],
-    "BACloud": ["85.206.0.0/16"],
-    "AWS": ["3.0.0.0/8", "13.0.0.0/8", "15.0.0.0/9", "16.0.0.0/8", "18.0.0.0/8", "34.0.0.0/8", "35.0.0.0/8", "52.0.0.0/8", "54.0.0.0/8", "99.0.0.0/8"],
-    "AzerStar": ["62.212.0.0/16", "94.20.0.0/16"],
-    "Azure": ["20.0.0.0/8", "40.64.0.0/10", "40.112.0.0/12", "52.224.0.0/11", "104.40.0.0/13", "137.116.0.0/15", "168.61.0.0/16", "168.63.0.0/16", "191.232.0.0/13", "207.46.0.0/16"],
-    "Biznet": ["103.52.0.0/16"],
-    "BuyVM": ["205.185.112.0/20", "198.98.48.0/20"],
-    "CenturyLink": ["63.228.0.0/14", "65.118.0.0/15", "67.128.0.0/10", "71.32.0.0/11", "75.64.0.0/10", "205.171.0.0/16"],
-    "Cherry Servers": ["5.199.168.0/21", "93.190.136.0/21"],
-    "Cloudflare": ["104.16.0.0/12", "172.64.0.0/13", "173.245.48.0/20", "198.41.128.0/17"],
-    "Cloudie": ["103.163.0.0/16"],
-    "Cogent": ["38.0.0.0/8", "170.80.0.0/16", "190.103.0.0/16"],
-    "ColoCrossing": ["192.3.0.0/16", "192.210.0.0/16", "198.12.0.0/16", "198.46.0.0/16"],
-    "Contabo": ["62.171.0.0/16", "144.91.0.0/16", "161.97.0.0/16", "173.249.0.0/16", "178.238.0.0/16", "193.26.0.0/16", "207.180.0.0/16"],
-    "CtrlS": ["103.26.0.0/16"],
-    "DataCamp": ["209.58.0.0/16"],
-    "Datapacket": ["5.188.0.0/16"],
-    "Deltahost": ["176.107.0.0/16"],
-    "DediPath": ["104.254.0.0/16", "192.227.128.0/17"],
-    "DigitalOcean": ["64.225.0.0/16", "104.131.0.0/16", "134.209.0.0/16", "137.184.0.0/16", "142.93.0.0/16", "143.110.0.0/16", "143.198.0.0/16", "144.126.0.0/16", "157.245.0.0/16", "159.65.0.0/16", "159.89.0.0/16", "161.35.0.0/16", "164.90.0.0/16", "165.22.0.0/16", "167.71.0.0/16", "167.99.0.0/16", "174.138.0.0/16", "178.128.0.0/16", "206.189.0.0/16", "209.97.0.0/16"],
-    "DreamHost": ["64.90.48.0/20", "173.236.128.0/17", "208.97.128.0/17"],
-    "EDIS": ["93.190.0.0/16", "194.32.104.0/22"],
-    "Equinix Metal": ["136.144.0.0/16", "145.40.0.0/16", "147.28.0.0/16", "169.150.0.0/16"],
-    "Fasthosts": ["46.235.224.0/19", "212.48.64.0/18"],
-    "Fastly": ["23.235.32.0/20", "151.101.0.0/16", "199.27.72.0/21"],
-    "Fiberhub": ["108.181.0.0/16", "216.106.0.0/16", "192.96.0.0/16", "199.115.0.0/16", "172.96.0.0/16", "74.121.0.0/16", "172.111.0.0/16"],
-    "Flokinet": ["84.234.0.0/16", "185.100.84.0/22"],
-    "G-Core": ["92.38.0.0/16", "44.31.0.0/16", "92.223.0.0/16"],
-    "GoDaddy": ["92.205.0.0/16", "148.72.0.0/16", "160.153.0.0/16", "184.168.0.0/16"],
-    "Google Cloud": ["34.64.0.0/10", "35.184.0.0/13", "35.192.0.0/12", "104.196.0.0/14", "104.154.0.0/15", "130.211.0.0/16", "146.148.0.0/16"],
-    "GreenGeeks": ["66.160.128.0/18"],
-    "GTHost": ["158.51.0.0/16", "167.17.0.0/16"],
-    "GTT": ["77.67.0.0/16", "141.136.0.0/16", "199.229.0.0/16", "213.200.0.0/16"],
-    "Hetzner": ["49.12.0.0/16", "65.21.0.0/16", "65.108.0.0/16", "78.46.0.0/16", "78.47.0.0/16", "88.99.0.0/16", "88.198.0.0/16", "95.216.0.0/16", "95.217.0.0/16", "116.202.0.0/16", "135.181.0.0/16", "138.201.0.0/16", "144.76.0.0/16", "148.251.0.0/16", "159.69.0.0/16", "167.235.0.0/16", "176.9.0.0/16", "178.63.0.0/16"],
-    "Hostinger": ["185.185.0.0/16", "79.98.0.0/16", "89.116.0.0/16"],
-    "Hostway": ["64.29.0.0/16", "216.234.0.0/16"],
-    "Hostwinds": ["104.168.0.0/16", "142.11.0.0/16"],
-    "Hurricane Electric": ["72.52.92.0/22", "184.105.0.0/16", "216.218.0.0/16"],
-    "IDCloudHost": ["103.31.38.0/23", "103.23.20.0/22"],
-    "Imperva": ["199.83.128.0/21", "198.143.32.0/19"],
-    "InMotion": ["173.247.192.0/18", "198.46.80.0/20"],
-    "InterKVM": ["46.229.243.0/24"],
-    "InterConnects": ["104.160.0.0/16"],
-    "IONOS": ["82.165.0.0/16", "85.215.0.0/16", "87.106.0.0/16", "212.227.0.0/16", "217.160.0.0/16"],
-    "IPXON": ["190.120.0.0/16"],
-    "IPTELECOM": ["110.172.0.0/16"],
-    "Iservice": ["185.180.220.0/22", "91.240.84.0/22"],
-    "iWeb": ["70.38.0.0/16", "209.172.32.0/19"],
-    "Kamatera": ["154.16.0.0/16", "185.191.0.0/16", "31.154.0.0/16"],
-    "KDDI": ["106.72.0.0/13", "118.236.0.0/14", "133.208.0.0/13"],
-    "KeyCDN": ["104.17.0.0/16"],
-    "Leaseweb": ["5.79.0.0/16", "37.48.0.0/16", "46.165.0.0/16", "62.212.64.0/18", "66.23.0.0/16", "85.17.0.0/16", "95.211.0.0/16", "104.192.0.0/16", "178.162.0.0/16"],
-    "Level3": ["4.0.0.0/8", "8.0.0.0/8", "63.208.0.0/12", "209.244.0.0/16"],
-    "Limestone": ["69.162.64.0/18", "72.52.64.0/18"],
-    "Linode": ["172.104.0.0/16", "139.162.0.0/16", "45.79.0.0/16", "50.116.0.0/16"],
-    "Liquid Web": ["67.225.128.0/17", "69.16.192.0/18", "72.52.128.0/17"],
-    "Locaweb": ["186.202.0.0/16", "177.52.0.0/16"],
-    "M247": ["85.235.0.0/16", "146.70.0.0/16", "165.231.0.0/16", "149.88.0.0/16", "37.19.192.0/18"],
-    "Maxihost": ["168.205.0.0/16", "179.43.128.0/17"],
-    "Melbicom": ["5.182.224.0/20", "185.112.82.0/23", "193.35.224.0/23"],
-    "MTS": ["62.112.96.0/19", "83.220.0.0/14", "95.167.0.0/16", "213.87.0.0/16"],
-    "Mullvad": ["185.213.152.0/22", "193.138.218.0/23", "198.54.132.0/22"],
-    "myLoc": ["89.163.0.0/16", "62.141.0.0/16", "37.157.0.0/16"],
-    "Namecheap": ["198.54.0.0/16", "162.0.208.0/20"],
-    "netcup": ["5.22.152.0/21", "37.120.0.0/16", "46.232.248.0/21", "185.183.156.0/22"],
-    "Njalla": ["5.253.84.0/22", "198.251.88.0/22"],
-    "NTT": ["210.173.0.0/16", "129.250.0.0/16", "192.48.0.0/16"],
-    "Oracle Cloud": ["129.146.0.0/16", "129.150.0.0/15", "129.152.0.0/16", "130.35.0.0/16", "132.145.0.0/16", "134.70.0.0/16", "138.1.0.0/16", "140.83.0.0/16", "141.144.0.0/16", "144.24.0.0/14", "150.136.0.0/13", "152.67.0.0/16", "158.101.0.0/16", "168.138.0.0/16", "193.122.0.0/16"],
-    "OVH": ["37.59.0.0/16", "37.187.0.0/16", "51.38.0.0/16", "51.68.0.0/16", "51.75.0.0/16", "51.77.0.0/16", "51.79.0.0/16", "51.83.0.0/16", "51.89.0.0/16", "51.91.0.0/16", "51.178.0.0/16", "51.195.0.0/16", "51.210.0.0/16", "51.254.0.0/16", "51.255.0.0/16", "54.36.0.0/16", "54.37.0.0/16", "54.38.0.0/16", "57.128.0.0/16", "57.129.0.0/16", "66.70.0.0/16", "91.134.0.0/16", "92.222.0.0/16", "135.125.0.0/16", "137.74.0.0/16", "141.94.0.0/16", "141.95.0.0/16", "146.59.0.0/16", "147.135.0.0/16", "148.113.0.0/16", "151.80.0.0/16", "158.69.0.0/16", "162.19.0.0/16", "164.132.0.0/16", "176.31.0.0/16", "178.32.0.0/16", "188.165.0.0/16", "193.70.0.0/16", "198.27.0.0/16", "198.244.0.0/16", "15.204.0.0/16", "15.235.0.0/16"],
-    "Path.net": ["199.167.0.0/16", "93.189.40.0/21"],
-    "PCCW": ["63.218.0.0/15", "202.85.128.0/17", "218.189.0.0/16"],
-    "PhoenixNAP": ["131.153.0.0/16", "154.12.0.0/16"],
-    "Psychz": ["103.59.109.0/24", "208.87.240.0/22"],
-    "QuadraNet": ["104.128.0.0/14", "198.55.0.0/16"],
-    "Rackspace": ["104.239.0.0/16", "162.209.0.0/16", "162.242.0.0/16", "198.101.0.0/16"],
-    "RamNode": ["107.152.0.0/16", "23.226.224.0/19"],
-    "REG.RU": ["31.31.192.0/18", "185.220.220.0/22"],
-    "Rostelecom": ["87.226.128.0/17", "85.141.0.0/16", "178.176.0.0/12", "213.59.0.0/16"],
-    "Scaleway": ["51.15.0.0/16", "51.158.0.0/16", "51.159.0.0/16", "62.210.0.0/16", "163.172.0.0/16", "212.47.0.0/16"],
-    "Selectel": ["185.47.204.0/22", "46.229.240.0/21", "94.26.224.0/19"],
-    "Serverius": ["185.90.0.0/16", "5.178.0.0/16"],
-    "Singtel": ["165.21.0.0/16", "203.116.0.0/14", "218.186.0.0/15"],
-    "SiteGround": ["35.214.0.0/16", "198.57.0.0/16"],
-    "SoftLayer": ["50.22.0.0/15", "169.44.0.0/14", "173.192.0.0/13", "198.23.0.0/16"],
-    "StackPath": ["151.139.0.0/16", "104.247.0.0/16"],
-    "Strato": ["81.169.0.0/16", "85.214.0.0/16"],
-    "Sucuri": ["192.88.134.0/23", "66.248.200.0/22"],
-    "Tata": ["203.100.0.0/16", "121.240.0.0/12", "115.248.0.0/14"],
-    "Telia": ["62.115.0.0/16", "80.239.0.0/16", "83.145.0.0/16", "193.181.0.0/16", "213.248.0.0/16"],
-    "Tencent Cloud": ["43.128.0.0/12", "49.51.0.0/16", "101.32.0.0/12", "119.28.0.0/14", "129.204.0.0/16"],
-    "Tikona": ["103.247.0.0/16"],
-    "TimeWeb": ["185.12.148.0/22", "91.230.210.0/23"],
-    "Turk Telekom": ["89.252.0.0/16", "212.68.0.0/16", "45.11.0.0/16", "185.219.0.0/16", "185.227.0.0/16", "213.217.0.0/16", "87.236.0.0/16"],
-    "UOL": ["200.147.0.0/16", "200.221.0.0/16"],
-    "UpCloud": ["94.237.0.0/16", "185.26.48.0/22", "185.70.196.0/22"],
-    "VDSina": ["185.219.220.0/22", "91.201.112.0/22"],
-    "Virmach": ["23.94.0.0/16", "107.175.0.0/16"],
-    "Virtua Cloud": ["179.108.0.0/16", "189.1.0.0/16"],
-    "Vultr": ["45.32.0.0/16", "45.63.0.0/16", "45.76.0.0/16", "45.77.0.0/16", "64.176.0.0/16", "66.42.0.0/16", "78.141.0.0/16", "95.179.0.0/16", "108.61.0.0/16", "136.244.0.0/16", "140.82.0.0/16", "149.28.0.0/16", "155.138.0.0/16", "207.148.0.0/16", "209.250.0.0/16", "216.128.0.0/16"],
-    "WorldStream": ["185.252.0.0/16", "89.39.0.0/16", "77.247.0.0/16"],
-    "Zayo": ["64.125.0.0/16", "174.128.0.0/13", "216.115.0.0/16"],
-    "Zenlayer": ["152.32.128.0/17", "104.143.0.0/16"],
-    "Zscaler": ["104.129.192.0/20", "165.225.0.0/16"],
-    "iomart": ["109.169.0.0/16", "78.129.0.0/16"],
-}
+# --- Provider allocation table ------------------------------------------
+# GENERATED, not curated. `data/provider_cidrs.json` is derived from the public
+# prefix-to-AS dataset at <https://iptoasn.com> by `scripts/gen_provider_cidrs.py`,
+# which anyone can re-run to reproduce it byte for byte.
+#
+# A hand-maintained table is a snapshot of whatever its authors happened to
+# know: it cannot be complete, it goes stale from the day it ships, and a range
+# recorded wrongly does not fail loudly — it attributes an address to the wrong
+# provider, confidently, in output someone acts on. Deriving it from routing
+# data removes all three problems. Deployments with better information still
+# override it entirely via ZABBIX_PROVIDER_CIDRS (ADR 120).
+_DATA_FILE = os.path.join(os.path.dirname(__file__), "data", "provider_cidrs.json")
+
+
+def _load_provider_cidrs() -> dict[str, list[str]]:
+    try:
+        with open(_DATA_FILE, encoding="utf-8") as fh:
+            return {str(k): [str(c) for c in v] for k, v in json.load(fh).items()}
+    except (OSError, json.JSONDecodeError, TypeError, AttributeError):
+        # Packaged data is missing or unreadable — a build defect. Degrade to
+        # "Other" for everything rather than taking the server down, but say so:
+        # silently resolving every address as unrecognised looks identical to a
+        # deployment that genuinely uses no known provider.
+        _log.warning("provider table unreadable at %s — detect_provider will "
+                     "answer 'Other' until it is restored", _DATA_FILE)
+        return {}
+
+
+PROVIDER_CIDRS: dict[str, list[str]] = _load_provider_cidrs()
 
 # Pre-compiled network objects sorted by prefix length (most specific first).
 # ipaddress.ip_network() returns IPv4Network | IPv6Network; in practice we
@@ -350,12 +272,63 @@ _PROVIDER_NETS: list[tuple[str, _IpNet]] = sorted(
 )
 
 
+_EXTRA_PROVIDER_NETS: list[tuple[str, _IpNet]] | None = None
+
+
+def get_extra_provider_nets() -> list[tuple[str, _IpNet]]:
+    """Operator-supplied provider ranges, most specific first.
+
+    ``ZABBIX_PROVIDER_CIDRS`` holds a JSON object — a file path or inline —
+    of ``{"Provider": ["a.b.c.d/n", ...]}``. Entries are searched *before* the
+    built-in table, so a more precise local mapping wins, and unparseable
+    input yields nothing rather than a partial merge.
+
+    The built-in table is hand-maintained and cannot be complete: there is no
+    registry of every hosting provider, allocations move between them, and a
+    range recorded wrongly does not fail loudly — it attributes an address to
+    the wrong provider, confidently, in output someone acts on.
+
+    A deployment always has better information than the package does. It knows
+    its own address space exactly and can point at an authoritative dataset,
+    so the specific half of this mapping belongs in its configuration and the
+    built-in half stays a generic default (ADR 120).
+    """
+    global _EXTRA_PROVIDER_NETS
+    if _EXTRA_PROVIDER_NETS is not None:
+        return _EXTRA_PROVIDER_NETS
+    raw = os.environ.get("ZABBIX_PROVIDER_CIDRS", "").strip()
+    nets: list[tuple[str, _IpNet]] = []
+    if raw:
+        try:
+            if os.path.isfile(raw):
+                with open(raw) as fh:
+                    data = json.load(fh)
+            else:
+                data = json.loads(raw)
+            for prov, cidrs in dict(data).items():
+                for cidr in cidrs:
+                    nets.append(
+                        (str(prov), ipaddress.ip_network(str(cidr), strict=False))
+                    )
+        except (json.JSONDecodeError, OSError, TypeError, ValueError, AttributeError):
+            nets = []          # unusable config disables the override entirely
+    nets.sort(key=lambda x: -x[1].prefixlen)
+    _EXTRA_PROVIDER_NETS = nets
+    return nets
+
+
 def detect_provider(ip_str: str) -> str:
-    """Detect hosting provider from IP address using known CIDR ranges."""
+    """Detect hosting provider from IP address using known CIDR ranges.
+
+    Operator-supplied ranges are consulted first, then the built-in table.
+    """
     try:
         addr = ipaddress.ip_address(ip_str)
     except ValueError:
         return "Unknown"
+    for provider, network in get_extra_provider_nets():
+        if addr in network:
+            return provider
     for provider, network in _PROVIDER_NETS:
         if addr in network:
             return provider

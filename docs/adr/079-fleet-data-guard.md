@@ -1,25 +1,23 @@
-# ADR 079: No deployment magnitudes in public docs
+# ADR 079: Documentation describes scale qualitatively
 
 **Status:** Accepted
 **Date:** 2026-07-13
 
 ## Problem
 
-Documentation ages with the system it describes.
-Documentation written while working on a live system tends to drift into
-quoting that system's **operational magnitudes** — how many hosts a tool
-scanned, how wide an incident spread, which regions the estate spans. Those
-figures are illustrative in prose but they describe someone's private
-infrastructure, and they have no place in a public artefact.
+Documentation written while working against a running system tends to absorb
+that run's numbers — how many hosts a tool scanned, how wide an incident
+spread, which regions appeared. Those are **one execution's output**, not facts
+about this codebase. They date the instant anything changes, a reader cannot
+verify them, and the argument they illustrate reads exactly the same without
+them.
 
-The pre-push sensitive scan cannot catch this. It is a **string deny-list**
-(product names, protocol names, hostname prefixes). Numbers and ISO country
-codes are not strings on a list, so this entire class is invisible to it by
-construction — the scan is doing exactly what it was designed to do.
+A string deny-list cannot catch this class at all: numbers and ISO country
+codes are not strings on a list, so they are invisible to it by construction.
 
 ## Decision
 
-Add a **fleet-data guard** (`tests/test_guards.py`) that scans
+Add a **magnitude guard** (`tests/test_guards.py`) that scans
 `docs/adr/*.md`, `CHANGELOG.md`, `README.md` and `CLAUDE.md` for what the
 string scan cannot see:
 
@@ -34,13 +32,12 @@ string scan cannot see:
 
 The guard is deliberately scoped to *observed* magnitudes. Configured
 thresholds and caps ("capped at N hosts per call", "fires when ≥N hosts on ≥M
-distinct /24s") are design facts about this codebase, not descriptions of
-anyone's estate, and keep passing.
+distinct /24s") ARE design facts about this codebase and keep passing.
 
 Documentation prose therefore describes scale qualitatively — "every host in
-the fleet", "most of its /24s", "several unrelated regions". The reasoning in
-an ADR is what carries its value; concrete magnitudes were only ever
-illustration, and generalising them costs the argument nothing.
+scope", "most of its /24s", "several unrelated regions". The reasoning in an
+ADR is what carries its value; concrete magnitudes were only ever illustration,
+and generalising them costs the argument nothing while making it age better.
 
 ## Test approach
 

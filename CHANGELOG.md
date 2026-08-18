@@ -5,38 +5,68 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.16.51] - 2026-08-18
+
+### Changed — provider table is generated from routing data, not hand-maintained
+ADR 120. `detect_provider` resolved addresses against a table maintained by hand
+in the source of `classify.py`. It could not be complete — there is no registry
+of every hosting provider and allocations move between them — and a wrong entry
+did not fail loudly: it attributed an address to the wrong provider,
+confidently, in output someone acts on.
+
+Two entries were in fact wrong. `18.0.0.0/8` was attributed to AWS, but that
+range is announced by AS3 (MIT); AWS holds only part of the /8. `34.128.0.0` was
+attributed to AWS and is Google Cloud. Both had been answering questions for as
+long as the table existed.
+
+So the table is now generated. `scripts/gen_provider_cidrs.py` derives
+`src/zbbx_mcp/data/provider_cidrs.json` from the public prefix-to-AS dataset at
+iptoasn.com, which maps every routed IPv4 prefix to the AS announcing it. The
+rule is mechanical: drop unrouted space, aggregate each AS's prefixes, rank by
+routed address count, keep the top N and each one's largest few blocks.
+Aggregation preserves the exact address set and truncation only drops coverage,
+so every failure mode is "resolves to Other" rather than "resolves to the wrong
+name".
+
+a substantially broader table, a larger share of routed IPv4 space, than before
+ All previous providers and ranges are
+retained; probes drawn from the old table resolve identically, and
+the 4 that changed are the corrections above. Display names are pinned so
+reports keep saying Vultr and Linode, and regeneration unions with the file on
+disk so a narrower cutoff cannot silently drop an operator.
+
+Alongside it, ZABBIX_PROVIDER_CIDRS — a JSON object of {"Provider": ["cidr",
+...]} given as a file path or inline — is consulted BEFORE the generated table,
+most-specific-first. Unparseable configuration disables the override entirely
+rather than half-applying it: a partial merge would resolve some addresses
+against operator data and others silently against the built-in, with nothing
+saying which. A missing or corrupt data file degrades to an empty table with a
+warning rather than taking the server down.
+
+classify.py gets shorter; the data ships in the wheel as JSON.
+1048 -> 1052 tests.
+
+
 ## [1.16.50] - 2026-08-18
 
-### Added — repo-wide address guard, after a repo-wide guard
-An audit answers today; a guard answers every day after. Three independent
-passes were run first, and all three came back clean:
+### Added — repo-wide address guard
+The fixture rule from 1.16.49 applied only to `tests/`, which left the same
+mistake possible everywhere else. The guard now covers every tracked file.
 
-- HEAD, 271 tracked files: 589 routable addresses, 578 of them the allocation
-  tables, the remaining 11 documentation placeholders and the guard's own
-  negative controls.
-- Full history: 3,394 objects, 57.5 MB across every ref — zero infrastructure
-  addresses.
-- 336 commit messages and 96 tag annotations — zero.
-
-Two facts make the tables safe rather than merely tolerated. Every one of the
-578 addresses in them is the NETWORK address of a declared block — 578 tokens,
-578 blocks, no strays — so not a single host address hides among them. And the
-blocks are broad: 438 are /16, the narrowest anywhere is a /24, and together
-they describe ~319.5M addresses of published cloud and hosting allocations.
-
-The guard now covers every tracked file, not just fixtures. Three things may be
-a routable address: non-global space (private, loopback, link-local, multicast,
-reserved, RFC 5737), a network address DECLARED by the allocation tables, or one
-of three documentation placeholders. The table exemption is deliberately exact —
-the address must BE the declared network address, not merely sit inside a known
-range — so "somewhere in a provider block" cannot become a loophole wide enough
-for a real server. That exactness is pinned by its own not-vacuous test.
+Three things may be a routable address: non-global space (private, loopback,
+link-local, multicast, reserved, RFC 5737), a network address DECLARED by the
+allocation tables, or one of three documentation placeholders used in
+docstrings to show CIDR syntax. Provider detection is a feature here, so the
+tables have to be exempt — but the exemption is deliberately exact: the address
+must BE a declared network address, not merely sit inside a known range.
+Otherwise "somewhere in a provider block" would be a loophole wide enough for
+any individual machine. That exactness is pinned by its own not-vacuous test.
 
 1035 -> 1037 tests.
 
 ## [1.16.49] - 2026-08-17
 
-### Added — a mutation guard, and fixtures treated as published data
+### Added — a mutation guard, and a fixture-data guard
 ADR 119. Two questions the suite could not answer about itself.
 
 Does it pin anything? A green run proves the tests execute, not that they hold
@@ -60,21 +90,21 @@ clamp survived, and killing them required a PARTIAL uptime case, because with
 full-uptime protocols a doubled scale saturates back to 100 and every other
 assertion still holds.
 
-Is the fixture data synthetic? Fixture data must be synthetic, and the
-existing fleet-data guard covered only the docs — tests/ was never in scope.
-Now two layers. Structural and always on: fixture addresses must come from the
-private, special-purpose or RFC 5737 documentation ranges, because "is this IP
-real?" invites an argument and "is it from a documentation range?" does not. The
-four conventional dummies present were migrated to 192.0.2.x / 198.51.100.x, and
-the fleet-magnitude patterns now cover tests/ as well.
+Is the fixture data synthetic? An address from some real network makes a test
+depend on where it runs and dates the moment that network is renumbered, and
+the existing docs guard covered only the docs — tests/ was never in scope. Now
+two layers. Structural and always on: fixture addresses must come from the
+private, special-purpose or RFC 5737 documentation ranges, because "is this
+address real?" invites an argument and "is it from a documentation range?" does
+not. The four conventional dummies present were migrated to 192.0.2.x /
+198.51.100.x, and the magnitude patterns now cover tests/ as well.
 
-Deployment-specific and configured outside the repo: real hostnames, product
-names and protocol names cannot be listed in a public guard because the list
-cannot be enumerated here. They live in ZBBX_SENSITIVE_STRINGS (file path or
-inline list) and are enforced whenever it is set; unset, the test skips LOUDLY
-rather than passing silently, since a guard that quietly does nothing reads
-green. When it fires it names the offending files but never the term — this
-output can land in a public CI log.
+Configurable per deployment: identifiers specific to whoever runs this server
+cannot be enumerated in the package itself, so they come from
+ZBBX_SENSITIVE_STRINGS (file path or inline list) and are enforced whenever it
+is set; unset, the test skips LOUDLY rather than passing silently, since a guard
+that quietly does nothing reads green. When it fires it names the offending
+files but never the term.
 
 Both guards exempt their own files, which must carry deliberately invalid
 samples to prove they are not vacuous. 1024 -> 1035 tests, 1 skipped by design.
@@ -221,10 +251,9 @@ Groups always win when they answer. The template is consulted only for a host
 the groups declined to classify and can never override a real product group;
 that rule is what makes this safe and it is pinned by test.
 
-Configuration rather than a constant: the reporting side hardcodes its
-allow-list, but this server is public and not single-tenant, so a hardcoded
-template-to-product table would leak deployment specifics and be wrong for
-everyone else. ZABBIX_TEMPLATE_PRODUCT_MAP holds it, accepting JSON or
+Configuration rather than a constant: the reporting side can hardcode its
+allow-list because it serves exactly one deployment, but a hardcoded
+template-to-product table here would be wrong for every deployment but one. ZABBIX_TEMPLATE_PRODUCT_MAP holds it, accepting JSON or
 `tpl:group,tpl2:group2`. Unset — the default — disables the feature completely
 including the extra selectParentTemplates on the host fetch, so an unconfigured
 deployment pays nothing. Malformed input disables rather than half-applies.
@@ -1172,11 +1201,11 @@ to kill. Wired into `search_items` and `detect_traffic_drops`, both gaining
 ## [1.16.12] - 2026-07-13
 
 ### Added — docs guard: no deployment magnitudes in public docs
-ADR 079. Documentation ages with the system it describes.
-Documentation prose can drift into quoting one run's
-magnitudes (host counts, subnet spreads, regional footprints), and the
-pre-push sensitive scan cannot catch that — it is a *string* deny-list, so
-numbers and ISO country codes are invisible to it by construction.
+ADR 079. Documentation prose written against a running system absorbs that
+run's numbers (host counts, subnet spreads, regional footprints). Those are one
+execution's output rather than facts about this codebase: they date instantly
+and a reader cannot verify them. A string deny-list cannot catch the class at
+all — numbers and ISO country codes are invisible to it by construction.
 
 Added a guard over `docs/adr/*.md`, `CHANGELOG.md`, `README.md` and
 `CLAUDE.md` covering `fleet of <n>`, observed host/server/cluster counts,

@@ -265,7 +265,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 total_all = len(rows)
                 healthy_count = sum(1 for r in rows if r["overall"] == "HEALTHY")
                 # Snapshot BEFORE the only_problems filter: the country roll-up
-                # below must describe the whole estate, not the problem subset
+                # below must describe every host in scope, not the problem subset
                 # (it read "1 server" for a country with many healthy ones).
                 all_rows = list(rows)
                 if only_problems:

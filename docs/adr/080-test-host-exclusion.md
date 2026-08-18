@@ -78,7 +78,7 @@ was dropped and truncates long lists. 724 → 747.
 
 ## Not included
 
-- **Fixing the estate.** The right long-term answer is to put the boxes in the
+- **Fixing the inventory.** The right long-term answer is to put the boxes in the
   test groups (or tag them) rather than leave them in production groups. The
   group half of the rule starts working the day that happens; until then the
   name half carries it.

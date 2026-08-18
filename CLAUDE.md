@@ -26,7 +26,7 @@ uv run pytest -k "test_name"               # single test by name
 | `config.py` | Env var loading, multi-instance config |
 | `data.py` | Shared data fetching, `ServerRow`, `extract_country()`, constants, region maps |
 | `fetch.py` | Shared fetch helpers (`fetch_traffic_map`, `fetch_cpu_map`, `fetch_enabled_hosts`) |
-| `classify.py` | Host classification + provider detection (93 providers, 368 CIDRs). No tools/ imports |
+| `classify.py` | Host classification + provider detection. Table loaded from `data/provider_cidrs.json` (generated — see `scripts/gen_provider_cidrs.py`); override with `ZABBIX_PROVIDER_CIDRS`. No tools/ imports |
 | `rollback.py` | Pre-mutation snapshots, `SNAPSHOT_CONFIG` |
 | `excel.py` | Shared Excel formatting (bandwidth thresholds, color fills) |
 | `formatters.py` | Output formatters (severity labels, host/trigger formatting) |
@@ -104,7 +104,8 @@ uv run pytest -k "test_name"               # single test by name
 | `ZABBIX_COMPACT` / `ZABBIX_COMPACT_TOOLS` | Token optimization |
 | `ZABBIX_RESPONSE_BUDGET` | Max chars per response (default: 6000) |
 | `ZABBIX_READ_ONLY` | Disable write operations |
-| `ZBBX_SENSITIVE_STRINGS` | Optional deny-list (file path or inline `a,b,c`) of deployment-specific terms that must never appear in fixtures. Enforced by the fixture guard when set; skipped loudly when unset. Never commit the list — ADR 119 |
+| `ZABBIX_PROVIDER_CIDRS` | Provider → CIDR map (inline JSON or a file path) searched before the generated table, most-specific-first. Unset = generated table only, ADR 120 |
+| `ZBBX_SENSITIVE_STRINGS` | Optional deny-list (file path or inline `a,b,c`) of identifiers that must not appear in fixtures. Enforced by the fixture guard when set; skipped loudly when unset — ADR 119 |
 
 ## Adding a new tool
 
