@@ -32,3 +32,8 @@ htmlcov/
 .DS_Store
 Thumbs.db
 tasks.md
+
+# Local review tooling — runs under pytest in this checkout, not part of the
+# package.
+tests/test_hostname_guard.py
+docs/adr/121-hostname-examples-allow-list.md
