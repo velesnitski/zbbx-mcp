@@ -21,6 +21,15 @@ Accurate provider detection therefore comes from the operator, not the package
 You then replace each placeholder with the provider's name — that part needs a
 human, because only you can look up who announces the block.
 
+**Relationship to the `identify_providers` tool.** That tool answers the same
+question interactively and is the better choice when you just want to look: it
+prints a table of unresolved prefixes with a reverse-DNS hint per prefix. This
+script exists for the one thing the tool does not do — write the file. It uses
+the same reverse-DNS approach, so the two should agree.
+
+(The lookup helper is currently duplicated between them. Worth extracting into
+a shared module the next time either is touched.)
+
 **The output describes your infrastructure. Keep it out of version control.**
 
 Usage::
@@ -39,6 +48,7 @@ import ipaddress
 import json
 import os
 import pathlib
+import socket
 import sys
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent / "src"))
@@ -65,6 +75,21 @@ async def collect(url: str, token: str) -> list[tuple[str, str]]:
             if ip:
                 out.append((str(h.get("host", "")), ip))
     return out
+
+
+def rdns_label(ip: str) -> str:
+    """The registrable-ish tail of a reverse-DNS name, or "".
+
+    `clients.your-server.de` and `clients.gthost.com` name the operator far
+    better than a placeholder does, and this is exactly what the
+    `identify_providers` tool surfaces. A prefix with no PTR simply keeps its
+    placeholder — an unnamed entry is still a usable range.
+    """
+    try:
+        parts = socket.gethostbyaddr(ip)[0].split(".")
+    except (socket.herror, socket.gaierror, OSError):
+        return ""
+    return ".".join(parts[-3:]) if len(parts) >= 3 else ".".join(parts)
 
 
 def unresolved(pairs: list[tuple[str, str]]) -> dict[str, list[str]]:
@@ -107,10 +132,14 @@ def main() -> int:
 
     draft: dict[str, list[str]] = {}
     for i, (block, hosts) in enumerate(ordered, 1):
-        # The placeholder carries the hostnames so you can tell which block is
-        # which without cross-referencing. Rename the key; keep the value.
-        label = f"RENAME-ME-{i:02d} ({len(hosts)} hosts: {', '.join(sorted(hosts)[:3])})"
-        draft[label] = [block]
+        sample = str(ipaddress.ip_network(block).network_address + 1)
+        name = rdns_label(sample)
+        # A PTR names the operator; without one, the placeholder carries the
+        # hostnames so you can still tell which block is which.
+        label = name or f"RENAME-ME-{i:02d} ({len(hosts)} hosts: {', '.join(sorted(hosts)[:3])})"
+        draft.setdefault(label, [])
+        if block not in draft[label]:
+            draft[label].append(block)
 
     if args.out.exists():
         print(f"{args.out} exists — refusing to overwrite", file=sys.stderr)
@@ -120,7 +149,9 @@ def main() -> int:
     total = sum(len(h) for h in kept.values())
     print(f"{len(pairs)} addresses read; {total} unresolved across {len(kept)} /16 blocks")
     print(f"draft written to {args.out}")
-    print("\nNext: replace each RENAME-ME-* key with the provider's name, then")
+    named = sum(1 for k in draft if not k.startswith("RENAME-ME-"))
+    print(f"{named} of {len(draft)} entries named from reverse DNS")
+    print("\nNext: check the names, replace any RENAME-ME-* key, then")
     print(f'  export ZABBIX_PROVIDER_CIDRS={args.out}')
 
     if args.wire:
