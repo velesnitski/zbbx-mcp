@@ -84,6 +84,76 @@ class ShapingVerdict:
     note: str
 
 
+# Worst-first. A host is reported at its worse direction, because the action a
+# reader takes is driven by the direction that is constrained, not by the
+# healthy one.
+_SEVERITY = ("shaped", "capped", "dropped", "normal", "idle", "insufficient")
+
+# Two ceilings this close are treated as the same limit. A shared port or plan
+# limit lands on one number in both directions; independent policers rarely do.
+_SYMMETRY_TOL = 0.10
+
+
+def combine_directions(
+    inbound: ShapingVerdict | None,
+    outbound: ShapingVerdict | None,
+) -> tuple[str, str]:
+    """Headline verdict and a direction note for a host measured both ways.
+
+    Measuring one direction cannot see a cap on the other, and for a relay
+    fleet egress is the likelier one to be limited — it is what costs the
+    provider transit. So both are classified independently, and the pair says
+    something neither does alone:
+
+    * **both pinned at the same ceiling** — one limit applies to the link.
+      A port speed or a plan tier, not a policer aimed at traffic.
+    * **both pinned at different ceilings** — two separate limits, i.e. an
+      asymmetric plan.
+    * **one pinned, one free** — a shaper on that direction specifically.
+
+    Those are three different tickets, and they are indistinguishable from a
+    single direction. Pure.
+    """
+    def rank(v: ShapingVerdict | None) -> int:
+        return _SEVERITY.index(v.verdict) if v else len(_SEVERITY)
+
+    if inbound is None and outbound is None:
+        return "insufficient", "no traffic items in either direction"
+    worse = inbound if rank(inbound) <= rank(outbound) else outbound
+    headline = worse.verdict if worse else "insufficient"
+
+    pinned = {
+        name: v for name, v in (("in", inbound), ("out", outbound))
+        if v is not None and v.verdict in ("shaped", "capped")
+    }
+    if len(pinned) == 2:
+        ci, co = pinned["in"].ceiling_mbps, pinned["out"].ceiling_mbps
+        hi = max(ci, co)
+        if hi > 0 and abs(ci - co) / hi <= _SYMMETRY_TOL:
+            return headline, (f"both directions pinned at ~{hi:.0f} Mbps — one "
+                              "limit on the link (port speed or plan), not a "
+                              "per-direction shaper")
+        return headline, (f"both directions pinned, at different ceilings "
+                          f"(in {ci:.0f} / out {co:.0f} Mbps) — two separate limits")
+    if len(pinned) == 1:
+        name, v = next(iter(pinned.items()))
+        opposite = "out" if name == "in" else "in"
+        other = outbound if name == "in" else inbound
+        if other is None:
+            # Without the other direction there is nothing to be asymmetric
+            # against: a one-sided shaper and a link-wide limit look identical.
+            return headline, (f"{name}bound pinned at {v.ceiling_mbps:.0f} Mbps; "
+                              f"{opposite}bound not measured — cannot tell a "
+                              "per-direction shaper from a limit on the link")
+        return headline, (f"{name}bound only, pinned at {v.ceiling_mbps:.0f} Mbps "
+                          f"({opposite} reads {other.verdict}) — a shaper on "
+                          "that direction")
+    if inbound and outbound:
+        return headline, f"in {inbound.verdict}, out {outbound.verdict}"
+    only = "in" if inbound else "out"
+    return headline, f"{only}bound only — no items for the other direction"
+
+
 def percentile(values: list[float], q: float) -> float:
     """Nearest-rank percentile of ``values``. Pure; 0.0 for an empty list.
 
@@ -489,6 +559,70 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                         + excluded_test_note(excluded)
                     )
 
+                # The same pass for egress. Measuring only ingress cannot see a
+                # cap on the other direction, and for a relay fleet egress is
+                # the likelier one to be limited — it is what costs the
+                # provider transit. Classified independently: the two
+                # directions have their own baselines and their own ceilings.
+                out_verdicts: dict[str, ShapingVerdict] = {}
+                out_items = await physical_traffic_items(
+                    client, filtered_ids, direction="out")
+                if out_items:
+                    out_by_host: dict[str, list[dict]] = {}
+                    for it in out_items:
+                        out_by_host.setdefault(it["hostid"], []).append(it)
+                    out_short: list[str] = []
+                    for items in out_by_host.values():
+                        items.sort(key=_lv, reverse=True)
+                        out_short.extend(i["itemid"] for i in items[:_IFACE_CANDIDATES])
+                    out_trends = await client.call("trend.get", {
+                        "itemids": out_short,
+                        "time_from": now - total_h * 3600,
+                        "output": ["itemid", "clock", "value_max"],
+                        "limit": len(out_short) * total_h + 1000,
+                    })
+                    o_recent: dict[str, list[float]] = {}
+                    o_base: dict[str, list[float]] = {}
+                    for tr in out_trends:
+                        try:
+                            clock = int(tr["clock"])
+                            val = float(tr["value_max"]) / TRAFFIC_DIVISOR
+                        except (ValueError, TypeError, KeyError):
+                            continue
+                        (o_recent if clock >= cut else o_base).setdefault(
+                            tr["itemid"], []).append(val)
+                    for hid, items in out_by_host.items():
+                        best_iid, best_c = None, -1.0
+                        for it in items[:_IFACE_CANDIDATES]:
+                            iid = it["itemid"]
+                            c = percentile(o_base.get(iid) or o_recent.get(iid) or [], 0.95)
+                            if c > best_c:
+                                best_iid, best_c = iid, c
+                        if best_iid is None:
+                            continue
+                        out_verdicts[hid] = classify_shaping(
+                            o_recent.get(best_iid, []), o_base.get(best_iid, []),
+                            min_ceiling_mbps=min_ceiling_mbps,
+                            min_drop_pct=min_drop_pct, min_hit_rate=min_hit_rate,
+                        )
+
+                # What the pair says that neither direction says alone.
+                direction_notes: dict[str, str] = {}
+                for hid in set(verdicts) | set(out_verdicts):
+                    _headline, why = combine_directions(
+                        verdicts.get(hid), out_verdicts.get(hid))
+                    direction_notes[hid] = why
+                # An egress-only limit is invisible to the ingress pass, so it
+                # must be promoted into the flagged set rather than left to a
+                # footnote nobody reads.
+                egress_only = sorted(
+                    host_map.get(hid, {}).get("host", hid)
+                    for hid, ov in out_verdicts.items()
+                    if ov.verdict in (SHAPED, CAPPED)
+                    and verdicts.get(hid) is not None
+                    and verdicts[hid].verdict not in (SHAPED, CAPPED)
+                )
+
                 # A host that could not be examined must say so. Absent from
                 # the table has to mean "unmeasured", never "healthy" — the
                 # whole reason this bug survived was that it looked like a
@@ -573,10 +707,16 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     counts[v.verdict] = counts.get(v.verdict, 0) + 1
 
                 wanted = {SHAPED, CAPPED} if include_capped else {SHAPED}
+                # A host whose EGRESS is pinned belongs in the table even when
+                # its ingress reads clean — that asymmetry is the finding, and
+                # leaving it to a footnote reproduces the blind spot this
+                # change exists to close.
                 flagged = [(hid, v) for hid, v in verdicts.items()
-                           if v.verdict in wanted]
+                           if v.verdict in wanted
+                           or (out_verdicts.get(hid) is not None
+                               and out_verdicts[hid].verdict in wanted)]
                 _order = {SHAPED: 0, CAPPED: 1}
-                flagged.sort(key=lambda hv: (_order[hv[1].verdict],
+                flagged.sort(key=lambda hv: (_order.get(hv[1].verdict, 2),
                                              -hv[1].drop_pct))
 
                 header = (
@@ -586,7 +726,9 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     f"{counts.get(NORMAL, 0)} normal, {counts.get(IDLE, 0)} idle, "
                     f"{counts.get(NO_BASELINE, 0)} no-baseline, "
                     f"{counts.get(INSUFFICIENT, 0)} insufficient, "
-                    f"{len(peer_capped)} peer-capped)\n"
+                    f"{len(peer_capped)} peer-capped"
+                    + (f", {len(egress_only)} egress-only" if egress_only else "")
+                    + ")\n"
                 )
 
                 # Built once and shown on BOTH exits. A peer-capped host is
@@ -631,8 +773,8 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 parts = [
                     header,
                     peer_block,
-                    "| Server | Country | Ceiling | Was | Drop | At ceiling | Verdict |",
-                    "|--------|---------|--------:|----:|-----:|-----------:|---------|",
+                    "| Server | Country | Ceiling | Was | Drop | At ceiling | Verdict | Direction |",
+                    "|--------|---------|--------:|----:|-----:|-----------:|---------|-----------|",
                 ]
                 for hid, v in flagged[:max_results]:
                     h = host_map.get(hid, {})
@@ -642,7 +784,8 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                         f"| {h.get('host', hid)} | {extract_country(h.get('host', ''))} | "
                         f"{v.ceiling_mbps:.1f} Mbps | {was} | {drop} | "
                         f"{v.hits}/{v.active_hours} ({v.hit_rate:.0%}) | "
-                        f"{'SHAPED' if v.verdict == SHAPED else 'capped'} |"
+                        f"{'SHAPED' if v.verdict == SHAPED else 'capped'} | "
+                        f"{direction_notes.get(hid, '–')} |"
                     )
                 if len(flagged) > max_results:
                     parts.append(f"\n*{len(flagged) - max_results} more omitted*")
@@ -652,7 +795,9 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     "drop — a pre-existing limit, or genuinely constant demand, "
                     "which throughput alone cannot separate. Hosts that merely "
                     "lost traffic are counted as `dropped` above and belong to "
-                    "`detect_traffic_drops`._"
+                    "`detect_traffic_drops`. The Direction column reads both ways: one "
+                    "ceiling in both is a limit on the link (port or plan); a "
+                    "ceiling in one is a shaper on that direction._"
                 )
                 return ("\n".join(parts) + unjudged_note + unexamined_note
                         + excluded_test_note(excluded))

@@ -172,6 +172,8 @@ fixed headings (`## Problem`, `## Decision`, `## Test approach`,
 
 | [123](123-error-reports-are-an-egress-channel.md) | An error report is an egress channel | Sentry scrubbing covered credential words only, so `connect to <address> failed` and `host <name> unreachable` left the process verbatim — found from a real report whose text embedded a live address. Addresses and machine-shaped names are now replaced in place, credentials and configured deny-list terms drop the whole string. Deliberately over-broad: the trade is not symmetric. |
 
+| [124](124-shaping-is-measured-both-directions.md) | Shaping is measured in both directions | The detector read inbound only — the wrong half if you can pick one, since a provider's incentive is to limit egress, which is what it pays transit for. An egress-only cap was invisible, not under-reported. Both directions are now classified independently and combined: one ceiling in both is a limit on the link, one ceiling in one is a shaper on that direction, and an unmeasured opposite says it cannot tell. |
+
 ## Writing a new ADR
 
 1. Pick the next number (`ls docs/adr/*.md | wc -l` + 1).
