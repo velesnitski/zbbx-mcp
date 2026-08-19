@@ -90,3 +90,25 @@ fail on its own evidence.
 deliberately broken implementation must be rejected by the oracles, the address
 rule must reject something just outside each allowed range, and the deny-list
 parser handles both configured forms.
+
+## Addendum (2026-08-19) — two ideas borrowed from a sibling repo
+
+`detect-blocking`'s data guard solves the same problem, and does two things
+this one did not.
+
+**A coverage floor.** Its magnitude layer refuses to pass if it scanned fewer
+files than expected — *"a guard that scans nothing reads green. This one
+refuses to."* That is the failure mode this repo keeps meeting: a pathspec the
+shell mangles, a dry-run pattern narrower than the real one, a cross-check
+comparing zero fields. Every one of them **looked like a pass**. All three
+layers here now assert a floor, and a test proves the floors fire.
+
+**Partial self-exemption.** The magnitude layer must skip the guards' own
+files, because each carries a deliberately invalid sample to prove it is not
+vacuous. The address layer must not: a blanket skip makes the file defining the
+address rule the one place any address passes unchecked.
+
+This file previously exempted itself from *both*. The address exemption is
+removed; its two boundary probes — one just outside RFC 1918, one just outside
+TEST-NET-3 — are named in the placeholder set instead, so they are visible and
+countable rather than covered by a wildcard.

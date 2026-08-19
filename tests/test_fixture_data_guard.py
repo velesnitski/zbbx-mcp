@@ -29,13 +29,24 @@ from tests.test_guards import TestFleetDataGuard
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 
-# The guards' own files are exempt, and must be. Both carry deliberately
-# invalid samples — a fake fleet magnitude, an address that has to be
-# rejected — because that is how each proves it is not vacuous. Scanning them
-# would make every guard fail on its own evidence.
-_SELF_EXEMPT = {"test_guards.py", "test_fixture_data_guard.py"}
+# Self-exemption is deliberately PARTIAL.
+#
+# The magnitude layer must skip the guards' own files: each carries a
+# deliberately invalid sample — a fake fleet magnitude — because that is how it
+# proves it is not vacuous, and scanning them would make every guard fail on
+# its own evidence.
+#
+# The ADDRESS layer does not get that exemption. A blanket skip would make the
+# file defining the address rule the one place any address passes unchecked —
+# precisely the wrong property for that file. Its own boundary probes are
+# non-global or listed in `_doc_placeholders`, so nothing routable can hide
+# here either.
+_MAGNITUDE_SELF_EXEMPT = {"test_guards.py", "test_fixture_data_guard.py"}
 TESTS = [p for p in sorted((ROOT / "tests").glob("*.py"))
-         if p.name not in _SELF_EXEMPT]
+         if p.name not in _MAGNITUDE_SELF_EXEMPT]
+
+# Every tracked test file, including this one — used by the address layer.
+ALL_TESTS = sorted((ROOT / "tests").glob("*.py"))
 
 # RFC 1918, loopback, link-local, "this network", and the RFC 5737
 # documentation ranges.
@@ -51,6 +62,20 @@ _ALLOWED_NETS = [
     )
 ]
 _IP_RE = re.compile(r"\b\d{1,3}(?:\.\d{1,3}){3}\b")
+
+# A guard that scans nothing reads exactly like a guard that found nothing.
+# These floors refuse that: if the file list ever breaks — a bad glob, a
+# pathspec the shell mangles, a rename — the guard fails loudly instead of
+# passing on an empty set. Set well below the real counts so ordinary growth
+# and pruning never trip them; they exist to catch zero, not to track size.
+_MIN_TRACKED_FILES = 100
+_MIN_TEST_FILES = 20
+
+
+def _assert_scanned(n: int, floor: int, what: str) -> None:
+    assert n >= floor, (
+        f"{what} guard scanned only {n} file(s), expected at least {floor} — "
+        "the file list is broken, so a pass here would mean nothing")
 
 
 def _is_allowed(text: str) -> bool:
@@ -73,6 +98,7 @@ def test_fixture_addresses_come_from_documentation_ranges():
                         "203.0.113.x (RFC 5737) so a real address can never be "
                         "mistaken for scaffolding"
                     )
+    _assert_scanned(len(TESTS), _MIN_TEST_FILES, "fixture address")
     assert not violations, "\n".join(violations)
 
 
@@ -96,6 +122,7 @@ def test_fixtures_carry_no_fleet_magnitudes():
                 if rx.search(line):
                     violations.append(
                         f"{path.name}:{n} — {why}: {line.strip()[:70]}")
+    _assert_scanned(len(TESTS), _MIN_TEST_FILES, "fixture magnitude")
     assert not violations, "\n".join(violations)
 
 
@@ -129,22 +156,35 @@ def test_no_infrastructure_addresses_anywhere_in_the_repo():
         declared |= {str(ipaddress.ip_network(c, strict=False).network_address)
                      for c, _ in entries}
 
-    # Classic dummies used in docstrings/ADRs to show CIDR syntax. Kept
-    # explicit and tiny so the exemption cannot quietly grow.
-    doc_placeholders = {"1.2.3.4", "1.2.3.0", "1.2.0.0"}
+    # Classic dummies used in docstrings/ADRs to show CIDR syntax, plus this
+    # guard's own boundary probes. Kept explicit and tiny so the exemption
+    # cannot quietly grow.
+    #
+    # The probes are addresses that must be REJECTED for the rule to be worth
+    # anything: one just outside RFC 1918, one just outside TEST-NET-3. They
+    # are listed here rather than by exempting this whole file, because a
+    # blanket skip would make the file defining the address rule the one place
+    # any address passes unchecked. Both sit one address outside an allowed
+    # range, so neither can be a real host.
+    doc_placeholders = {"1.2.3.4", "1.2.3.0", "1.2.0.0",
+                        "172.15.0.1", "203.0.114.9"}
 
     tracked = subprocess.run(
         ["git", "ls-files"], capture_output=True, text=True, cwd=ROOT
     ).stdout.split()
     violations = []
+    scanned = 0
     for rel in tracked:
         path = ROOT / rel
-        if not path.is_file() or path.name == pathlib.Path(__file__).name:
+        # No self-exemption here, deliberately: see the note at the top. This
+        # file is subject to the address rule like every other.
+        if not path.is_file():
             continue
         try:
             text = path.read_text()
         except (UnicodeDecodeError, OSError):
             continue
+        scanned += 1
         for n, line in enumerate(text.splitlines(), 1):
             for tok in _IP_RE.findall(line):
                 if _is_allowed(tok) or tok in declared or tok in doc_placeholders:
@@ -154,6 +194,7 @@ def test_no_infrastructure_addresses_anywhere_in_the_repo():
                     "documentation space nor a declared allocation-table "
                     "network. Fixture addresses must be from RFC 5737"
                 )
+    _assert_scanned(scanned, _MIN_TRACKED_FILES, "repo-wide address")
     assert not violations, "\n".join(violations)
 
 
@@ -210,3 +251,34 @@ def test_deny_list_parsing_handles_both_forms(monkeypatch, tmp_path):
     assert _deny_terms() == ["gamma", "delta"]
     monkeypatch.delenv("ZBBX_SENSITIVE_STRINGS")
     assert _deny_terms() == []
+
+
+def test_the_coverage_floors_actually_fire():
+    """A guard that scans nothing reads exactly like one that found nothing.
+
+    Every silent-verifier failure this repo has hit looked like a pass: a
+    pathspec the shell mangled, a dry-run pattern narrower than the real one, a
+    cross-check comparing zero fields. The floors turn "scanned nothing" from a
+    green result into a red one, so they have to be shown to fire.
+    """
+    with pytest.raises(AssertionError, match="scanned only 0"):
+        _assert_scanned(0, _MIN_TEST_FILES, "probe")
+    with pytest.raises(AssertionError, match="would mean nothing"):
+        _assert_scanned(_MIN_TRACKED_FILES - 1, _MIN_TRACKED_FILES, "probe")
+    _assert_scanned(_MIN_TRACKED_FILES, _MIN_TRACKED_FILES, "probe")   # boundary
+
+
+def test_this_file_is_subject_to_the_address_rule():
+    """The self-exemption is partial, and that must stay true.
+
+    A blanket skip would make the file defining the address rule the one place
+    any address passes unchecked. If someone re-adds this file to an exemption
+    set, this fails.
+    """
+    me = pathlib.Path(__file__).name
+    # The magnitude layer skips this file — it must, to carry invalid samples.
+    assert me in _MAGNITUDE_SELF_EXEMPT
+    assert not any(p.name == me for p in TESTS)
+    # The address layer does not: this file is in the list it walks, and its
+    # own boundary probes are named explicitly rather than waved through.
+    assert any(p.name == me for p in ALL_TESTS)
