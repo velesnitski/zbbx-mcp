@@ -62,8 +62,12 @@ failure.
   connection to an agent port failed.
 - Over-redaction will occasionally hit a hyphenated word not on the allow-list.
   Adding one is a one-line change; the reverse mistake is not recoverable.
-- Structured `extra` fields are still scrubbed by key name only. A value placed
-  under an innocuous key is not examined — worth extending the same way.
+- Structured `extra` fields are scrubbed by key name **and** by value, at any
+  depth. Keying alone assumed a sensitive value always sits under a revealing
+  name, but an address under `target` or `arg` identifies just as well as one
+  under `host`. The recursion guard fails **closed**: strings are scrubbed at
+  any depth and only an over-deep container is dropped, because a guard that
+  passes the branch through unexamined is not a guard.
 
 ## Verification
 

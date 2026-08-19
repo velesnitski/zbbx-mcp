@@ -228,13 +228,37 @@ _HOSTISH_ALLOW = frozenset({
 })
 
 
+def _scrub_nested(value: object, _depth: int = 0) -> object:
+    """Apply `_scrub_value` to every string inside a nested structure.
+
+    Sentry `extra` payloads are arbitrary JSON, so an identifier can sit at any
+    depth. Bounded recursion: a hostile or cyclic structure must not turn error
+    reporting into a hang.
+    """
+    if isinstance(value, str):
+        return _scrub_value(value)          # scrubbed at any depth
+    if _depth > 6:
+        # Past the cap, drop the branch rather than pass it through: a guard
+        # that fails open is not a guard.
+        return "[TRUNCATED]"
+    if isinstance(value, dict):
+        return {k: _scrub_nested(v, _depth + 1) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_scrub_nested(v, _depth + 1) for v in value]
+    return value
+
+
 def _scrub_event(event: dict, hint: dict) -> dict:
     """Remove sensitive data before sending to Sentry."""
-    # Scrub extra fields
+    # Scrub extra fields: the key name AND the value. Keying alone assumed a
+    # sensitive value always sits under a revealing name, but a host address
+    # under `target` or `arg` is just as identifying as one under `host`.
     if "extra" in event:
         for key in list(event["extra"].keys()):
             if any(s in key.lower() for s in _SENSITIVE_PATTERNS):
                 event["extra"][key] = "[REDACTED]"
+            else:
+                event["extra"][key] = _scrub_nested(event["extra"][key])
     # Scrub exception messages
     if "exception" in event:
         for exc in event.get("exception", {}).get("values", []):

@@ -543,7 +543,8 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
 
         @mcp.tool()
         async def search_hosts_by_ip(
-            query: str,
+            query: str = "",
+            ip: str = "",
             max_results: int = 50,
             instance: str = "",
         ) -> str:
@@ -553,12 +554,20 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
 
             Args:
                 query: IP, CIDR, or dotted prefix
+                ip: Alias for `query` — a tool named "by_ip" invites it
                 max_results: Max results (default: 50)
                 instance: Zabbix instance (optional)
             """
             try:
                 client = resolver.resolve(instance)
-                q = query.strip()
+                # `ip` is accepted because the tool's own name suggests it, and
+                # a validation error on the obvious spelling is a worse answer
+                # than simply understanding it.
+                q = (query or ip).strip()
+                if not q:
+                    return ("Provide an IP, CIDR, or dotted prefix — "
+                            "e.g. query='192.0.2.10', query='192.0.2.0/24', "
+                            "or query='192.0.2'.")
 
                 net = None
                 prefix = None
@@ -600,12 +609,12 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                             break
 
                 if not matches:
-                    return f"No hosts with IP matching '{query}'."
+                    return f"No hosts with IP matching '{q}'."
 
                 total = len(matches)
                 matches = matches[:max_results]
 
-                lines = [f"**{total} hosts** matching `{query}`" + (f" (showing {max_results})" if total > max_results else "")]
+                lines = [f"**{total} hosts** matching `{q}`" + (f" (showing {max_results})" if total > max_results else "")]
                 lines.append("| Host | Name | Host ID | IP | Country | Product |")
                 lines.append("|------|------|---------|----|---------|---------|")
                 for h, ip in matches:

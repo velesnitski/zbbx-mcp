@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import pytest
 
-from zbbx_mcp.logging import _scrub_value
+from zbbx_mcp.logging import _scrub_event, _scrub_nested, _scrub_value
 
 
 class TestIdentifiersAreRemoved:
@@ -85,3 +85,44 @@ def test_the_scrubber_is_not_vacuous():
     """A scrubber that redacts nothing would pass every test above by accident."""
     assert _scrub_value("srv-nl01") != "srv-nl01"
     assert _scrub_value("192.0.2.1") != "192.0.2.1"
+
+
+class TestExtraFields:
+    """`extra` was scrubbed by key name only.
+
+    That assumed a sensitive value always sits under a revealing name. A host
+    address under `target` or `arg` is exactly as identifying as one under
+    `host`, and nothing was looking at values.
+    """
+
+    def test_a_value_under_an_innocuous_key_is_scrubbed(self):
+        ev = {"extra": {"target": "192.0.2.10", "note": "srv-nl01 down"}}
+        out = _scrub_event(ev, {})
+        assert out["extra"]["target"] == "[IP]"
+        assert "[HOST]" in out["extra"]["note"]
+
+    def test_a_revealing_key_still_drops_the_whole_value(self):
+        ev = {"extra": {"api_token": "abc123"}}
+        assert _scrub_event(ev, {})["extra"]["api_token"] == "[REDACTED]"
+
+    def test_nested_structures_are_reached(self):
+        ev = {"extra": {"args": {"inner": ["192.0.2.1", {"deep": "edge-de01"}]}}}
+        out = _scrub_event(ev, {})["extra"]["args"]["inner"]
+        assert out[0] == "[IP]"
+        assert out[1]["deep"] == "[HOST]"
+
+    def test_non_strings_survive(self):
+        # Counts and flags are what make a report useful; only identifiers go.
+        out = _scrub_nested({"n": 5, "ok": True, "none": None})
+        assert out == {"n": 5, "ok": True, "none": None}
+
+    def test_the_depth_guard_fails_closed(self):
+        """A guard that fails open is not a guard.
+
+        Strings are scrubbed at any depth; only an over-deep container is
+        dropped, so nothing identifying rides out past the cap.
+        """
+        deep = {"a": {"b": {"c": {"d": {"e": {"f": {"g": "192.0.2.1"}}}}}}}
+        assert "192.0.2.1" not in repr(_scrub_nested(deep))
+        beyond = {"a": {"b": {"c": {"d": {"e": {"f": {"g": {"h": {"i": 1}}}}}}}}}
+        assert "[TRUNCATED]" in repr(_scrub_nested(beyond))
