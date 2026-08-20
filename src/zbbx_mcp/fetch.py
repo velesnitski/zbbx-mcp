@@ -16,6 +16,7 @@ from typing import Any
 from zbbx_mcp.classify import classify_host as _classify_host
 from zbbx_mcp.classify import detect_provider
 from zbbx_mcp.client import ZabbixClient
+from zbbx_mcp.country import INVENTORY_COUNTRY_FIELDS
 from zbbx_mcp.data import (
     GB_BYTES,
     KEY_AGENT_VERSION,
@@ -96,8 +97,8 @@ async def fetch_enabled_hosts(
 ) -> list[dict]:
     """Fetch all enabled hosts with optional groups / interfaces / inventory.
 
-    ``inventory=True`` requests Zabbix host inventory (``country_code``,
-    ``country_name``, ``location``) and bypasses the client-side cache —
+    ``inventory=True`` requests Zabbix host inventory
+    (``INVENTORY_COUNTRY_FIELDS``) and bypasses the client-side cache —
     use only when the caller actually needs an inventory fallback.
 
     ``exclude_test=True`` drops test/staging hosts (ADR 080/089) so they don't
@@ -137,7 +138,7 @@ async def fetch_enabled_hosts(
     if interfaces:
         params["selectInterfaces"] = ["ip"]
     if inventory:
-        params["selectInventory"] = ["country_code", "country_name", "location"]
+        params["selectInventory"] = list(INVENTORY_COUNTRY_FIELDS)
     # client.call returns dict | list — for host.get the actual return is
     # always a list. Narrow explicitly for downstream callers and the cache.
     result = await client.call("host.get", params)

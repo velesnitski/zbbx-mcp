@@ -56,7 +56,7 @@ class TestFormatHostDetailContext:
 class TestGetHostEnrichment:
     def _client(self):
         return RecordingClient({
-            "host.get": [dict(BASE, inventory={"country_code": "FJ"},
+            "host.get": [dict(BASE, inventory={"site_country": "FJ"},
                               parentTemplates=[{"name": "Tmpl A"}])],
             "usermacro.get": [
                 {"macro": "{$COST_MONTH}", "value": "42"},

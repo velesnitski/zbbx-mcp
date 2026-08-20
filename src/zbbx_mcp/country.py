@@ -24,6 +24,8 @@ import re
 
 __all__ = [
     "REGION_MAP",
+    "HOST_INVENTORY_FIELDS",
+    "INVENTORY_COUNTRY_FIELDS",
     "CAPITAL_COORDS",
     "ISO2_CODES",
     "country_inventory_gap",
@@ -33,6 +35,44 @@ __all__ = [
     "resolve_country",
     "countries_for_region",
 ]
+
+
+# Zabbix host-inventory field names, from the fixed `host_inventory` schema.
+# Inventory is not free-form: the field set is defined by Zabbix, and asking
+# for a name outside it is not an error — `host.get` accepts the request and
+# returns nothing for it (ADR 088's silent-degradation class). A typo or an
+# invented field therefore produces an empty result that is indistinguishable
+# from "this host has no inventory".
+HOST_INVENTORY_FIELDS = frozenset({
+    "alias", "asset_tag", "chassis", "contact", "contract_number",
+    "date_hw_decomm", "date_hw_expiry", "date_hw_install", "date_hw_purchase",
+    "deployment_status", "hardware", "hardware_full", "host_netmask",
+    "host_networks", "host_router", "hw_arch", "installer_name", "location",
+    "location_lat", "location_lon", "macaddress_a", "macaddress_b", "model",
+    "name", "notes", "oob_ip", "oob_netmask", "oob_router", "os", "os_full",
+    "os_short", "poc_1_cell", "poc_1_email", "poc_1_name", "poc_1_notes",
+    "poc_1_phone_a", "poc_1_phone_b", "poc_1_screen", "poc_2_cell",
+    "poc_2_email", "poc_2_name", "poc_2_notes", "poc_2_phone_a",
+    "poc_2_phone_b", "poc_2_screen", "serialno_a", "serialno_b",
+    "site_address_a", "site_address_b", "site_address_c", "site_city",
+    "site_country", "site_notes", "site_rack", "site_state", "site_zip",
+    "software", "software_app_a", "software_app_b", "software_app_c",
+    "software_app_d", "software_app_e", "software_full", "tag", "type",
+    "type_full", "url_a", "url_b", "url_c", "vendor",
+})
+
+# The inventory fields the country fallback reads. Requested by every caller
+# that passes `selectInventory`, and consumed by `resolve_country` below.
+#
+# These two lists used to live apart — the request in `fetch.py`, `hosts.py`
+# and `diagnose.py`, the parse here — with nothing tying them together. They
+# drifted: every caller asked for `country_code` and `country_name`, neither of
+# which is a Zabbix inventory field, so the request was silently ignored, the
+# inventory dict never carried those keys, and the whole fallback below was
+# unreachable from the day it shipped (ADR 129). Keeping the request and the
+# parse adjacent is the structural half of the fix; the guard test is the
+# other half.
+INVENTORY_COUNTRY_FIELDS = ["site_country", "site_city", "location"]
 
 
 # Two distinct host-name conventions carry a country, and they are NOT
@@ -533,9 +573,9 @@ def normalize_country(value: str) -> str:
 def resolve_country(host: dict) -> str:
     """Resolve a host's country from name first, then Zabbix inventory.
 
-    Order: ``extract_country(host['host'])`` → ``inventory.country_code``
-    → ``normalize_country(inventory.country_name)``. Returns ``""`` when
-    none of the three sources yield a valid 2-letter code.
+    Order: ``extract_country(host['host'])``, then each of
+    ``INVENTORY_COUNTRY_FIELDS`` in turn, normalised and validated. Returns
+    ``""`` when no source yields a valid 2-letter code.
 
     The caller must include ``selectInventory`` in its ``host.get`` to
     populate the inventory fields. Use this only inside country-filter
@@ -547,14 +587,22 @@ def resolve_country(host: dict) -> str:
         return cc
     inv = host.get("inventory") or {}
     if isinstance(inv, dict):
-        code = (inv.get("country_code") or "").strip()
-        if code:
-            normalized = normalize_country(code)
+        # In INVENTORY_COUNTRY_FIELDS order: the explicit country field first,
+        # then the looser location text. `normalize_country` accepts an ISO-2,
+        # ISO-3 or English name and validates the result, so a city or a free
+        # -text location that is not a country simply yields "" rather than a
+        # wrong code.
+        for field in INVENTORY_COUNTRY_FIELDS:
+            value = (inv.get(field) or "").strip()
+            if not value:
+                continue
+            normalized = normalize_country(value)
             if normalized:
                 return normalized
-        name = (inv.get("country_name") or "").strip()
-        if name:
-            normalized = normalize_country(name)
-            if normalized:
-                return normalized
+            # "Amsterdam, NL" — trailing token is worth one try, and is
+            # validated like any other candidate.
+            if "," in value:
+                normalized = normalize_country(value.rsplit(",", 1)[-1])
+                if normalized:
+                    return normalized
     return ""

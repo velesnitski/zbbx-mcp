@@ -5,6 +5,43 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.16.55] - 2026-08-20
+
+### Fixed — the host-inventory country fallback never ran
+ADR 129. ADR 099 added a fallback that resolves a host's country from Zabbix
+inventory when the name carries no code. Five call sites requested
+`country_code` and `country_name` via `selectInventory`; neither is a Zabbix
+host-inventory field. The schema's country field is `site_country`, alongside
+`site_city` and `location`.
+
+An unknown field is not rejected — `host.get` accepts the request and returns
+nothing for it (the silent-degradation behaviour of ADR 088) — so the inventory
+dict never carried those keys and every branch of the fallback saw an empty
+string. The feature was unreachable from the day it shipped, and invisible,
+because a field that does not exist and a host with no inventory produce the
+same empty result.
+
+Requests and parsing now share `INVENTORY_COUNTRY_FIELDS`
+(`site_country`, `site_city`, `location`), defined next to `resolve_country`
+which consumes it. Values are free text, so each candidate goes through
+`normalize_country` and yields `""` rather than a wrong code when it is not a
+country; `"<city>, <cc>"` gets one validated attempt at the trailing token.
+
+Whether the fallback now *fires* depends on whether this deployment populates
+`site_country` — an unpopulated field yields `""` exactly as before, and the
+existing inventory-gap note still names hosts whose country cannot be resolved.
+
+### Added — a guard tying requested fields to the schema and to the parser
+ADR 129. `HOST_INVENTORY_FIELDS` carries Zabbix's documented inventory column
+set. Tests assert every requested field exists in it, that no dead field name
+survives anywhere in `src`, that every `selectInventory` site uses the shared
+constant rather than an inline list, and that every inventory field
+`resolve_country` reads is one some caller actually requests.
+
+The previous tests passed throughout by supplying `{"country_code": "NL"}` —
+a dict Zabbix cannot produce. They proved the parser handled a shape that
+never arrives. Those fixtures now use real field names.
+
 ## [1.16.54] - 2026-08-20
 
 ### Fixed — `generate_service_brief` reported an unmonitored check as healthy

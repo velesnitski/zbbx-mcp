@@ -7,6 +7,7 @@ import httpx
 from zbbx_mcp.classify import classify_host as _classify_host
 from zbbx_mcp.classify import detect_provider, resolve_datacenter
 from zbbx_mcp.data import (
+    INVENTORY_COUNTRY_FIELDS,
     country_inventory_gap,
     extract_country,
     fetch_enabled_hosts,
@@ -161,7 +162,7 @@ def _inventory_gap_note(hosts: list[dict], cc: str, max_names: int = 5) -> str:
     return (
         f"\n\n_{len(names)} host(s) look like {cc} by name but have no "
         f"resolvable country — likely an inventory gap rather than an absence: "
-        f"{shown}{more}. Set `country_code` in Zabbix host inventory, or check "
+        f"{shown}{more}. Set `site_country` in Zabbix host inventory, or check "
         "the naming convention._"
     )
 
@@ -216,7 +217,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 if country and not cc_filter:
                     return f"Unknown country: {country!r}. Use ISO-2 (RU), ISO-3 (RUS), or full name (Russia)."
                 if cc_filter:
-                    params["selectInventory"] = ["country_code", "country_name"]
+                    params["selectInventory"] = list(INVENTORY_COUNTRY_FIELDS)
                 if status == "enabled":
                     params["filter"] = {"status": "0"}
                 elif status == "disabled":
@@ -427,7 +428,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     "selectInterfaces": ["type", "ip", "port"],
                     # Inventory rides along on the call we already make, so
                     # country resolution costs nothing extra (ADR 099).
-                    "selectInventory": ["country_code", "country_name", "location"],
+                    "selectInventory": list(INVENTORY_COUNTRY_FIELDS),
                     "selectParentTemplates": ["name"],
                 })
 
@@ -493,7 +494,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     "sortfield": "host",
                 }
                 if cc_filter:
-                    params["selectInventory"] = ["country_code", "country_name"]
+                    params["selectInventory"] = list(INVENTORY_COUNTRY_FIELDS)
                 if group:
                     gids = await resolve_group_ids(client, group)
                     if gids is not None:

@@ -351,23 +351,23 @@ class TestResolveCountry:
 
         h = {
             "host": "edge-de9001",
-            "inventory": {"country_code": "FR", "country_name": "France"},
+            "inventory": {"site_country": "France"},
         }
         # Hostname says DE; inventory disagreement loses to the name.
         assert resolve_country(h) == "DE"
 
-    def test_inventory_country_code_used_when_hostname_empty(self):
+    def test_inventory_site_country_used_when_hostname_empty(self):
         from zbbx_mcp.data import resolve_country
 
-        h = {"host": "control-plane-01", "inventory": {"country_code": "us"}}
+        h = {"host": "control-plane-01", "inventory": {"site_country": "us"}}
         assert resolve_country(h) == "US"
 
-    def test_inventory_country_name_used_when_code_empty(self):
+    def test_inventory_location_used_when_site_country_empty(self):
         from zbbx_mcp.data import resolve_country
 
         h = {
             "host": "control-plane-01",
-            "inventory": {"country_code": "", "country_name": "Russia"},
+            "inventory": {"site_country": "", "location": "Russia"},
         }
         assert resolve_country(h) == "RU"
 
@@ -387,7 +387,7 @@ class TestResolveCountry:
     def test_inventory_unknown_name_falls_through(self):
         from zbbx_mcp.data import resolve_country
 
-        h = {"host": "weird", "inventory": {"country_name": "Atlantis"}}
+        h = {"host": "weird", "inventory": {"site_country": "Atlantis"}}
         assert resolve_country(h) == ""
 
 class TestClassifyCountryGroup:

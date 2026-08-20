@@ -24,7 +24,7 @@ from datetime import datetime, timezone
 import httpx
 
 from zbbx_mcp.anomaly import seasonal_floor
-from zbbx_mcp.country import resolve_country
+from zbbx_mcp.country import INVENTORY_COUNTRY_FIELDS, resolve_country
 from zbbx_mcp.data import (
     AUDIT_ACTION_UPDATE,
     AUDIT_RESOURCE_HOST,
@@ -785,7 +785,7 @@ async def _fetch_host_records(
         # otherwise we'd filter from an arbitrarily-windowed sample and
         # miss most matching hosts. Pull inventory so resolve_country has
         # both signals; cap at the end.
-        params["selectInventory"] = ["country_code", "country_name"]
+        params["selectInventory"] = list(INVENTORY_COUNTRY_FIELDS)
     else:
         # No country filter: server-side limit avoids over-fetching.
         params["limit"] = max_hosts + 1

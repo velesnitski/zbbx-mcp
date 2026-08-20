@@ -39,6 +39,7 @@ from zbbx_mcp.classify import classify_host as _classify_host
 from zbbx_mcp.classify import resolve_datacenter  # noqa: F401 — re-export
 from zbbx_mcp.country import (  # noqa: F401 — re-exports for back-compat
     CAPITAL_COORDS,
+    INVENTORY_COUNTRY_FIELDS,
     REGION_MAP,
     countries_for_region,
     country_inventory_gap,
