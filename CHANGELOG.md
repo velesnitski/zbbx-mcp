@@ -5,6 +5,30 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.16.58] - 2026-08-20
+
+### Added — `detect_traffic_erosion` reports subnet waves
+ADR 132. Cohort-relative erosion (ADR 091) is what stops a market-wide dip from
+reading as N host failures, and it guarantees a blind spot that grows with the
+size of the event: when correlated decliners dominate their cohort they drag the
+median down with themselves, every member sits at roughly the cohort slope, and
+each is labelled *demand*. The reasoning is circular — the baseline is largely
+made of the hosts under test. `detect_disruption_wave` requires a blast radius
+spanning many /24s by design, so a subnet-confined event fell between the tools.
+
+A wave is ≥3 hosts in one network, each down ≥20%, with ≤15 percentage points
+between best and worst member. It is computed on the **cohort-blind** pass — a
+detector fed cohort-relative verdicts would inherit the blind spot it exists to
+cover. `/24` claims its hosts before `/16`, so one event is never reported both
+as a rack and as a range.
+
+When a wave covers half or more of the judged hosts the output states the
+ambiguity rather than resolving it: the cohort median is largely theirs, so
+"tracks cohort" is circular, and a subnet event and a scope-wide fall are not
+separable from that data. The tool says nothing about cause — a shared switch,
+transit link or config push all produce this signature — only that the
+correlation is spatial rather than behavioural.
+
 ## [1.16.57] - 2026-08-20
 
 ### Fixed — dashboards built from graph widgets resolved to no hosts

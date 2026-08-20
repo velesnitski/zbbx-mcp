@@ -211,6 +211,99 @@ def classify_erosion(
     )
 
 
+# --- Subnet waves (ADR 132) -------------------------------------------------
+#
+# The cohort test is what makes this tool trustworthy: a host is "eroding" only
+# when it falls faster than its scope's median, so a market-wide dip reads as
+# demand rather than N host failures. That test also guarantees a blind spot.
+# When the decliners DOMINATE their cohort they drag the median down with
+# themselves, every one of them lands at `slope ≈ cohort_slope`, and a
+# correlated infrastructure event is labelled *demand* — the more hosts an
+# event takes out, the more certainly it hides.
+#
+# `detect_disruption_wave` does not cover this either: it requires the blast
+# radius to span many /24s by design, so a wave confined to a single subnet
+# falls between the two tools.
+#
+# The signature that separates infrastructure from demand is spatial: several
+# hosts, in one network, declining by a SIMILAR amount. Demand does not respect
+# a netmask.
+_WAVE_MIN_HOSTS = 3        # two hosts can decline together by chance
+_WAVE_MIN_DECLINE = 20.0   # each member must actually be falling
+_WAVE_MAX_SPREAD = 15.0    # percentage POINTS between the best and worst member
+
+
+def _net_of(ip: str, bits: int) -> str:
+    """``ip`` → its /bits network as a string, or "" when unparseable. Pure."""
+    import ipaddress
+    try:
+        return str(ipaddress.ip_network(f"{ip}/{bits}", strict=False))
+    except ValueError:
+        return ""
+
+
+def subnet_waves(
+    rows: list[dict],
+    min_hosts: int = _WAVE_MIN_HOSTS,
+    min_decline_pct: float = _WAVE_MIN_DECLINE,
+    max_spread_pp: float = _WAVE_MAX_SPREAD,
+) -> list[dict]:
+    """Group correlated decliners by network.
+
+    ``rows`` need ``host``, ``ip`` and ``decline_pct`` (positive = declined).
+    Returns one dict per wave: ``cidr``, ``prefix``, ``hosts``, ``declines``,
+    ``spread``, ``worst``, ``best``.
+
+    Two rules earn their place:
+
+    * **/24 before /16.** A tighter network is the more specific claim, so it
+      takes its members first and a /16 only sees what is left. Without the
+      ordering the same four hosts surface twice — once as a rack, once as a
+      range — and a reader cannot tell whether that is one event or two.
+    * **Spread, not just count.** Three hosts in a subnet that fall 22%, 40%
+      and 95% are three stories. Requiring them to land within
+      ``max_spread_pp`` of each other is the correlation test; without it any
+      busy subnet eventually collects three decliners and reports a wave.
+
+    Deliberately says nothing about cause. A shared switch, a shared transit
+    link and a shared config push all look like this, and the tool cannot
+    separate them — it can only say the shape is spatial rather than
+    behavioural. Pure.
+    """
+    candidates = [
+        r for r in rows
+        if r.get("ip") and (r.get("decline_pct") or 0.0) >= min_decline_pct
+    ]
+    waves: list[dict] = []
+    claimed: set[str] = set()
+    for bits in (24, 16):
+        groups: dict[str, list[dict]] = {}
+        for r in candidates:
+            if r["host"] in claimed:
+                continue
+            net = _net_of(r["ip"], bits)
+            if net:
+                groups.setdefault(net, []).append(r)
+        for cidr, members in sorted(groups.items()):
+            if len(members) < min_hosts:
+                continue
+            declines = sorted((m["decline_pct"] for m in members), reverse=True)
+            spread = declines[0] - declines[-1]
+            if spread > max_spread_pp:
+                continue
+            waves.append({
+                "cidr": cidr,
+                "prefix": bits,
+                "hosts": sorted(m["host"] for m in members),
+                "declines": declines,
+                "spread": spread,
+                "worst": declines[0],
+                "best": declines[-1],
+            })
+            claimed.update(m["host"] for m in members)
+    return waves
+
+
 def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> None:
 
     if "detect_traffic_erosion" not in skip:
@@ -412,6 +505,61 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     hv[1].relative_pct if hv[1].relative_pct is not None else hv[1].slope_pct,
                 ))
 
+                # Waves are computed from the COHORT-BLIND pass on purpose. The
+                # cohort test is exactly what hides a dominating wave, so a
+                # detector reading its verdicts would inherit the blind spot it
+                # exists to cover (ADR 132).
+                wave_rows = []
+                for hid, v in prelim.items():
+                    if v.state in (IDLE, INSUFFICIENT):
+                        continue
+                    h = host_map.get(hid, {})
+                    ip = host_ip(h) if h else ""
+                    if ip:
+                        wave_rows.append({
+                            "host": h.get("host", hid),
+                            "ip": ip,
+                            "decline_pct": v.cum_decline_pct,
+                        })
+                waves = subnet_waves(wave_rows)
+                cohort_n = len(cohort_slopes)
+
+                wave_parts: list[str] = []
+                if waves:
+                    wave_parts.append(
+                        "\n**Subnet waves** — several hosts in one network "
+                        "declining together. Demand does not respect a netmask, "
+                        "so this shape is spatial rather than behavioural:\n"
+                    )
+                    wave_parts.append(
+                        "| Network | Hosts | Decline | Spread | Reading |")
+                    wave_parts.append(
+                        "|---------|------:|---------|-------:|---------|")
+                    for w in waves:
+                        n = len(w["hosts"])
+                        if cohort_n and n / cohort_n >= 0.5:
+                            # State the ambiguity; do not resolve it by fiat.
+                            reading = (
+                                f"{n} of {cohort_n} judged hosts — the cohort "
+                                "median is largely theirs, so 'tracks cohort' "
+                                "is circular here. A subnet event and a "
+                                "scope-wide fall are NOT separable from this "
+                                "data"
+                            )
+                        else:
+                            reading = (
+                                "confined to this network while the rest of the "
+                                "cohort held — infrastructure, not demand"
+                            )
+                        wave_parts.append(
+                            f"| {w['cidr']} | {n} | "
+                            f"{w['best']:.0f}–{w['worst']:.0f}% | "
+                            f"{w['spread']:.0f}pp | {reading} |"
+                        )
+                    for w in waves:
+                        wave_parts.append(
+                            f"\n_{w['cidr']}: {', '.join(w['hosts'])}_")
+
                 cohort_str = (
                     f"{cohort_slope_pct:+.1f}%/wk"
                     if cohort_slope_pct is not None
@@ -427,13 +575,15 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 if not declining:
                     return (
                         header
-                        + "\nNo host-specific erosion and no scope-wide decline "
-                        "detected in the window."
+                        + ("\n".join(wave_parts) if wave_parts else
+                           "\nNo host-specific erosion and no scope-wide decline "
+                           "detected in the window.")
                         + excluded_test_note(excluded)
                     )
 
                 parts = [
                     header,
+                    *wave_parts,
                     "| Server | Provider | Weeks | First → Last | Decline | "
                     "Slope/wk | vs cohort | Verdict |",
                     "|--------|----------|------:|--------------|--------:|"
