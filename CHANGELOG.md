@@ -5,6 +5,32 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.16.53] - 2026-08-20
+
+### Fixed — the health matrix read a missing check as a failing one
+ADR 126. `get_service_health_matrix` folds sub-hosts into canonical groups and
+scored each group per protocol with `all(...)` over every sub-host, while
+scoring the denominator with `any(...)` over the same group — two different
+sets. A sibling carrying no item of that key is absent from the value map, so
+`None != 1` sank the whole group to DOWN while the other half still counted it
+as measured. The halves of a pair are routinely provisioned differently here,
+so this was the ordinary case: a country whose every protocol answered on both
+halves of every pair reported `DOWN (0/3)`, while the wide walk in
+`detect_dead_protocols` found every check alive. Groups are now judged only on
+the sub-hosts that carry evidence for that protocol; nothing carrying the key
+reads `N/A` rather than zero. Worst-wins is unchanged over what is measured.
+
+The tool had **no behavioural test** — only its name in the registration list.
+Five now pin it, and the first was confirmed to reproduce the exact live cell
+against the old scoring before being accepted.
+
+### Changed — the matrix discloses that its columns are configured keys
+ADR 126. Three columns implied the fleet has three protocols; they are the
+three configured check keys. A protocol served under any other key is absent
+from the table, and absent is not down. The output now says so, counts its
+`N/A` cells, and points at the tool that walks every check item. Widening the
+column set to discovered checks is deferred — it changes what the columns mean.
+
 ## [1.16.52] - 2026-08-20
 
 ### Fixed — `detect_traffic_shaping` crashed on every invocation

@@ -424,6 +424,33 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 TRAFFIC_VALIDATION_MBPS = 5.0
                 active_by_traffic = {hid for hid, mbps in traffic_map.items() if mbps >= TRAFFIC_VALIDATION_MBPS}
 
+                def _group_state(vmap: dict, group_ids: list) -> "bool | None":
+                    """Is this canonical group up for this protocol? None = not judged.
+
+                    Judged ONLY on the sub-hosts that carry evidence for this
+                    protocol. `up` was previously `all(...)` over every sub-host
+                    while `checked` was `any(...)`, and the two sets differing is
+                    what made absence read as failure: a sibling carrying no such
+                    item scored `vmap.get(hid) != 1` and dragged its whole group
+                    down, while the group still counted toward the denominator.
+
+                    The halves of a pair here are routinely provisioned
+                    differently, so that is the normal case, not a corner one.
+                    Live before this fix: a country whose every protocol answered
+                    1 on both halves of all three pairs reported ``DOWN (0/3)``,
+                    purely because one half of each carried no item of that key —
+                    while the wide walk in ``detect_dead_protocols`` found every
+                    check alive. A protocol nobody in the group is provisioned
+                    for is N/A, not zero (ADR 107, ADR 113, ADR 117).
+                    """
+                    measured = [hid for hid in group_ids
+                                if hid in vmap or hid in active_by_traffic]
+                    if not measured:
+                        return None
+                    return all((vmap.get(hid) or 0) >= 1 or hid in active_by_traffic
+                               for hid in measured)
+
+                na_cells = 0
                 parts = [
                     "**Service Health Matrix**\n",
                     "| Country | Servers | Proto 1 | Proto 2 | Proto 3 | Recommendation |",
@@ -447,33 +474,26 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     # (or a sub-host has real traffic, traffic-validation fallback).
                     # Worst-wins: a single failing sub-host marks the whole
                     # canonical group as down for this metric.
-                    service1_up = 0
-                    service2_up = 0
-                    service3_up = 0
-                    service1_checked = 0
-                    service2_checked = 0
-                    service3_checked = 0
+                    ups = [0, 0, 0]
+                    checkeds = [0, 0, 0]
                     for group_ids in canonical_groups.values():
-                        if all(service1_map.get(hid) == 1 or hid in active_by_traffic for hid in group_ids):
-                            service1_up += 1
-                        if all(service2_map.get(hid) == 1 or hid in active_by_traffic for hid in group_ids):
-                            service2_up += 1
-                        if all((service3_map.get(hid) or 0) >= 1 or hid in active_by_traffic for hid in group_ids):
-                            service3_up += 1
-                        # "checked" must admit the same evidence that can mark
-                        # a group up. Counting only check-ITEMS while traffic
-                        # alone could raise `up` let up exceed checked, so a
-                        # country whose one measured host was DOWN rendered as
-                        # "OK (2/1)" — a >100% ratio (ADR 097).
-                        if any(hid in service1_map or hid in active_by_traffic
-                               for hid in group_ids):
-                            service1_checked += 1
-                        if any(hid in service2_map or hid in active_by_traffic
-                               for hid in group_ids):
-                            service2_checked += 1
-                        if any(hid in service3_map or hid in active_by_traffic
-                               for hid in group_ids):
-                            service3_checked += 1
+                        # `checked` must admit the same evidence that can mark a
+                        # group up. Counting only check-ITEMS while traffic alone
+                        # could raise `up` let up exceed checked, so a country
+                        # whose one measured host was DOWN rendered "OK (2/1)" —
+                        # a >100% ratio (ADR 097). `_group_state` keeps the two
+                        # over one identical set, which is also what fixes the
+                        # asymmetry described on it.
+                        for idx, vmap in enumerate(
+                                (service1_map, service2_map, service3_map)):
+                            state = _group_state(vmap, group_ids)
+                            if state is None:
+                                continue
+                            checkeds[idx] += 1
+                            if state:
+                                ups[idx] += 1
+                    service1_up, service2_up, service3_up = ups
+                    service1_checked, service2_checked, service3_checked = checkeds
 
                     def _status(up: int, checked: int) -> str:
                         if checked == 0:
@@ -522,6 +542,27 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                         rec = " / ".join(working) + " only"
 
                     parts.append(f"| {ctry} | {total} | {x_s} | {k_s} | {o_s} | {rec} |")
+                    na_cells += sum(1 for c in (x_s, k_s, o_s) if c == "N/A")
+
+                # Disclose the scoping rather than let three columns imply the
+                # fleet has exactly three protocols (ADR 114 permits widening or
+                # disclosing; this is the disclosure). These columns are the
+                # three CONFIGURED keys. A host serving a protocol under any
+                # other key is invisible here — one live fleet carries several
+                # differently-named variants of one protocol, all answering,
+                # while the configured key for it exists on none of them, so
+                # that column describes a key rather than a protocol.
+                parts.append(
+                    "\n_Columns are the three configured check keys, not the "
+                    "fleet's full protocol set: a protocol served under any "
+                    "other key is absent from this table, and absent is not "
+                    "down. `detect_dead_protocols` walks every `*check*` item "
+                    "and is the wider view (ADR 114)._")
+                if na_cells:
+                    parts.append(
+                        f"\n_{na_cells} cell(s) read N/A — no host in that "
+                        "country carries an item for that key. Not measured, "
+                        "not zero._")
 
                 return "\n".join(parts) + excluded_test_note(excluded)
             except (httpx.HTTPError, ValueError) as e:
