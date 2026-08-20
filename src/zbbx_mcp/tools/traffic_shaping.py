@@ -87,7 +87,34 @@ class ShapingVerdict:
 # Worst-first. A host is reported at its worse direction, because the action a
 # reader takes is driven by the direction that is constrained, not by the
 # healthy one.
-_SEVERITY = ("shaped", "capped", "dropped", "normal", "idle", "insufficient")
+#
+# Keyed by the verdict CONSTANTS rather than by retyped strings, and looked up
+# with a default, because the first version of this was a tuple searched with
+# `.index()` and omitted two of the eight verdicts. `no_baseline` occurs on any
+# fleet with short-history hosts, so the tool raised `tuple.index(x): x not in
+# tuple` on effectively every real call — while its unit tests stayed green,
+# because each of them built a verdict from one of the six values that WERE
+# listed. A missing key must degrade, never raise: this ranking decides
+# presentation order, and no ordering question is worth failing a fleet report.
+_SEVERITY_RANK: dict[str, int] = {
+    # Findings, worst first. These drive a ticket.
+    SHAPED: 0,        # a cap was applied — act
+    CAPPED: 1,        # pinned, no drop — pre-existing limit or constant demand
+    PEER_CAPPED: 2,   # flat AND below cohort — likely a limit
+    DROPPED: 3,       # lower peaks that still spread — demand or reachability
+    # "Cannot say", ABOVE the benign readings and deliberately so. A host that
+    # is normal one way and unjudgeable the other has not been shown to be
+    # normal, and headlining it that way is the pair-level form of rendering
+    # absent evidence as evidence of absence — the thing ADR 107 exists to
+    # forbid, cited by name forty lines below where the no-baseline verdict is
+    # built. Uncertainty must survive the combine, not be overwritten by
+    # whichever direction happened to look fine.
+    NO_BASELINE: 4,   # nothing to compare against
+    INSUFFICIENT: 5,  # too few hours
+    NORMAL: 6,
+    IDLE: 7,          # below the floor — spare/out of rotation
+}
+_UNRANKED = len(_SEVERITY_RANK) + 1
 
 # Two ceilings this close are treated as the same limit. A shared port or plan
 # limit lands on one number in both directions; independent policers rarely do.
@@ -115,7 +142,10 @@ def combine_directions(
     single direction. Pure.
     """
     def rank(v: ShapingVerdict | None) -> int:
-        return _SEVERITY.index(v.verdict) if v else len(_SEVERITY)
+        # `.get`, not `[...]`, and never `.index()`: an unranked verdict is an
+        # ordering question, and no ordering question is worth raising on. It
+        # sorts last and the verdict string still reaches the caller intact.
+        return _SEVERITY_RANK.get(v.verdict, _UNRANKED) if v else _UNRANKED
 
     if inbound is None and outbound is None:
         return "insufficient", "no traffic items in either direction"
@@ -124,7 +154,7 @@ def combine_directions(
 
     pinned = {
         name: v for name, v in (("in", inbound), ("out", outbound))
-        if v is not None and v.verdict in ("shaped", "capped")
+        if v is not None and v.verdict in (SHAPED, CAPPED)
     }
     if len(pinned) == 2:
         ci, co = pinned["in"].ceiling_mbps, pinned["out"].ceiling_mbps

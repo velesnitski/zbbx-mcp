@@ -94,3 +94,99 @@ class TestSymmetryTolerance:
         far = combine_directions(V("capped", 100.0), V("capped", 89.0))[1]
         assert "one limit" in near
         assert "two separate" in far
+
+
+class TestVerdictVocabularyIsCovered:
+    """The ranking must cover every verdict the module can actually produce.
+
+    The first version of `combine_directions` ranked verdicts with
+    `_SEVERITY.index(...)` over a hand-typed tuple that listed six of the
+    eight. `no_baseline` occurs on any fleet with short-history hosts, so the
+    tool raised `tuple.index(x): x not in tuple` on effectively every real
+    call — while every test in the classes above passed, because each one
+    builds its verdicts from one of the six values that happened to be listed.
+
+    A test that retyped the vocabulary would drift exactly as the tuple did.
+    So these check the ranking against **ground truth**: what the source can
+    construct, and what the function does when handed it.
+    """
+
+    def test_ranking_covers_every_constructible_verdict(self):
+        import ast
+        import inspect
+
+        from zbbx_mcp.tools import traffic_shaping as ts
+
+        tree = ast.parse(inspect.getsource(ts))
+        produced = {}
+        for node in ast.walk(tree):
+            if (isinstance(node, ast.Call)
+                    and isinstance(node.func, ast.Name)
+                    and node.func.id == "ShapingVerdict"
+                    and node.args):
+                first = node.args[0]
+                if isinstance(first, ast.Name):
+                    produced[first.id] = getattr(ts, first.id)
+                elif isinstance(first, ast.Constant):
+                    produced[repr(first.value)] = first.value
+
+        assert produced, (
+            "found no ShapingVerdict(...) constructions to check against — "
+            "the AST walk is broken, so a pass here would mean nothing")
+
+        missing = {n: v for n, v in produced.items()
+                   if v not in ts._SEVERITY_RANK}
+        assert not missing, (
+            f"{sorted(missing)} can be constructed but is absent from "
+            "_SEVERITY_RANK. Under the old .index() ranking that raised "
+            "ValueError on every call that met such a host")
+
+    def test_no_pair_of_verdicts_can_raise(self):
+        from zbbx_mcp.tools import traffic_shaping as ts
+
+        vocab = list(ts._SEVERITY_RANK)
+        assert len(vocab) >= 8, "vocabulary shrank — check this is intended"
+        for a in vocab + [None]:
+            for b in vocab + [None]:
+                va = V(a, 100.0) if a else None
+                vb = V(b, 100.0) if b else None
+                headline, note = combine_directions(va, vb)
+                assert isinstance(headline, str) and headline
+                assert isinstance(note, str) and note
+
+    def test_an_unknown_verdict_degrades_instead_of_raising(self):
+        # A verdict added tomorrow and not yet ranked must sort last, not
+        # take the tool down. The string still reaches the caller intact.
+        headline, _ = combine_directions(V("some-new-verdict", 100.0),
+                                         V("shaped", 50.0))
+        assert headline == "shaped"
+        headline, _ = combine_directions(V("some-new-verdict", 100.0), None)
+        assert headline == "some-new-verdict"
+
+
+class TestUncertaintyOutranksBenign:
+    """ADR 107 at the pair level.
+
+    A host that reads normal one way and unjudgeable the other has not been
+    shown to be normal. Headlining it "normal" renders absent evidence as
+    evidence of absence — which is what the no-baseline verdict exists to
+    prevent in the first place.
+    """
+
+    def test_no_baseline_beats_normal(self):
+        headline, note = combine_directions(V("normal", 400.0),
+                                            V("no_baseline", 380.0))
+        assert headline == "no_baseline"
+        assert "no_baseline" in note
+
+    def test_insufficient_beats_idle(self):
+        headline, _ = combine_directions(V("idle", 1.0),
+                                         V("insufficient", 0.0))
+        assert headline == "insufficient"
+
+    def test_but_a_real_finding_still_wins(self):
+        # Uncertainty outranks benign, not evidence. A direction that is
+        # provably shaped is the headline regardless of the other side.
+        for other in ("no_baseline", "insufficient"):
+            headline, _ = combine_directions(V("shaped", 100.0), V(other, 0.0))
+            assert headline == "shaped", other

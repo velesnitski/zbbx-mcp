@@ -5,6 +5,34 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.16.52] - 2026-08-20
+
+### Fixed — `detect_traffic_shaping` crashed on every invocation
+ADR 125. The both-direction combiner added in 1.16.51 ranked verdicts by
+position in a hand-typed tuple listing six of the module's eight. Any host
+whose verdict was one of the two omitted raised `ValueError: tuple.index(x):
+x not in tuple`, and one of them — `no_baseline` — is produced for any host
+without trend history before the comparison window, so the tool failed on
+every call from the moment it shipped. Ranking is now a dict keyed by the
+verdict constants and read with a default: an unranked verdict sorts last and
+still reaches the caller intact, because ordering is a presentation question
+and no presentation question justifies failing a report. The `pinned` test
+was switched off retyped literals to the same constants.
+
+Thirteen tests covered the combiner and all stayed green, because every one
+built its fixtures from the six values the tuple happened to list. Coverage is
+now asserted against ground truth: a guard AST-walks the module for every
+`ShapingVerdict(...)` construction and asserts its verdict is ranked, and a
+second drives every verdict against every other plus `None`. Both were
+confirmed to fail against the shipped ranking before being accepted.
+
+### Changed — uncertainty outranks benign when combining directions
+ADR 125. `no_baseline` and `insufficient` now rank above `normal` and `idle`,
+and below every real finding. A host that reads normal one way and unjudgeable
+the other has not been shown to be normal; headlining it `normal` renders
+absent evidence as evidence of absence (ADR 107) at the pair level. A
+direction that is provably shaped is still the headline.
+
 ## [1.16.51] - 2026-08-18
 
 ### Changed — provider table is generated from routing data, not hand-maintained
