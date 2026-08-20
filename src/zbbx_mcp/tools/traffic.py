@@ -391,8 +391,14 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     if country and extract_country(h.get("host", "")).lower() != country.lower():
                         continue
 
-                    conns = host_conns.get(hid, 0)
-                    bw_per_client = (traffic / conns) if conns > 0 else 0
+                    # None, not 0: a host that carries no connections item has
+                    # not reported zero sessions, it has reported nothing. The
+                    # two rendered identically as "0", so a fleet where the
+                    # configured connections key is not deployed read as a fleet
+                    # with no clients on it — a measurement gap wearing the
+                    # costume of a finding (ADR 130).
+                    conns = host_conns.get(hid)
+                    bw_per_client = (traffic / conns) if conns else 0
                     ip = host_ip(h)
 
                     rows.append({
@@ -420,18 +426,23 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                         canonical_rows[cn] = {**r, "host": cn}
                     else:
                         g["traffic"] += r["traffic"]
-                        g["connections"] += r["connections"]
+                        # Unmeasured stays unmeasured; a measured sibling makes
+                        # the box measured for what it could see.
+                        if r["connections"] is not None:
+                            g["connections"] = (g["connections"] or 0) + r["connections"]
                         g["sub_count"] = g.get("sub_count", 0) + 1
                 for g in canonical_rows.values():
                     g["bw_per_client"] = (
                         g["traffic"] / g["connections"]
-                        if g["connections"] > 0 else 0
+                        if g["connections"] else 0
                     )
                 rows = list(canonical_rows.values())
 
                 # Sort
                 if sort_by == "connections":
-                    rows.sort(key=lambda r: -r["connections"])
+                    # Unmeasured sorts last rather than as if it were zero.
+                    rows.sort(key=lambda r: (r["connections"] is None,
+                                             -(r["connections"] or 0)))
                 elif sort_by == "bw_per_client":
                     rows.sort(key=lambda r: -r["bw_per_client"])
                 else:
@@ -448,7 +459,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 ]
                 for r in rows:
                     t = f"{to_mbps(r['traffic']):.1f} Mbps"
-                    c = f"{r['connections']:.0f}" if r["connections"] > 0 else "0"
+                    c = "–" if r["connections"] is None else f"{r['connections']:.0f}"
                     bw = f"{to_kbps(r['bw_per_client']):.0f} Kbps" if r["bw_per_client"] > 0 else "–"
                     parts.append(
                         f"| {r['host']} | {r['product']}/{r['tier']} | "
@@ -456,7 +467,21 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     )
 
                 header = f"**Traffic Report ({len(rows)} servers, sorted by {sort_by})**\n\n"
-                return header + "\n".join(parts)
+                unmeasured = sum(1 for r in rows if r["connections"] is None)
+                note = ""
+                if unmeasured:
+                    note = (
+                        f"\n\n_Connections shown as – on {unmeasured} of "
+                        f"{len(rows)} server(s): they carry no item for the "
+                        "configured connections key, so the session count is "
+                        "unknown rather than zero. BW/Client cannot be derived "
+                        "without it._"
+                    )
+                elif not KEY_CONNECTIONS:
+                    note = ("\n\n_No connections key configured "
+                            "(ZABBIX_CONNECTIONS_KEY), so the Connections and "
+                            "BW/Client columns are not measured._")
+                return header + "\n".join(parts) + note
             except (httpx.HTTPError, ValueError) as e:
                 return f"Error: {e}"
 

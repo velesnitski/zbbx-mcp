@@ -5,6 +5,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.16.56] - 2026-08-20
+
+### Fixed — `get_traffic_report` reported unmeasured session counts as zero
+ADR 130. Connections were read with `host_conns.get(hid, 0)`, so a host carrying
+no item for the configured connections key rendered `0` — identical to a host
+genuinely reporting no sessions. On a fleet where that key is not deployed every
+row read `0` connections with `–` bandwidth-per-client: a plausible and entirely
+fabricated finding, since it claims servers carry traffic with nobody connected.
+
+Unmeasured is now `None` and renders as `–`, with a footnote stating the count
+is unknown rather than zero and how many rows it affects. It propagates through
+the canonical fold (a box stays unmeasured only while no sub-host reported) and
+sorts last rather than lowest, instead of competing with genuinely idle hosts.
+A real zero still reads zero.
+
+The environment variable was set, so the usual configured/not-configured check
+passed. Configuration being present says nothing about whether the configured
+item exists on the hosts — the same gap as ADR 128.
+
 ## [1.16.55] - 2026-08-20
 
 ### Fixed — the host-inventory country fallback never ran
