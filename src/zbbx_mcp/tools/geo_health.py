@@ -424,7 +424,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 TRAFFIC_VALIDATION_MBPS = 5.0
                 active_by_traffic = {hid for hid, mbps in traffic_map.items() if mbps >= TRAFFIC_VALIDATION_MBPS}
 
-                def _group_state(vmap: dict, group_ids: list) -> "bool | None":
+                def _group_state(vmap: dict, group_ids: list) -> bool | None:
                     """Is this canonical group up for this protocol? None = not judged.
 
                     Judged ONLY on the sub-hosts that carry evidence for this
