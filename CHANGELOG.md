@@ -5,6 +5,28 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.16.57] - 2026-08-20
+
+### Fixed — dashboards built from graph widgets resolved to no hosts
+ADR 131. Widget references are typed; both dashboard readers decoded `2`/`3`/`4`
+(group/host/item) and ignored the rest. A classic **Graph** widget names a
+*graphid*, and the graph belongs to its items' hosts — one hop through
+`graph.get` that nothing followed. So a dashboard built entirely from graph
+widgets resolved to zero hosts, `get_dashboard_detail` printed a widget count
+with no host section, and `find_host_dashboard` answered "not found on any
+dashboard" for hosts whose graphs sit on one.
+
+Both tools now share one decoder (`collect_widget_refs`), follow the graph hop,
+and name the match ("via graph '<name>'"). The page list also names the graph
+each widget draws instead of repeating "[Graph]".
+
+### Added — undecodable widget references are counted, not silently dropped
+ADR 131. Some widgets name hosts by *pattern* rather than id and cannot be
+resolved. Those are counted by widget type: the detail view warns their hosts
+are absent from its list, and a "not found" answer carries the caveat that the
+host could be on one of them. A widget with no fields is not counted — nothing
+to read is not the same as failing to read something.
+
 ## [1.16.56] - 2026-08-20
 
 ### Fixed — `get_traffic_report` reported unmeasured session counts as zero
