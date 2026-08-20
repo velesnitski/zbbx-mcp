@@ -225,7 +225,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()):
             """Compare multiple servers side-by-side with trend data.
 
             Args:
-                hosts: Comma-separated hostnames (e.g., 'srv-nl01,srv-de01')
+                hosts: Comma-separated hostnames (e.g., 'srv-tf9001,srv-bv9001')
                 metrics: Comma-separated: cpu, traffic, traffic_out, load, memory
                 period: Time period: 1d, 7d, 30d (default: 7d)
                 instance: Zabbix instance name (optional, for multi-instance setups)

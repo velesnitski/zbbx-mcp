@@ -290,7 +290,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     return f"No predicted issues within {days_ahead} days."
 
                 # Collapse cluster duplicates: same base hostname + metric + near-identical
-                # current/rate values. Cluster secondaries (e.g. "srv-us901 us903") share
+                # current/rate values. Cluster secondaries (e.g. "srv-aq9901 aq9903") share
                 # underlying hardware and produce identical trend data.
                 raw_count = len(alerts)
                 groups: dict[str, list] = {}

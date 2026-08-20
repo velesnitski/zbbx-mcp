@@ -38,7 +38,7 @@ indexed and searchable. **Do not commit any of the following**:
 - **Real product or company names** — use `<product>` or generic
   placeholders in examples
 - **Real hostnames** that follow your fleet's naming convention — use
-  `host-a`, `edge-de01`, `parent child` as placeholders
+  `host-a`, `edge-aq9001`, `parent child` as placeholders
 - **Protocol names** specific to your service stack
 - **ISP / carrier names** specific to your infrastructure
 - **Non-ASCII characters** — keep all source ASCII-only. Localised data

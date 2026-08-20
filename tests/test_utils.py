@@ -28,22 +28,22 @@ class TestFormatResults:
 
 class TestExtractCountry:
     def test_nl(self):
-        assert extract_country("srv-nl0999") == "NL"
+        assert extract_country("srv-nl9999") == "NL"
 
     def test_de(self):
-        assert extract_country("srv-de3") == "DE"
+        assert extract_country("srv-de9003") == "DE"
 
     def test_us(self):
-        assert extract_country("srv-us0999") == "US"
+        assert extract_country("srv-us9999") == "US"
 
     def test_nl_lite(self):
-        assert extract_country("srv-nl03") == "NL"
+        assert extract_country("srv-nl9003") == "NL"
 
     def test_us_lite(self):
-        assert extract_country("srv-us03") == "US"
+        assert extract_country("srv-us9003") == "US"
 
     def test_tr_lite(self):
-        assert extract_country("srv-tr03") == "TR"
+        assert extract_country("srv-tr9003") == "TR"
 
     def test_no_country(self):
         assert extract_country("Zabbix server") == ""

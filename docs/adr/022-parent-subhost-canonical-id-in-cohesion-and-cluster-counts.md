@@ -7,7 +7,7 @@
 
 A 2026-05-05 wave smoke kept reporting "Centered on US (43%)" with
 7 hosts. Of the 5 visible US hosts in the rendered output, two were
-``edge-us01`` and ``edge-us01 us02`` — the parent + sub-host
+``edge-aq9001`` and ``edge-aq9001 aq9002`` — the parent + sub-host
 convention used across the fleet, where one physical machine has a
 parent Zabbix host plus a child whose hostname is parent + space +
 suffix. The cohesion guard counted them as two distinct US hosts;

@@ -9,9 +9,9 @@ class TestParentSubHostCanonicalization:
         from zbbx_mcp.data import build_parent_map
 
         hosts = [
-            {"hostid": "p", "host": "edge-us01"},
-            {"hostid": "c", "host": "edge-us01 us02"},
-            {"hostid": "x", "host": "edge-de01"},
+            {"hostid": "p", "host": "edge-aq9001"},
+            {"hostid": "c", "host": "edge-aq9001 aq9002"},
+            {"hostid": "x", "host": "edge-bv9001"},
         ]
         pm = build_parent_map(hosts)
         assert pm == {"c": "p"}
@@ -22,8 +22,8 @@ class TestParentSubHostCanonicalization:
         # The canonical-id pattern: parent_map.get(hid, hid). After this,
         # a parent + child pair maps to one canonical id.
         hosts = [
-            {"hostid": "p", "host": "edge-us01"},
-            {"hostid": "c", "host": "edge-us01 us02"},
+            {"hostid": "p", "host": "edge-aq9001"},
+            {"hostid": "c", "host": "edge-aq9001 aq9002"},
         ]
         pm = build_parent_map(hosts)
         canonical_ids = {pm.get(h["hostid"], h["hostid"]) for h in hosts}
@@ -41,19 +41,19 @@ class TestParentSubHostCanonicalization:
         # upstream of _compute_waves de-dupes traffic into the parent,
         # so this list has one record per canonical machine.
         drops = [
-            {"clock": 1000, "hostid": "p_us", "host": "edge-us01",
+            {"clock": 1000, "hostid": "p_us", "host": "edge-aq9001",
              "subnet": "10.0.1.0/24", "hostgroup": "x", "country": "US",
              "drop_pct": 60.0},
-            {"clock": 1100, "hostid": "p_us2", "host": "edge-us03",
+            {"clock": 1100, "hostid": "p_us2", "host": "edge-aq9003",
              "subnet": "10.0.2.0/24", "hostgroup": "x", "country": "US",
              "drop_pct": 60.0},
-            {"clock": 1200, "hostid": "p_de", "host": "edge-de01",
+            {"clock": 1200, "hostid": "p_de", "host": "edge-bv9001",
              "subnet": "10.0.3.0/24", "hostgroup": "x", "country": "DE",
              "drop_pct": 60.0},
-            {"clock": 1300, "hostid": "p_id", "host": "edge-id01",
+            {"clock": 1300, "hostid": "p_id", "host": "edge-gs9001",
              "subnet": "10.0.4.0/24", "hostgroup": "x", "country": "ID",
              "drop_pct": 60.0},
-            {"clock": 1400, "hostid": "p_mx", "host": "edge-mx01",
+            {"clock": 1400, "hostid": "p_mx", "host": "edge-hm9001",
              "subnet": "10.0.5.0/24", "hostgroup": "x", "country": "MX",
              "drop_pct": 60.0},
         ]
@@ -72,14 +72,14 @@ class TestParentSubHostCanonicalization:
         records = [
             # Parent and sub-host both have a problem in the same cluster.
             # Both records carry the canonical (parent's) hostid.
-            {"clock": 1000, "hostid": "p", "host": "edge-us01",
+            {"clock": 1000, "hostid": "p", "host": "edge-aq9001",
              "name": "X", "severity": 4, "key": "10.0.0.0/24"},
-            {"clock": 1050, "hostid": "p", "host": "edge-us01",
+            {"clock": 1050, "hostid": "p", "host": "edge-aq9001",
              "name": "Y", "severity": 4, "key": "10.0.0.0/24"},
             # Two distinct other hosts in the same /24.
-            {"clock": 1100, "hostid": "h2", "host": "edge-us03",
+            {"clock": 1100, "hostid": "h2", "host": "edge-aq9003",
              "name": "X", "severity": 4, "key": "10.0.0.0/24"},
-            {"clock": 1150, "hostid": "h3", "host": "edge-us04",
+            {"clock": 1150, "hostid": "h3", "host": "edge-aq9004",
              "name": "X", "severity": 4, "key": "10.0.0.0/24"},
         ]
         # 4 records but only 3 distinct canonical hosts. min_hosts=3 passes;

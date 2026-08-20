@@ -32,8 +32,8 @@ TERTIARY = "tertiary_check.sh[{HOST.IP}]"
 
 PARENT, CHILD = "1", "2"
 HOSTS = [
-    {"hostid": PARENT, "host": "edge-us01", "groups": [{"name": "prod"}]},
-    {"hostid": CHILD, "host": "edge-us01 us02", "groups": [{"name": "prod"}]},
+    {"hostid": PARENT, "host": "edge-aq9001", "groups": [{"name": "prod"}]},
+    {"hostid": CHILD, "host": "edge-aq9001 aq9002", "groups": [{"name": "prod"}]},
 ]
 
 
@@ -65,7 +65,7 @@ def _client(items_by_key: dict[str, list[str]]) -> RecordingClient:
 
 def _cell(out: str, col: int) -> str:
     row = next(line for line in out.splitlines()
-               if line.startswith("| US "))
+               if line.startswith("| AQ "))
     return row.split("|")[3 + col].strip()
 
 

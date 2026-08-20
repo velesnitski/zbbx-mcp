@@ -59,10 +59,10 @@ class TestCapitalCoords:
 class TestGroupByCountry:
     def _hosts(self):
         return [
-            {"hostid": "1", "host": "srv-nl01", "groups": [{"name": "tier-a"}]},
-            {"hostid": "2", "host": "srv-nl02", "groups": [{"name": "tier-a"}]},
-            {"hostid": "3", "host": "srv-de01", "groups": [{"name": "tier-b"}]},
-            {"hostid": "4", "host": "srv-us01", "groups": [{"name": "tier-a"}]},
+            {"hostid": "1", "host": "srv-nl9001", "groups": [{"name": "tier-a"}]},
+            {"hostid": "2", "host": "srv-nl9002", "groups": [{"name": "tier-a"}]},
+            {"hostid": "3", "host": "srv-de9001", "groups": [{"name": "tier-b"}]},
+            {"hostid": "4", "host": "srv-us9001", "groups": [{"name": "tier-a"}]},
             {"hostid": "5", "host": "no-country", "groups": [{"name": "mon"}]},
         ]
 
@@ -242,26 +242,26 @@ class TestResolveDatacenter:
 
 class TestExtractCountry:
     def test_standard_patterns(self):
-        assert extract_country("srv-nl0999") == "NL"
-        assert extract_country("srv-de3") == "DE"
-        assert extract_country("srv-us0999") == "US"
+        assert extract_country("srv-nl9999") == "NL"
+        assert extract_country("srv-de9003") == "DE"
+        assert extract_country("srv-us9999") == "US"
 
     def test_lite_pattern(self):
-        assert extract_country("srv-nl03") == "NL"
-        assert extract_country("srv-us03") == "US"
-        assert extract_country("srv-tr03") == "TR"
+        assert extract_country("srv-nl9003") == "NL"
+        assert extract_country("srv-us9003") == "US"
+        assert extract_country("srv-tr9003") == "TR"
 
     def test_ar_pattern(self):
-        assert extract_country("srv-ar099") == "AR"
+        assert extract_country("srv-ar9099") == "AR"
 
     def test_br_mx_patterns(self):
-        assert extract_country("srv-br0101") == "BR"
-        assert extract_country("srv-mx0101") == "MX"
+        assert extract_country("srv-br9101") == "BR"
+        assert extract_country("srv-mx9101") == "MX"
 
     def test_uk_normalizes_to_gb(self):
         """Non-ISO country code normalizes to standard."""
-        assert extract_country("srv-uk0998") == "GB"
-        assert extract_country("srv-uk0997") == "GB"
+        assert extract_country("srv-uk9998") == "GB"
+        assert extract_country("srv-uk9997") == "GB"
 
     def test_no_match(self):
         assert extract_country("Zabbix server") == ""
@@ -350,7 +350,7 @@ class TestResolveCountry:
         from zbbx_mcp.data import resolve_country
 
         h = {
-            "host": "edge-de01",
+            "host": "edge-de9001",
             "inventory": {"country_code": "FR", "country_name": "France"},
         }
         # Hostname says DE; inventory disagreement loses to the name.

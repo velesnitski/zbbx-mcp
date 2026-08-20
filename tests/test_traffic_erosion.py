@@ -140,7 +140,7 @@ class TestDetectTrafficErosionWire:
     def _client(self, trend_records):
         return RecordingClient({
             "host.get": [
-                {"hostid": "1", "host": "edge-aa1", "groups": [{"name": "edge"}],
+                {"hostid": "1", "host": "edge-aa9001", "groups": [{"name": "edge"}],
                  "interfaces": [{"ip": "10.0.0.1"}]},
             ],
             "item.get": [
@@ -170,13 +170,13 @@ class TestDetectTrafficErosionWire:
         assert "value_avg" in sent["output"]
         assert sent["time_from"] <= now - 6 * WEEK + 7200
         # single-host scope -> cohort n/a -> a real decline is flagged eroding
-        assert "edge-aa1" in out
+        assert "edge-aa9001" in out
         assert "ERODING" in out
 
     def test_no_traffic_items_message(self):
         client = RecordingClient({
             "host.get": [
-                {"hostid": "1", "host": "edge-aa1", "groups": [{"name": "edge"}],
+                {"hostid": "1", "host": "edge-aa9001", "groups": [{"name": "edge"}],
                  "interfaces": [{"ip": "10.0.0.1"}]},
             ],
             "item.get": [],

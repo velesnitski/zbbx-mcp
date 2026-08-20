@@ -37,5 +37,5 @@ Before approving any PR, verify:
 
 - **Forgot to update tool count** — tests will fail with "Expected N tools, got M"
 - **Substring country filter** — `country in hostname` matches partial strings (e.g., "in" matches "portainer")
-- **Sensitive data in examples** — use `srv-nl01`, `srv-us01`, never real naming patterns
+- **Sensitive data in examples** — use `srv-tf9001`, `srv-aq9001` (uninhabited-territory codes, 9000+ numbering), never real naming patterns
 - **Missing skip gate** — every tool must be wrapped in `if "tool_name" not in skip:`

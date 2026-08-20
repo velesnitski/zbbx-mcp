@@ -95,7 +95,7 @@ class TestDetectCheckFlapsWire:
     def _client(self, history):
         return RecordingClient({
             "host.get": [
-                {"hostid": "1", "host": "edge-aa1", "groups": [{"name": "edge"}]},
+                {"hostid": "1", "host": "edge-aa9001", "groups": [{"name": "edge"}]},
             ],
             "hostgroup.get": [{"groupid": "9"}],
             "item.get": [
@@ -124,7 +124,7 @@ class TestDetectCheckFlapsWire:
         sent = client.sent("history.get")
         assert sent["history"] == 3 and sent["itemids"] == ["i1"]
         # 31 isolated dips / 3d > 10/day and zero problem events -> candidate
-        assert "edge-aa1" in out
+        assert "edge-aa9001" in out
         assert "trigger candidates" in out
 
     def test_no_service_keys_message(self, monkeypatch):

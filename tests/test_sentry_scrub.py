@@ -29,8 +29,8 @@ class TestIdentifiersAreRemoved:
         assert addr not in out, "the address itself must not survive"
 
     @pytest.mark.parametrize("text", [
-        "host srv-nl01 unreachable",
-        "edge-de01 returned no items",
+        "host srv-tf9001 unreachable",
+        "edge-bv9001 returned no items",
     ])
     def test_hyphenated_names_go(self, text):
         assert "[HOST]" in _scrub_value(text)
@@ -42,8 +42,8 @@ class TestIdentifiersAreRemoved:
         hyphen, so a hyphen-based rule removes the parent and leaves the
         sibling — the more specific of the two.
         """
-        out = _scrub_value("srv-us01 us02 has no items")
-        assert "us02" not in out
+        out = _scrub_value("srv-aq9001 aq9002 has no items")
+        assert "aq9002" not in out
         assert out.count("[HOST]") == 2
 
     def test_credentials_drop_the_whole_string(self):
@@ -83,7 +83,7 @@ class TestDenyList:
 
 def test_the_scrubber_is_not_vacuous():
     """A scrubber that redacts nothing would pass every test above by accident."""
-    assert _scrub_value("srv-nl01") != "srv-nl01"
+    assert _scrub_value("srv-tf9001") != "srv-tf9001"
     assert _scrub_value("192.0.2.1") != "192.0.2.1"
 
 
@@ -96,7 +96,7 @@ class TestExtraFields:
     """
 
     def test_a_value_under_an_innocuous_key_is_scrubbed(self):
-        ev = {"extra": {"target": "192.0.2.10", "note": "srv-nl01 down"}}
+        ev = {"extra": {"target": "192.0.2.10", "note": "srv-tf9001 down"}}
         out = _scrub_event(ev, {})
         assert out["extra"]["target"] == "[IP]"
         assert "[HOST]" in out["extra"]["note"]
@@ -106,7 +106,7 @@ class TestExtraFields:
         assert _scrub_event(ev, {})["extra"]["api_token"] == "[REDACTED]"
 
     def test_nested_structures_are_reached(self):
-        ev = {"extra": {"args": {"inner": ["192.0.2.1", {"deep": "edge-de01"}]}}}
+        ev = {"extra": {"args": {"inner": ["192.0.2.1", {"deep": "edge-bv9001"}]}}}
         out = _scrub_event(ev, {})["extra"]["args"]["inner"]
         assert out[0] == "[IP]"
         assert out[1]["deep"] == "[HOST]"

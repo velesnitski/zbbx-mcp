@@ -141,7 +141,7 @@ class TestServiceUptimeReportUintFix:
         ]
         return RecordingClient({
             "host.get": [
-                {"hostid": "1", "host": "edge-de1", "groups": [{"name": "edge"}]},
+                {"hostid": "1", "host": "edge-bv9001", "groups": [{"name": "edge"}]},
             ],
             "item.get": [
                 {"itemid": "i1", "hostid": "1", "key_": "svc.check",
@@ -162,7 +162,7 @@ class TestServiceUptimeReportUintFix:
         # path this same host read 0.0% / DOWN (the 60x over-penalty).
         # value_max=1 every hour -> the host's row reads 100.0% / HEALTHY.
         # Under the old value_avg=0 path it read 0.0% / DOWN.
-        assert "| edge-de1 | DE | 100.0% | N/A | HEALTHY |" in out
+        assert "| edge-bv9001 | BV | 100.0% | N/A | HEALTHY |" in out
 
     def test_wire_requests_value_max_for_checks(self, monkeypatch):
         monkeypatch.setattr(geo_mod, "KEY_service_PRIMARY", "svc.check")

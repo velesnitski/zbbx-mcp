@@ -449,8 +449,8 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
     def _parse_cluster_base(hostname: str) -> str:
         """Extract base host from cluster name.
 
-        'srv-us905 us907' → 'srv-us905'
-        'srv-us905' → 'srv-us905'
+        'srv-aq9905 aq9907' → 'srv-aq9905'
+        'srv-aq9905' → 'srv-aq9905'
         """
         return hostname.split()[0]
 

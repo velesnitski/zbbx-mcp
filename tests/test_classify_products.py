@@ -52,15 +52,15 @@ class TestProductHiding:
         import zbbx_mcp.data as _data
 
         hosts = [
-            {"hostid": "1", "host": "srv-de01", "groups": [{"name": "good_product"}]},
-            {"hostid": "2", "host": "srv-de02", "groups": [{"name": "Legacy"}]},
-            {"hostid": "3", "host": "srv-nl01", "groups": [{"name": "good_product"}]},
+            {"hostid": "1", "host": "srv-bv9001", "groups": [{"name": "good_product"}]},
+            {"hostid": "2", "host": "srv-bv9002", "groups": [{"name": "Legacy"}]},
+            {"hostid": "3", "host": "srv-tf9001", "groups": [{"name": "good_product"}]},
         ]
         result = _data.group_by_country(hosts)
-        # DE should have 1 host (not 2 — Legacy host excluded)
-        assert len(result.get("DE", [])) == 1
-        assert result["DE"][0]["hostid"] == "1"
-        assert "NL" in result
+        # BV should have 1 host (not 2 — Legacy host excluded)
+        assert len(result.get("BV", [])) == 1
+        assert result["BV"][0]["hostid"] == "1"
+        assert "TF" in result
 
     def test_fleet_composition_filter(self, monkeypatch):
         """Simulate CEO report fleet composition: hidden + non-service excluded."""
@@ -105,11 +105,11 @@ class TestProductHiding:
 
         # Simulate all hosts from Zabbix
         all_hosts = [
-            {"hostid": "1", "host": "srv-de01", "groups": [{"name": "Activeservice"}]},
-            {"hostid": "2", "host": "srv-de02", "groups": [{"name": "Activeservice"}]},
-            {"hostid": "3", "host": "srv-nl01", "groups": [{"name": "Activeservice"}]},
-            {"hostid": "4", "host": "srv-us01", "groups": [{"name": "Legacy"}]},
-            {"hostid": "5", "host": "srv-us02", "groups": [{"name": "Legacy"}]},
+            {"hostid": "1", "host": "srv-bv9001", "groups": [{"name": "Activeservice"}]},
+            {"hostid": "2", "host": "srv-bv9002", "groups": [{"name": "Activeservice"}]},
+            {"hostid": "3", "host": "srv-tf9001", "groups": [{"name": "Activeservice"}]},
+            {"hostid": "4", "host": "srv-aq9001", "groups": [{"name": "Legacy"}]},
+            {"hostid": "5", "host": "srv-aq9002", "groups": [{"name": "Legacy"}]},
             {"hostid": "6", "host": "monitor-1", "groups": [{"name": "Monitoring"}]},
             {"hostid": "7", "host": "infra-1", "groups": [{"name": "Infrastructure"}]},
         ]
