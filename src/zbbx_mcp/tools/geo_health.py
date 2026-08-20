@@ -106,7 +106,12 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 time_from = now - _parse_period(period)
 
                 # Get items for service protocol checks
+                # PRIMARY and SECONDARY only — the tertiary key is never read
+                # here, unlike the health matrix which reads all three. That is
+                # a narrower scope than the title "service uptime" suggests, and
+                # it was silent. Disclosed in the output (ADR 128).
                 service_keys = [k for k in (KEY_service_PRIMARY, KEY_service_SECONDARY) if k]
+                unread_keys = [k for k in (KEY_service_TERTIARY,) if k]
                 if not service_keys:
                     return "No service check keys configured."
                 service_items = await client.call("item.get", {
@@ -334,6 +339,18 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                         f"{worst['pscore']:.1f}% over {worst['pdeployed']} "
                         "protocol(s). `up-if-any` cannot show this._"
                     )
+                parts.append(
+                    "\n_Measured over "
+                    f"{len(service_keys)} configured check key(s)"
+                    + (f"; `{'`, `'.join(unread_keys)}` is configured but NOT read "
+                       "by this tool, and any protocol served under a key outside "
+                       "that set is absent from these figures rather than down. "
+                       "`detect_dead_protocols` walks every check item (ADR 114)."
+                       if unread_keys else
+                       ". A protocol served under any other key is absent from "
+                       "these figures rather than down.")
+                    + "_"
+                )
                 parts.append(coverage_note(min_clock, _now, now - time_from))
                 return "\n".join(p for p in parts if p) + excluded_test_note(excluded)
             except (httpx.HTTPError, ValueError) as e:

@@ -367,10 +367,19 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 # (fixes false positives from deprecated check items returning 0)
                 TRAFFIC_VALIDATION_MBPS = 5.0
                 agg: dict[str, dict] = {}
+                skipped_no_item = 0
                 for h in hosts:
                     hid = h["hostid"]
                     if hid not in service_map:
-                        continue  # skip servers without service check item
+                        # Correct to skip — a host without the item has no
+                        # evidence and must not be scored down for it. But the
+                        # skip is SILENT, and this reads as a whole-fleet SLA:
+                        # only ONE configured key is consulted here, so any host
+                        # serving under a different key vanishes from the
+                        # denominator with no trace in the output. Counted, and
+                        # disclosed below (ADR 128).
+                        skipped_no_item += 1
+                        continue
                     prod, _ = _classify_host(h.get("groups", []))
                     if product and product.lower() not in (prod or "").lower():
                         continue
@@ -421,6 +430,15 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
 
                 if len(rows) > max_results:
                     lines.append(f"\n*{len(rows) - max_results} more omitted*")
+                if skipped_no_item:
+                    lines.append(
+                        f"\n_{skipped_no_item} enabled host(s) carry no item for "
+                        "the configured primary check and are absent from every "
+                        "row above — not counted up, not counted down. This "
+                        "dashboard measures one configured key, so a host serving "
+                        "under a different key is invisible here rather than "
+                        "unhealthy._"
+                    )
                 return "\n".join(lines)
             except (httpx.HTTPError, ValueError) as e:
                 return f"Error: {e}"

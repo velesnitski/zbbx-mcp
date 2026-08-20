@@ -274,6 +274,20 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     cd[klass] += 1
 
             # --- Per-protocol blocked servers table ---
+            #
+            # Carriers, counted separately from failures. `blocked_by_check` is
+            # built only from checks that FAILED, so a key carried by no host
+            # has no rows — indistinguishable, downstream, from a key carried
+            # by many hosts of which none failed. The first renders as "all
+            # healthy", which is a green verdict on a protocol nobody measures,
+            # and green is the one verdict nobody investigates. Live, a premium
+            # fleet carries none of one configured key while serving that
+            # protocol under several differently-named ones.
+            carriers: dict[str, int] = {}
+            for _chk in host_checks.values():
+                for _k in _chk:
+                    carriers[_k] = carriers.get(_k, 0) + 1
+
             blocked_by_check: dict[str, list[tuple[str, str, float]]] = {}
             for h in hosts:
                 hid = h["hostid"]
@@ -409,18 +423,33 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
             html.append('</tbody></table></div>')
 
             # Blocked servers per check (shows per-protocol visibility)
-            if blocked_by_check:
+            _unmonitored = [k for k in service_keys if not carriers.get(k)]
+            if blocked_by_check or _unmonitored:
                 html.append('<div class="section"><h2>Blocked Servers by Check</h2>'
-                            '<div class="muted">Servers failing each configured service check</div>')
+                            '<div class="muted">Servers failing each configured service '
+                            'check. A check no host carries is reported as such, not as '
+                            'healthy.</div>')
                 html.append('<table><thead><tr><th>Check</th><th class="num">Servers Failing</th>'
                             '<th class="num">Traffic Still Flowing</th><th>Top Affected Countries</th></tr></thead><tbody>')
                 for key in service_keys:
                     rows = blocked_by_check.get(key, [])
+                    carried = carriers.get(key, 0)
+                    if not carried:
+                        html.append(
+                            f'<tr><td><code>{key}</code></td><td class="num">&mdash;</td>'
+                            f'<td class="num">&mdash;</td>'
+                            f'<td><span class="tag tag-warn">no host carries this '
+                            f'check</span> <span class="muted">not measured, not '
+                            f'healthy</span></td></tr>'
+                        )
+                        continue
                     if not rows:
                         html.append(
                             f'<tr><td><code>{key}</code></td><td class="num">0</td>'
                             f'<td class="num">&mdash;</td>'
-                            f'<td><span class="tag tag-ok">all healthy</span></td></tr>'
+                            f'<td><span class="tag tag-ok">all healthy</span> '
+                            f'<span class="muted">({carried} host(s) carry it)</span>'
+                            f'</td></tr>'
                         )
                         continue
                     traffic_flowing = sum(1 for _, _, m in rows if m >= TRAFFIC_VALIDATED_MBPS)

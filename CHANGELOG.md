@@ -5,6 +5,35 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.16.54] - 2026-08-20
+
+### Fixed — `generate_service_brief` reported an unmonitored check as healthy
+ADR 128. The per-protocol table was built from `blocked_by_check`, which is
+populated only from checks that FAILED. A key carried by no host produced no
+rows — indistinguishable downstream from a key carried by many hosts of which
+none failed — and rendered "all healthy". The section was also gated on there
+being failures at all, so when nothing was failing the table vanished entirely,
+taking the disclosure with it exactly when a reader concludes the fleet is fine.
+Carriers are now counted separately from failures: a key nobody carries is
+reported as such and labelled *not measured, not healthy*, while a carried and
+passing key still reads healthy with its carrier count.
+
+This is the opposite symptom from ADR 126 with the same root cause. Where
+absence entered a numerator it read as failure; where it entered a filter it
+read as health. The second is the more dangerous direction, because a false
+DOWN gets investigated and a false green does not.
+
+### Changed — health rollups disclose partial coverage
+ADR 128. `get_sla_dashboard` consults one configured key and silently dropped
+every host without it; the skip is correct (absent evidence must not become a
+down vote) but the output read as a whole-fleet SLA. It now counts and names
+those hosts. `get_service_uptime_report` names the configured key it does not
+read — it reads primary and secondary, never tertiary.
+
+Audited and unchanged: `get_service_uptime_report` has no numerator/denominator
+asymmetry (it builds rows only from items that exist, then folds), and
+`get_fleet_risk_score` consults no service check key at all.
+
 ## [1.16.53] - 2026-08-20
 
 ### Fixed — the health matrix read a missing check as a failing one
