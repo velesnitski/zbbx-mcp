@@ -5,6 +5,40 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.16.59] - 2026-08-24
+
+### Fixed — `diagnose_host` told operators to restart an agent on silent hosts
+ADR 133. `traffic_collapsed` was computed from a comparison that is only
+possible when both figures exist, so a host with **no traffic data at all**
+scored `False` — identical to a host measured and healthy. Execution fell to the
+agent-unreachable branch, which returned *"Agent unreachable but traffic still
+flowing — agent-side issue (restart agent…)"*: an assertion that traffic flows,
+derived from never having measured any.
+
+Live, this sent operators to the agent on four hosts at one site whose agents
+had been dead with no traffic for twenty-six days across two separate /24s —
+where the evidence pointed at the provider. `bulk_diagnose` also printed
+"0 flagged as down" above the table listing them, because they classified as
+`degraded`.
+
+Traffic now has three states — collapsed, flowing, **unmeasured**. Agent
+unreachable with no traffic data is `down`, with an action that says explicitly
+it is not an agent-only fault. The "still flowing" branch now requires evidence
+that traffic flows. A genuine agent-only fault is unchanged.
+
+### Fixed — `get_trends` silently ignored time arguments it could not parse
+ADR 134. `_parse_epoch` returned `0` for both "not supplied" and "could not
+parse", and the caller reads `0` as "use the default window". So
+`time_from="now-13d"` returned the most recent `limit` hours — a full table of
+real data for a window nobody asked about. Found while reconstructing an
+incident, where the returned "pre-event baseline" was entirely post-event.
+
+Unintelligible input now returns `None`, and `get_trends` refuses before
+querying Zabbix, naming the offending argument and the accepted formats
+(`"13d"`, not `"now-13d"`). Additionally, `limit` doubles as the window span, so
+an explicit `time_from` further back than `limit` hours was silently clipped;
+that is now disclosed in the output.
+
 ## [1.16.58] - 2026-08-20
 
 ### Added — `detect_traffic_erosion` reports subnet waves

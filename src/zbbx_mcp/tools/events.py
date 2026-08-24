@@ -16,21 +16,31 @@ EVENT_VALUES = {
 }
 
 
-def _parse_epoch(value: str) -> int:
-    """Epoch from a time argument, tolerating anything ``parse_time`` knows.
+# Accepted time formats, named once so the error message and the docstring
+# cannot drift from what `parse_time` actually implements.
+_TIME_FORMATS = 'epoch ("1755000000"), ISO date ("2026-08-17"), ISO datetime, or a relative duration ("48h", "7d", "2w") — note a bare duration, NOT "now-7d"'
 
-    ``int(value)`` alone raised ``invalid literal for int()`` on the natural
-    ``"2026-07-24"`` form and killed the whole call, so the caller had to
-    know to pre-convert. Delegates to the shared ``parse_time`` (epoch / ISO
-    date / ISO datetime / relative "24h") and returns 0 for empty or
-    unparseable input, letting the caller apply its own default. Pure.
+
+def _parse_epoch(value: str) -> int | None:
+    """Epoch from a time argument. ``0`` = not supplied, ``None`` = not understood.
+
+    These were the same value once, and that conflation was the bug: an
+    unparseable argument returned 0, the caller read 0 as "not supplied", and
+    silently substituted its default window. A caller who asked for a specific
+    historical range got the most recent rows instead — data that looks
+    entirely valid and answers a different question.
+
+    ``"now-7d"`` is the shape that exposed it: it reads like a relative
+    duration, `parse_time` accepts only the bare ``"7d"`` form, and the
+    difference was invisible in the output. Distinguishing absent from
+    unintelligible lets the caller refuse rather than guess (ADR 134). Pure.
     """
     if not (value or "").strip():
         return 0
     try:
         return parse_time(value)
     except ValueError:
-        return 0
+        return None
 
 
 def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> None:
@@ -161,12 +171,33 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 # (ADR 100; the ADR 096 fix covered only the default call).
                 now = int(time.time())
                 t_from = _parse_epoch(time_from)
-                t_till = _parse_epoch(time_till) or now
+                t_till_parsed = _parse_epoch(time_till)
+                bad = [
+                    f"{name}={val!r}"
+                    for name, val, parsed in (
+                        ("time_from", time_from, t_from),
+                        ("time_till", time_till, t_till_parsed),
+                    )
+                    if parsed is None
+                ]
+                if bad:
+                    # Refuse rather than silently serve a different window.
+                    return (
+                        f"Unrecognised time value(s): {', '.join(bad)}. "
+                        f"Accepted: {_TIME_FORMATS}."
+                    )
+                t_till = t_till_parsed or now
                 span = max(1, limit) * 3600
                 params["time_till"] = t_till
                 params["time_from"] = (
                     max(t_from, t_till - span) if t_from else t_till - span
                 )
+                # `limit` doubles as the window span, so an explicit `time_from`
+                # further back than `limit` hours is silently clipped — the
+                # caller asks for a week and receives the last `limit` hours of
+                # it with nothing saying so. Say so.
+                clipped_from = t_from and (t_till - span) > t_from
+                requested_h = (t_till - t_from) // 3600 if t_from else 0
 
                 data = await client.call("trend.get", params)
 
@@ -183,6 +214,15 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     f"**Key:** `{item.get('key_', '?')}`",
                     f"**Item ID:** {item_id}",
                     f"**Records:** {len(data)} (hourly aggregates)",
+                ]
+                if clipped_from:
+                    parts.append(
+                        f"\n⚠ **Window clipped**: you asked for ~{requested_h}h "
+                        f"but `limit={limit}` caps the span at {limit}h, so only "
+                        f"the most recent {limit}h of that range was read. Raise "
+                        "`limit` to cover the whole window."
+                    )
+                parts += [
                     "",
                     "| Time | Min | Avg | Max | Count |",
                     "|------|-----|-----|-----|-------|",

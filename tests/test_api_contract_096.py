@@ -135,7 +135,17 @@ class TestParseEpoch:
         assert _parse_epoch("1700000000") == 1_700_000_000
         assert _parse_epoch("2026-07-24") == 1_784_851_200
 
-    def test_empty_or_junk_is_zero(self):
-        # 0 = "caller supplies its own default", never a crash.
-        assert _parse_epoch("") == 0
-        assert _parse_epoch("not-a-date") == 0
+    def test_absent_and_unintelligible_are_different_answers(self):
+        """These were both 0 once, and that conflation was the bug (ADR 134).
+
+        The caller reads 0 as "not supplied" and substitutes its default
+        window. So an argument it could not parse silently became an argument
+        that was never given, and a request for a specific historical range
+        returned the most recent rows instead — valid-looking data answering a
+        different question.
+        """
+        assert _parse_epoch("") == 0            # not supplied → caller's default
+        assert _parse_epoch("not-a-date") is None   # not understood → refuse
+        # The shape that exposed it: reads like a relative duration, is not one.
+        assert _parse_epoch("now-7d") is None
+        assert _parse_epoch("7d") not in (0, None)  # the form that IS accepted

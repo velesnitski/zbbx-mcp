@@ -199,15 +199,31 @@ def _classify_verdict(
         agent_ping_val is not None and agent_ping_val == 0
     ) or (agent_ping_age_min is not None and agent_ping_age_min > 5)
 
+    # Traffic has THREE states, not two. Collapsing "unmeasured" into "not
+    # collapsed" is what made an agent-down host with no traffic data at all
+    # report "traffic still flowing" — an assertion derived from the absence of
+    # a measurement, and an actively wrong instruction: it sends the reader to
+    # restart an agent when nothing on the host is reporting at all (ADR 133).
+    traffic_measured = (
+        traffic_baseline_mbps is not None and traffic_recent_mbps is not None
+    )
     traffic_collapsed = (
-        traffic_baseline_mbps is not None
-        and traffic_recent_mbps is not None
+        traffic_measured
         and traffic_baseline_mbps >= 5.0
         and traffic_recent_mbps < traffic_baseline_mbps * 0.1
     )
 
     if agent_unreachable and traffic_collapsed:
         return "down", "Host is fully down — check VM / hosting provider console."
+    if agent_unreachable and not traffic_measured:
+        # Silent on every channel available. That is not a lesser state than
+        # "agent down + traffic collapsed" — it is the same absence with one
+        # fewer witness, so it must not sort below it as `degraded`.
+        return "down", (
+            "Agent unreachable AND no traffic data — nothing on this host is "
+            "reporting. Check the VM / hosting provider console. This is NOT "
+            "an agent-only fault: there is no evidence traffic is flowing."
+        )
     if traffic_collapsed and not agent_unreachable:
         return "traffic_lost", (
             "Agent reachable but traffic collapsed. "
@@ -215,6 +231,8 @@ def _classify_verdict(
             "consider rotating the host's external IP if stale."
         )
     if agent_unreachable:
+        # Reached only when traffic is measured AND not collapsed — i.e. there
+        # really is evidence of traffic flowing.
         return "degraded", (
             "Agent unreachable but traffic still flowing — agent-side issue "
             "(restart agent, check connectivity to Zabbix server)."
@@ -233,6 +251,8 @@ def _verdict_primary_signal(facts: dict) -> str:
     """
     v = facts["verdict"]
     if v == "down":
+        if facts.get("traffic_baseline_mbps") is None:
+            return "agent down + no traffic data"
         return "agent down + traffic collapsed"
     if v == "traffic_lost":
         base = facts.get("traffic_baseline_mbps")
