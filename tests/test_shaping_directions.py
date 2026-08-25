@@ -190,3 +190,44 @@ class TestUncertaintyOutranksBenign:
         for other in ("no_baseline", "insufficient"):
             headline, _ = combine_directions(V("shaped", 100.0), V(other, 0.0))
             assert headline == "shaped", other
+
+
+class TestDeadServiceDemotion:
+    """A dead relay fakes an inbound cap: clients keep knocking, so the
+    machine-flat residual pins a tiny ceiling, while the egress — what the box
+    actually serves — collapses. A real one-direction shaper leaves the other
+    direction carrying traffic. Found on a live fleet: a proxy node dead for
+    days read SHAPED at 5 Mbps "after a 99% fall" while its egress was idle."""
+
+    def test_inbound_pin_with_idle_egress_is_a_dead_service(self):
+        head, note = combine_directions(V("shaped", 5.0), V("idle", 0.03))
+        assert head == "dropped"
+        assert "dead" in note and "not a shaper" in note
+
+    def test_inbound_pin_with_near_zero_insufficient_egress_demotes_too(self):
+        # The spiky variant: rare residual bursts leave too few active hours.
+        head, note = combine_directions(V("shaped", 5.0), V("insufficient", 0.4))
+        assert head == "dropped"
+        assert "dead" in note
+
+    def test_inbound_pin_with_live_egress_stays_a_shaper(self):
+        head, note = combine_directions(V("shaped", 100.0), V("normal", 400.0))
+        assert head == "shaped"
+        assert "shaper on that direction" in note
+
+    def test_insufficient_egress_with_a_real_ceiling_does_not_demote(self):
+        # "insufficient" from freshly created items is not evidence of death.
+        head, _ = combine_directions(V("shaped", 100.0), V("insufficient", 50.0))
+        assert head == "shaped"
+
+    def test_a_real_sized_pin_survives_an_unjudgeable_egress(self):
+        # Absence of judgment must not overturn a finding (ADR 107): only a
+        # residual-magnitude pin (machine chatter) demotes on `insufficient`.
+        head, _ = combine_directions(V("shaped", 100.0), V("insufficient", 0.0))
+        assert head == "shaped"
+
+    def test_egress_pin_with_idle_ingress_is_not_demoted(self):
+        # A send-only box (log shipper, backup origin) legitimately looks like
+        # this; the demotion is scoped to the inbound-residual signature.
+        head, _ = combine_directions(V("idle", 0.1), V("shaped", 900.0))
+        assert head == "shaped"
