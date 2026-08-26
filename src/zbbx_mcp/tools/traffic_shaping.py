@@ -175,6 +175,27 @@ def combine_directions(
             return headline, (f"{name}bound pinned at {v.ceiling_mbps:.0f} Mbps; "
                               f"{opposite}bound not measured — cannot tell a "
                               "per-direction shaper from a limit on the link")
+        # A dead or drained relay fakes this pattern from the inbound side:
+        # clients keep knocking, so the machine-flat residual reads as a pinned
+        # ceiling, while the egress — what the box actually serves — collapses
+        # to nothing. A real shaper on one direction leaves the other carrying
+        # its usual traffic. So an inbound "cap" opposite a dead egress is a
+        # dead service, not a policer, and belongs to the drop detector.
+        #
+        # Scope, deliberately narrow: `idle` is a MEASURED empty egress —
+        # evidence, and it demotes. `insufficient` is mere absence of judgment,
+        # and absence must not overturn a finding (the ADR 107 rule this file
+        # already lives by) — unless the pinned side itself sits at residual
+        # magnitude (a few Mbps of machine chatter), where "shaped" was never
+        # a credible reading of a serving relay to begin with.
+        other_dead = other.verdict == IDLE or (
+            other.verdict == INSUFFICIENT and other.ceiling_mbps < 1.0
+            and v.ceiling_mbps < 10.0)
+        if name == "in" and v.verdict == SHAPED and other_dead:
+            return DROPPED, (
+                f"inbound residual pinned at {v.ceiling_mbps:.0f} Mbps while "
+                f"outbound reads {other.verdict} — requests arriving, nothing "
+                "served: a dead/drained service, not a shaper")
         return headline, (f"{name}bound only, pinned at {v.ceiling_mbps:.0f} Mbps "
                           f"({opposite} reads {other.verdict}) — a shaper on "
                           "that direction")
