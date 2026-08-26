@@ -4,7 +4,17 @@ on:
   push:
     branches: [main, dev]
   pull_request:
-    branches: [main]
+    # `dev` as well as `main`. CONTRIBUTING points contributors at dev, so
+    # while this listed main only, no external pull request was ever checked
+    # by CI — they arrived looking green because nothing had run. Found when
+    # PR #2 merged with zero checks reported.
+    branches: [main, dev]
+
+# Least privilege, stated rather than inherited. This workflow reads code and
+# runs tests; it needs nothing else, and the repository is public and accepts
+# pull requests from forks.
+permissions:
+  contents: read
 
 jobs:
   lint:
