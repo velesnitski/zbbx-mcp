@@ -5,6 +5,34 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.16.60] - 2026-08-26
+
+### Fixed — a dead relay was reported as a shaped one
+ADR 135. Contributed as PR #2 by an outside contributor.
+
+`SHAPED` requires two things at once — the ceiling fell, and the peaks piled
+onto it — and a dead service satisfies both by accident. Clients keep knocking
+after the service dies, so the inbound side carries a few Mbps of retry traffic;
+being machine-generated it has no diurnal shape, so the peaks sit flat on one
+value, which is exactly the policer signature. The baseline collapsed with the
+service, so the drop threshold clears as well. The tool then recommended opening
+a provider ticket for a host serving nothing.
+
+An inbound pin opposite a dead egress now reads `dropped`, routing the reader to
+the host rather than the provider. Scoping follows ADR 107: `idle` egress is a
+*measured* empty egress and demotes; `insufficient` is an absence of judgment
+and demotes only when the pin is itself at machine-chatter magnitude; an egress
+pin with idle ingress is left alone, because send-only hosts legitimately look
+like that.
+
+Two corrections during review. **Both pinned verdicts demote, not only
+`shaped`**: once the baseline window rolls past the death there is no drop left
+to measure and the same dead host reads `capped`, so keying on `shaped` alone
+gave the fix a shelf life of one baseline window per incident. And the
+thresholds are now **named constants** rather than literals inside a boolean —
+a fleet whose idle chatter ran higher would have found the demotion silently
+ceasing to apply.
+
 ## [1.16.59] - 2026-08-24
 
 ### Fixed — `diagnose_host` told operators to restart an agent on silent hosts

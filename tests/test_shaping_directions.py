@@ -231,3 +231,53 @@ class TestDeadServiceDemotion:
         # this; the demotion is scoped to the inbound-residual signature.
         head, _ = combine_directions(V("idle", 0.1), V("shaped", 900.0))
         assert head == "shaped"
+
+
+class TestDeadServiceDemotionSurvivesTheBaseline:
+    """The demotion must not expire when the baseline catches up (ADR 135).
+
+    A service that died recently reads `shaped` — the ceiling fell. Once the
+    baseline window rolls past the death, the baseline is residual too, there
+    is no drop left to measure, and the very same dead box reads `capped`
+    instead. Keying the demotion on `shaped` alone therefore gave it a shelf
+    life of one baseline window per incident: the box would re-emerge as a
+    provider-ticket recommendation a week later, cured of nothing.
+
+    This is the recurring shape in this detector — a collapse quietly becoming
+    the new normal — and it is why the condition covers both pinned verdicts.
+    """
+
+    def test_long_dead_reads_capped_and_still_demotes(self):
+        head, note = combine_directions(V("capped", 5.0), V("idle", 0.03))
+        assert head == "dropped"
+        assert "dead" in note
+
+    def test_long_dead_with_unjudgeable_egress_demotes(self):
+        head, _ = combine_directions(V("capped", 5.0), V("insufficient", 0.4))
+        assert head == "dropped"
+
+    def test_the_note_names_what_it_is_not(self):
+        # Wording differs per verdict so the line reads naturally either way,
+        # and so the original test's "not a shaper" assertion still holds.
+        _, note = combine_directions(V("capped", 5.0), V("idle", 0.03))
+        assert "not a cap" in note
+        _, note = combine_directions(V("shaped", 5.0), V("idle", 0.03))
+        assert "not a shaper" in note
+
+    def test_a_real_pre_existing_cap_is_not_demoted(self):
+        """The guard against over-reach: a genuine cap with live egress."""
+        head, _ = combine_directions(V("capped", 100.0), V("normal", 400.0))
+        assert head == "capped"
+
+    def test_a_full_size_pin_with_unjudgeable_egress_is_not_demoted(self):
+        # Absence of judgment must not overturn a finding (ADR 107); only a
+        # residual-magnitude pin demotes on `insufficient`.
+        head, _ = combine_directions(V("capped", 100.0), V("insufficient", 0.0))
+        assert head == "capped"
+
+    def test_thresholds_are_named_not_inlined(self):
+        """A value buried in a boolean is one nobody revisits."""
+        from zbbx_mcp.tools import traffic_shaping as ts
+
+        assert ts._DEAD_EGRESS_MBPS > 0
+        assert ts._RESIDUAL_MBPS > ts._DEAD_EGRESS_MBPS

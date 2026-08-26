@@ -120,6 +120,13 @@ _UNRANKED = len(_SEVERITY_RANK) + 1
 # limit lands on one number in both directions; independent policers rarely do.
 _SYMMETRY_TOL = 0.10
 
+# Dead-service demotion (ADR 135). Named rather than inlined because a value
+# buried in a boolean is one nobody revisits: if a fleet's idle chatter runs
+# above _RESIDUAL_MBPS the demotion simply stops applying, and silent
+# inapplicability is the failure mode this module exists to prevent.
+_DEAD_EGRESS_MBPS = 1.0   # egress below this is "nothing served at all"
+_RESIDUAL_MBPS = 10.0     # a pin this small is machine chatter, not a service
+
 
 def combine_directions(
     inbound: ShapingVerdict | None,
@@ -189,13 +196,22 @@ def combine_directions(
         # magnitude (a few Mbps of machine chatter), where "shaped" was never
         # a credible reading of a serving relay to begin with.
         other_dead = other.verdict == IDLE or (
-            other.verdict == INSUFFICIENT and other.ceiling_mbps < 1.0
-            and v.ceiling_mbps < 10.0)
-        if name == "in" and v.verdict == SHAPED and other_dead:
+            other.verdict == INSUFFICIENT
+            and other.ceiling_mbps < _DEAD_EGRESS_MBPS
+            and v.ceiling_mbps < _RESIDUAL_MBPS)
+        # SHAPED *and* CAPPED. A service that died recently reads shaped (the
+        # ceiling fell); once the baseline window rolls past the death the
+        # baseline is residual too, there is no drop left to measure, and the
+        # very same dead box reads CAPPED instead. Catching only SHAPED gives
+        # the fix a shelf life of one baseline window per incident — the
+        # collapse quietly becomes the new normal, which is the pattern this
+        # detector keeps running into.
+        if name == "in" and v.verdict in (SHAPED, CAPPED) and other_dead:
+            kind = "shaper" if v.verdict == SHAPED else "cap"
             return DROPPED, (
                 f"inbound residual pinned at {v.ceiling_mbps:.0f} Mbps while "
                 f"outbound reads {other.verdict} — requests arriving, nothing "
-                "served: a dead/drained service, not a shaper")
+                f"served: a dead/drained service, not a {kind}")
         return headline, (f"{name}bound only, pinned at {v.ceiling_mbps:.0f} Mbps "
                           f"({opposite} reads {other.verdict}) — a shaper on "
                           "that direction")
