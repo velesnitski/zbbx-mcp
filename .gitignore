@@ -32,6 +32,8 @@ htmlcov/
 .DS_Store
 Thumbs.db
 tasks.md
+# match on case-sensitive checkouts too (Linux CI folds no case)
+TASKS.md
 
 # Local review tooling — runs under pytest in this checkout, not part of the
 # package.
