@@ -5,6 +5,55 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.16.61] - 2026-09-04
+
+### Fixed
+
+- **`diagnose_host` no longer reports `healthy` about a signal it never read**
+  (ADR 136). The verdict was computed from agent reachability, traffic against
+  baseline, IP rotation and open problems — CPU was not among them. A host whose
+  processors were fully occupied by a long-running process satisfied every arm
+  and came back
+  `healthy` / "No issues detected". The traffic arm did not help: a
+  compute-bound process moves almost no bytes, so egress read normal too.
+
+  "No issues detected" is a claim about the host; what the code supported was
+  "no issues among the four things I examined". Those differ exactly when the
+  problem is in the fifth. Same class as ADR 133 and ADR 128, one signal further
+  out — not a value misread, but a value never fetched.
+
+- **An item that has never collected is no longer read as a measurement of
+  zero.** Zabbix marks one with `lastclock = 0`; taken at face value a load
+  average of `0` timestamped 1970-01-01 reads as an idle host rather than as a
+  host nothing is known about.
+
+### Added
+
+- **Sustained-flat CPU detection.** A percentage threshold has a structural
+  blind spot: a process using a fixed number of cores occupies a fixed
+  *fraction* of the machine, so the same workload is an emergency on a small
+  host and invisible on a large one, and anything sitting below the line stays
+  below it. Variance does not have that problem. Real load breathes — a daily
+  shape, an hourly min and max several points apart; a constant-rate process
+  holds them within a fraction of a point for hours. The check is
+  threshold-independent, so it fires at levels no alert would.
+
+  New `zbbx_mcp/cpu_load.py`: `cpu_pct_from_items`, `flat_run_hours`,
+  `judge_cpu`, all pure. Level costs no extra API call (it comes from items
+  already fetched); the flat run needs hourly trends and so rides on the
+  existing `seasonal` flag — on for single-host, off for `bulk_diagnose`.
+
+- **`healthy` now names the checks that produced it**, and an unmeasured CPU is
+  disclosed rather than omitted. A host with no CPU item is not a host with
+  acceptable CPU.
+
+### Notes
+
+- Flat is reported as a shape, not an accusation — constant-rate work has
+  innocent explanations. The tool asks for the process to be identified.
+- 22 new tests (1231 → 1253), including a non-vacuity test pinning the old
+  behaviour so the suite cannot pass by accident.
+
 ## [1.16.60] - 2026-08-26
 
 ### Fixed — a dead relay was reported as a shaped one

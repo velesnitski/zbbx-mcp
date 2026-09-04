@@ -25,6 +25,7 @@ import httpx
 
 from zbbx_mcp.anomaly import seasonal_floor
 from zbbx_mcp.country import INVENTORY_COUNTRY_FIELDS, resolve_country
+from zbbx_mcp.cpu_load import cpu_pct_from_items, flat_run_hours, judge_cpu
 from zbbx_mcp.data import (
     AUDIT_ACTION_UPDATE,
     AUDIT_RESOURCE_HOST,
@@ -174,6 +175,8 @@ def _classify_verdict(
     open_problems: int,
     https_down: bool,
     https_age_h: float | None,
+    cpu_flag: str | None = None,
+    cpu_note: str = "",
 ) -> tuple[str, str]:
     """Decide a single verdict label + a one-line action recommendation.
 
@@ -237,11 +240,32 @@ def _classify_verdict(
             "Agent unreachable but traffic still flowing — agent-side issue "
             "(restart agent, check connectivity to Zabbix server)."
         )
+    # CPU is judged BEFORE the problem count, and `healthy` below names every
+    # check that ran.
+    #
+    # This verdict used to consult agent reachability, traffic against
+    # baseline, IP rotation and open problems — and nothing else. A host whose
+    # CPU was pinned by a process nobody had noticed satisfied all four and was
+    # returned as `healthy` / "No issues detected", which is positive assurance
+    # derived from a signal never examined. The traffic arm did not help: a
+    # compute-bound process moves almost no bytes, so it read normal too.
+    #
+    # "No issues detected" meant "none of the four things I looked at", and was
+    # read as "nothing is wrong". Same failure as ADR 133 (absence of a traffic
+    # measurement asserted as traffic flowing) and ADR 128 (a check nobody
+    # carries reported healthy), one signal further out.
+    if cpu_flag in ("flat", "busy"):
+        also = f" Also {open_problems} active problem(s)." if open_problems else ""
+        return "degraded", cpu_note + also
     if open_problems > 0:
         return "degraded", (
             f"{open_problems} active problem(s); review the list above."
         )
-    return "healthy", "No issues detected."
+    scope = (
+        "No issues detected in the checks that ran — agent reachability, "
+        "traffic against baseline, and active problems."
+    )
+    return "healthy", f"{scope} {cpu_note}".strip()
 
 
 def _verdict_primary_signal(facts: dict) -> str:
@@ -481,6 +505,42 @@ async def _collect_diagnosis_inner(
             except (ValueError, TypeError):
                 pass
 
+    # CPU level is free — it comes out of the item list already fetched. The
+    # flat-run check needs hourly trends, so it rides on `seasonal`, the same
+    # flag the single-host path already uses to opt into one extra read.
+    cpu_pct = cpu_pct_from_items(items)
+    cpu_flat_hours = 0
+    if seasonal and cpu_pct is not None:
+        cpu_item = next(
+            (it for it in items
+             if (it.get("key_") or "").strip()
+             in ("system.cpu.util", "system.cpu.util[,idle]")),
+            None,
+        )
+        if cpu_item:
+            inverted = (cpu_item.get("key_") or "").strip() == "system.cpu.util[,idle]"
+            try:
+                rows = await client.call("trend.get", {
+                    "itemids": [cpu_item["itemid"]],
+                    "time_from": now - 24 * 3600,
+                    "output": ["clock", "value_min", "value_max"],
+                })
+                hourly = sorted(
+                    ((int(r["clock"]), float(r["value_min"]), float(r["value_max"]))
+                     for r in rows),
+                    key=lambda t: t[0], reverse=True,
+                )
+                # An idle-derived series inverts: low idle is high utilisation,
+                # so min and max swap places as well as sign.
+                cpu_flat_hours = flat_run_hours([
+                    (100.0 - hi, 100.0 - lo) if inverted else (lo, hi)
+                    for _, lo, hi in hourly
+                ])
+            except (httpx.HTTPError, ValueError, KeyError, TypeError):
+                cpu_flat_hours = 0   # unreadable trends judge nothing
+
+    cpu_flag, cpu_note = judge_cpu(cpu_pct, cpu_flat_hours)
+
     verdict, action = _classify_verdict(
         mode=mode,
         agent_ping_val=agent_ping_val,
@@ -490,6 +550,8 @@ async def _collect_diagnosis_inner(
         open_problems=len(problems),
         https_down=https_down,
         https_age_h=https_age_h,
+        cpu_flag=cpu_flag,
+        cpu_note=cpu_note,
     )
 
     return {
