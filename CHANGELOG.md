@@ -5,6 +5,41 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.16.62] - 2026-09-04
+
+### Fixed
+
+- **Product and tier filters match exactly, not by substring** (ADR 137). Ten
+  call sites across eight files used `wanted in actual`; tier labels nest, so
+  asking for a base tier silently returned every variant sharing its prefix,
+  while `group` and `country` in the same function compared exactly. A filter
+  that broadens itself is worse than one that errors — the caller reads a
+  number about the wrong set. New `label_matches` in `data.py`; all sites use it.
+
+- **A never-collected connections item no longer reads as zero.** The fetch did
+  not request `lastclock`, so the `lastclock = 0` sentinel was invisible and a
+  host moving hundreds of megabits printed "0 connections" — impossible, hence
+  never a measurement. New `connections_from_items` in `fetch.py` honours the
+  sentinel; both fetches request the clock; absence renders `–`.
+
+- **`detect_traffic_anomalies` still had `host_conns.get(hid, 0)`** — the line
+  ADR 130 removed from `get_traffic_report` in the same file. Now reads `None`
+  for absence and guards every comparison.
+
+### Added
+
+- **`get_traffic_totals`** — one number for a fleet slice (`group`, `product`,
+  `tier`, `country`), summing each host's carrier NIC, with coverage stated as
+  *N of M*. Hosts with no readable traffic item are named as uncovered, never
+  summed as zero. Replaces hand-summing a truncated per-host table.
+  172 tools.
+
+### Notes
+
+- Connection-test fixtures predated `lastclock` being requested and now carry
+  a live clock; an explicit `0` is the sentinel under test.
+- 41 new tests (1231 → 1272).
+
 ## [1.16.61] - 2026-09-04
 
 ### Fixed

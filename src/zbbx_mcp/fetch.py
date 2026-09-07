@@ -978,3 +978,29 @@ async def fetch_trends_batch(
 
     rows.sort(key=lambda r: (r.hostname, r.metric))
     return rows, host_map
+
+
+def connections_from_items(items) -> dict[str, float]:
+    """``{hostid: session_count}`` from connection items. Pure, no API call.
+
+    Honours the never-collected sentinel. Zabbix marks an item that has never
+    produced a value with ``lastclock = 0``; its ``lastvalue`` is a placeholder,
+    not a count. Read without the clock it became ``0.0`` — and a host moving
+    hundreds of megabits with "0 connections" was printed as a fact, which is
+    physically impossible and therefore a tell that the number was never
+    measured. Such hosts are left OUT of the map, so the caller reads ``None``
+    and renders "unknown", the same as a host with no item at all (ADR 137;
+    the same sentinel as ``cpu_pct_from_items``, ADR 136).
+
+    Requires ``lastclock`` in the item ``output``. A caller that omits it gets
+    every item treated as never-collected, which fails closed rather than open.
+    """
+    out: dict[str, float] = {}
+    for it in items or []:
+        try:
+            if int(it.get("lastclock") or 0) <= 0:
+                continue
+            out[str(it["hostid"])] = float(it.get("lastvalue"))
+        except (KeyError, TypeError, ValueError):
+            continue
+    return out

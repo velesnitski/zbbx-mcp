@@ -27,8 +27,9 @@ from zbbx_mcp.data import (
     extract_country,
     fold_rows_by_canonical_host,
     host_ip,
+    label_matches,
 )
-from zbbx_mcp.fetch import physical_traffic_items, to_kbps, to_mbps
+from zbbx_mcp.fetch import connections_from_items, physical_traffic_items, to_kbps, to_mbps
 from zbbx_mcp.resolver import InstanceResolver
 
 # Per-host interface shortlist size for detect_traffic_drops. Bounds the
@@ -115,7 +116,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
 
                 conn_task = client.call("item.get", {
                     "hostids": all_ids,
-                    "output": ["hostid", "lastvalue"],
+                    "output": ["hostid", "lastvalue", "lastclock"],
                     "filter": {"key_": KEY_CONNECTIONS, "status": "0"},
                 }) if KEY_CONNECTIONS else _empty()
                 cpu_task = client.call("item.get", {
@@ -139,12 +140,8 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     if val > host_traffic.get(hid, 0):
                         host_traffic[hid] = val
 
-                host_conns: dict[str, float] = {}
-                for i in conn_items:
-                    try:
-                        host_conns[i["hostid"]] = float(i.get("lastvalue", "0"))
-                    except (ValueError, TypeError):
-                        pass
+                # Never-collected items are left out, so they read None (ADR 137).
+                host_conns: dict[str, float] = connections_from_items(conn_items)
 
                 host_cpu: dict[str, float] = {}
                 for i in cpu_items:
@@ -157,7 +154,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 group_members: dict[str, list[str]] = {}
                 for h in hosts:
                     prod, tier = _classify_host(h.get("groups", []))
-                    if product and product.lower() not in (prod or "").lower():
+                    if not label_matches(prod, product):
                         continue
                     if country and extract_country(h.get("host", "")).lower() != country.lower():
                         continue
@@ -204,7 +201,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
 
                     for hid in member_ids:
                         traffic = host_traffic.get(hid, 0)
-                        conns = host_conns.get(hid, 0)
+                        conns = host_conns.get(hid)   # None = unknown, not zero (ADR 130/137)
                         cpu = host_cpu.get(hid)
                         h = host_map[hid]
                         hostname = h["host"]
@@ -220,7 +217,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                             reasons.append(f"Traffic {pct:.0f}% of group median ({to_mbps(med):.1f} Mbps)")
 
                         # Signal 2: Has connections but very low traffic (tunnel broken)
-                        if conns > 0 and traffic < threshold:
+                        if conns is not None and conns > 0 and traffic < threshold:
                             reasons.append(f"{conns:.0f} active connections but only {to_mbps(traffic):.2f} Mbps")
 
                         # Signal 3: Statistical outlier (> 2 SD below mean)
@@ -233,7 +230,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
 
                         if reasons:
                             severity = "HIGH" if len(reasons) >= 2 else "MEDIUM"
-                            if conns > 0 and traffic < threshold:
+                            if conns is not None and conns > 0 and traffic < threshold:
                                 severity = "CRITICAL"  # Active conns + low traffic = broken tunnel
 
                             all_anomalies.append({
@@ -279,7 +276,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                         icon = {"CRITICAL": "🔴", "HIGH": "🟠", "MEDIUM": "🟡"}[sev]
                         parts.append(f"### {icon} {sev} ({len(sev_items)})\n")
                         for a in sev_items:
-                            conns_str = f", {a['connections']:.0f} conns" if a["connections"] > 0 else ""
+                            conns_str = f", {a['connections']:.0f} conns" if a["connections"] else ""
                             cpu_str = f", CPU {a['cpu_pct']}%" if a["cpu_pct"] is not None else ""
                             parts.append(
                                 f"- **{a['host']}** ({a['provider']}) — "
@@ -353,7 +350,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     }),
                     client.call("item.get", {
                         "hostids": all_ids,
-                        "output": ["hostid", "lastvalue"],
+                        "output": ["hostid", "lastvalue", "lastclock"],
                         "filter": {"key_": KEY_CONNECTIONS, "status": "0"},
                     }) if KEY_CONNECTIONS else _empty_list(),
                 )
@@ -368,12 +365,8 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     if val > host_traffic.get(hid, 0):
                         host_traffic[hid] = val
 
-                host_conns: dict[str, float] = {}
-                for i in conn_items:
-                    try:
-                        host_conns[i["hostid"]] = float(i.get("lastvalue", "0"))
-                    except (ValueError, TypeError):
-                        pass
+                # Never-collected items are left out, so they read None (ADR 137).
+                host_conns: dict[str, float] = connections_from_items(conn_items)
 
                 rows = []
                 for hid, traffic in host_traffic.items():
@@ -381,9 +374,9 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     if not h:
                         continue
                     prod, host_tier = _classify_host(h.get("groups", []))
-                    if product and product.lower() not in (prod or "").lower():
+                    if not label_matches(prod, product):
                         continue
-                    if tier and tier.lower() not in (host_tier or "").lower():
+                    if not label_matches(host_tier, tier):
                         continue
                     if group:
                         if not any(g["name"].lower() == group.lower() for g in h.get("groups", [])):
@@ -551,7 +544,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 filtered_ids = []
                 for h in hosts:
                     prod, _ = _classify_host(h.get("groups", []))
-                    if product and product.lower() not in (prod or "").lower():
+                    if not label_matches(prod, product):
                         continue
                     if group and not any(g["name"].lower() == group.lower() for g in h.get("groups", [])):
                         continue

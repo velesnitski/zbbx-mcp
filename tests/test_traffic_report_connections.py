@@ -24,6 +24,11 @@ HOSTS = [
 
 
 def _run(monkeypatch, conn_rows):
+    # The API now returns lastclock because the tool asks for it; a fixture
+    # without one models a response that no longer occurs. Fill a live clock
+    # where absent so each test keeps its original meaning — an EXPLICIT
+    # lastclock "0" is left alone, because that is the sentinel under test.
+    conn_rows = [{"lastclock": "1760000000", **r} for r in conn_rows]
     monkeypatch.setattr(traffic_mod, "KEY_CONNECTIONS", CONN_KEY, raising=False)
 
     def item_get(params):
@@ -76,7 +81,7 @@ class TestAbsentIsNotZero:
         def item_get(params):
             key = (params.get("filter") or {}).get("key_")
             if key == CONN_KEY:
-                return [{"hostid": "2", "lastvalue": "5"}]
+                return [{"hostid": "2", "lastvalue": "5", "lastclock": "1760000000"}]
             if isinstance(key, (list, tuple)):
                 return [{"hostid": "1", "lastvalue": "8000000"},
                         {"hostid": "2", "lastvalue": "4000000"}]
@@ -87,3 +92,29 @@ class TestAbsentIsNotZero:
                        sort_by="connections")
         body = [ln for ln in out.splitlines() if ln.startswith("| edge-")]
         assert body[0].startswith("| edge-bv9001")   # measured 5 outranks unmeasured
+
+
+class TestNeverCollectedIsNotZero:
+    """ADR 137: lastclock=0 means the item never produced a value."""
+
+    def test_a_never_collected_item_reads_unmeasured_not_zero(self, monkeypatch):
+        # Same row as `test_a_genuine_zero_still_reads_zero`, but the clock says
+        # it never collected. Printed blind, a host moving megabits showed
+        # "0 connections" — impossible, and therefore never a measurement.
+        out = _run(monkeypatch, conn_rows=[{"hostid": "1", "lastvalue": "0", "lastclock": "0"}])
+        assert "| – |" in out, out
+        assert "unmeasured" in out.lower() or "shown as –" in out, out
+
+    def test_the_fetch_asks_for_lastclock(self, monkeypatch):
+        # Without it the sentinel cannot be honoured, and the parser fails
+        # closed — every row would read unmeasured. Guard the request itself.
+        import zbbx_mcp.tools.traffic as traffic_mod
+        from tests.wiretest import RecordingClient, run_tool
+        monkeypatch.setattr(traffic_mod, "KEY_CONNECTIONS", CONN_KEY, raising=False)
+        client = RecordingClient({"host.get": [{"hostid": "1", "host": "srv-nl01",
+                                                "groups": [{"name": "g"}], "interfaces": []}]})
+        run_tool(traffic_mod, "get_traffic_report", client)
+        conn_calls = [pr for mth, pr in client.calls
+                      if mth == "item.get" and pr.get("filter", {}).get("key_") == CONN_KEY]
+        assert conn_calls, "connections item.get was not issued"
+        assert "lastclock" in conn_calls[0]["output"]

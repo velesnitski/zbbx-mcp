@@ -171,6 +171,7 @@ EXPECTED_TOOLS = {
     # traffic.py
     "detect_traffic_anomalies",
     "get_traffic_report",
+    "get_traffic_totals",
     "detect_traffic_drops",
     # traffic_erosion.py
     "detect_traffic_erosion",

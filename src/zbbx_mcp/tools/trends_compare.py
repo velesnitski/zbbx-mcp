@@ -9,6 +9,7 @@ from zbbx_mcp.data import (
     extract_country,
     fetch_trends_batch,
     host_ip,
+    label_matches,
 )
 from zbbx_mcp.resolver import InstanceResolver
 from zbbx_mcp.utils import resolve_group_ids
@@ -64,7 +65,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()):
                 filtered_ids = []
                 for h in hosts:
                     prod, t = _classify_host(h.get("groups", []))
-                    if product and product.lower() not in (prod or "").lower():
+                    if not label_matches(prod, product):
                         continue
                     if tier and tier.lower() not in (t or "").lower():
                         continue

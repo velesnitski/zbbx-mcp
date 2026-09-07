@@ -61,7 +61,7 @@ __all__ = [
     "REGION_MAP", "CAPITAL_COORDS", "STATUS_ENABLED",
     "KEY_service_PRIMARY", "KEY_service_SECONDARY", "KEY_service_TERTIARY",
     "KEY_CPU_IDLE", "KEY_CPU_LOAD", "KEY_MEM_AVAIL",
-    "KEY_CONNECTIONS", "KEY_AGENT_VERSION",
+    "KEY_CONNECTIONS", "KEY_AGENT_VERSION", "label_matches",
     "KEY_PING_LOSS", "KEY_PING_RTT", "KEY_SERVICE_BPS",
     "_get_regional_traffic_keys",
     # Re-exports from fetch.py for backward compatibility (resolved lazily —
@@ -634,3 +634,22 @@ def __getattr__(name: str):
         from zbbx_mcp import fetch as _fetch
         return getattr(_fetch, name)
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+
+def label_matches(actual: str | None, wanted: str | None) -> bool:
+    """Exact, case-insensitive match of a product or tier label.
+
+    An empty ``wanted`` means "no filter" and matches everything.
+
+    Exact, not substring. Every product/tier filter in ``tools/`` used
+    ``wanted.lower() in actual.lower()``, and tier labels nest: ``Free`` is a
+    prefix of ``Free Plus`` and ``Free Proxy``; ``Pro`` of ``Pro Max``. Asking for one tier silently returned several, and
+    nothing in the output said the scope had widened — the same function
+    compared ``group`` and ``country`` exactly, so the filters disagreed with
+    each other about what a filter is. A filter that broadens itself is worse
+    than one that errors: the caller reads a number about the wrong set and
+    has no way to know (ADR 137).
+    """
+    if not wanted:
+        return True
+    return (actual or "").strip().lower() == wanted.strip().lower()

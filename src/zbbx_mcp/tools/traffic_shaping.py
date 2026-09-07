@@ -49,6 +49,7 @@ from zbbx_mcp.data import (
     countries_for_region,
     excluded_test_note,
     extract_country,
+    label_matches,
     partition_test_hosts,
 )
 from zbbx_mcp.fetch import TRAFFIC_DIVISOR, physical_traffic_items
@@ -522,7 +523,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 filtered_ids = []
                 for h in hosts:
                     prod, _ = _classify_host(h.get("groups", []))
-                    if product and product.lower() not in (prod or "").lower():
+                    if not label_matches(prod, product):
                         continue
                     if group and not any(
                         g["name"].lower() == group.lower()

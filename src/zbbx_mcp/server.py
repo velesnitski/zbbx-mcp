@@ -159,7 +159,7 @@ def _register_resources(mcp: FastMCP) -> None:
             "Media & Actions": ["get_media_types", "get_actions"],
             "Slack": ["send_slack_message", "send_slack_report"],
             "Costs": ["import_server_costs", "set_bulk_cost", "get_cost_summary"],
-            "Traffic": ["detect_traffic_anomalies", "detect_traffic_drops", "get_traffic_report"],
+            "Traffic": ["detect_traffic_anomalies", "detect_traffic_drops", "get_traffic_report", "get_traffic_totals"],
             "Trends & Analysis": ["get_trends_batch", "get_server_dashboard", "compare_servers", "get_health_assessment", "get_shutdown_candidates", "get_capacity_planning"],
             "Geo": ["detect_regional_anomalies", "get_geo_traffic_trends", "get_service_uptime_report", "get_service_health_matrix", "get_traffic_drop_timeline", "get_expansion_report", "get_regional_density_map", "get_latency_estimate"],
             "Executive": ["get_executive_dashboard", "get_month_over_month", "get_fleet_risk_score", "get_sla_dashboard", "get_report_snapshot", "get_peak_analysis", "get_product_audit"],

@@ -23,6 +23,7 @@ from zbbx_mcp.data import (
     fetch_trends_batch,
     group_by_country,
     host_ip,
+    label_matches,
 )
 from zbbx_mcp.fetch import TRAFFIC_DIVISOR
 from zbbx_mcp.resolver import InstanceResolver
@@ -381,7 +382,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                         skipped_no_item += 1
                         continue
                     prod, _ = _classify_host(h.get("groups", []))
-                    if product and product.lower() not in (prod or "").lower():
+                    if not label_matches(prod, product):
                         continue
                     cc = extract_country(h["host"])
                     if country and cc and cc.lower() != country.lower():
