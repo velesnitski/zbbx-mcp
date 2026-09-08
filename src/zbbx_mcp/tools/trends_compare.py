@@ -25,6 +25,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()):
             product: str = "",
             tier: str = "",
             group: str = "",
+            hosts: str = "",
             metrics: str = "cpu,traffic,load",
             period: str = "7d",
             aggregation: str = "summary",
@@ -38,6 +39,9 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()):
                 product: Filter by product (optional)
                 tier: Filter by tier (optional)
                 group: Zabbix host group (optional)
+                hosts: Comma-separated exact host names. An explicit list is
+                    never cut by max_results, and names Zabbix does not know
+                    are reported, not dropped (optional)
                 metrics: Comma-separated: cpu, traffic, load, memory (default: cpu,traffic,load)
                 period: 1d, 7d, or 30d (default: 7d)
                 aggregation: 'summary' or 'daily' (default: summary)
@@ -59,11 +63,18 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()):
                     if gids is None:
                         return f"Host group '{group}' not found."
                     params["groupids"] = gids
+                wanted = [x.strip() for x in hosts.split(",") if x.strip()] if hosts else []
+                if wanted:
+                    params["filter"]["host"] = wanted
 
-                hosts = await client.call("host.get", params)
+                found_hosts = await client.call("host.get", params)
 
+                # A caller who names the hosts has already chosen the set; a cap
+                # that trimmed it would drop names silently, which is the bug the
+                # parameter exists to avoid.
+                cap = max(max_results, len(wanted))
                 filtered_ids = []
-                for h in hosts:
+                for h in found_hosts:
                     prod, t = _classify_host(h.get("groups", []))
                     if not label_matches(prod, product):
                         continue
@@ -72,11 +83,21 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()):
                     if country and extract_country(h.get("host", "")).lower() != country.lower():
                         continue
                     filtered_ids.append(h["hostid"])
-                    if len(filtered_ids) >= max_results:
+                    if len(filtered_ids) >= cap:
                         break
 
+                missing = sorted(set(wanted) - {h.get("host", "") for h in found_hosts})
+                note = ""
+                if missing:
+                    note = (
+                        f"_{len(missing)} of {len(wanted)} requested host(s) are not enabled "
+                        f"hosts in Zabbix: {', '.join(missing)}_\n"
+                    )
+
                 if not filtered_ids:
-                    return "No servers match the filters."
+                    if wanted and len(missing) == len(wanted):
+                        return note.strip("_\n") + "."
+                    return note + "No servers match the filters."
 
                 metric_list = [m.strip() for m in metrics.split(",") if m.strip()]
                 trend_rows, host_map = await fetch_trends_batch(
@@ -99,7 +120,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()):
 
                     day_cols = " | ".join(day_label(d) for d in all_days)
                     parts = [
-                        f"**Daily Trends ({period}) for {server_count} servers**\n",
+                        f"**Daily Trends ({period}) for {server_count} servers**\n" + note,
                         f"| Server | Metric | {day_cols} |",
                         f"|--------|--------|{'---|' * len(all_days)}",
                     ]
@@ -114,7 +135,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()):
                     return "\n".join(parts)
                 else:
                     parts = [
-                        f"**Trends ({period}) for {server_count} servers**\n",
+                        f"**Trends ({period}) for {server_count} servers**\n" + note,
                         "| Server | Metric | Avg | Peak | Min | Current | Trend |",
                         "|--------|--------|-----|------|-----|---------|-------|",
                     ]

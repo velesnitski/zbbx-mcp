@@ -1,9 +1,16 @@
 """ADR 138: a country filter that means where the box is, not what it is named.
 Fixtures are neutral; cities are illustrative."""
 
+import ipaddress
+
 from tests.wiretest import RecordingClient, run_tool
 from zbbx_mcp.tools import geo_inventory
-from zbbx_mcp.tools.geo_inventory import bucket_hosts, datacenter_cc, is_free_tier
+from zbbx_mcp.tools.geo_inventory import (
+    bucket_hosts,
+    datacenter_cc,
+    is_free_tier,
+    override_conflicts,
+)
 
 
 class TestDatacenterCc:
@@ -57,6 +64,60 @@ class TestBucketHosts:
         assert all(not v for v in b.values())
 
 
+# One configured range (documentation prefix) placing everything in AQ.
+_RANGE = [("P", "Base, AQ", ipaddress.ip_network("198.51.100.0/24"))]
+
+
+def _in_range(monkeypatch, nets=_RANGE):
+    monkeypatch.setattr(geo_inventory, "get_extra_dc_nets", lambda: nets)
+    monkeypatch.setattr(
+        geo_inventory, "resolve_datacenter",
+        lambda ip: next(((p, c) for p, c, n in nets if ipaddress.ip_address(ip) in n), ("Unknown", "")),
+    )
+
+
+class TestOverrideConflicts:
+    """ADR 139: a range contradicted by the names of the hosts it covers is a
+    question, not an answer — reported, with the minority named, and the hosts
+    left where the range put them."""
+
+    def test_a_range_whose_hosts_agree_is_silent(self, monkeypatch):
+        _in_range(monkeypatch)
+        hosts = [_host("1", "srv-aq01", "198.51.100.1"), _host("2", "srv-aq02", "198.51.100.2")]
+        bucket_hosts(hosts, "aq")
+        assert override_conflicts(hosts, "aq") == []
+
+    def test_two_countries_under_one_range_are_named(self, monkeypatch):
+        _in_range(monkeypatch)
+        hosts = [
+            _host("1", "srv-aq01", "198.51.100.1"),
+            _host("2", "srv-aq02", "198.51.100.2"),
+            _host("3", "srv-bv01", "198.51.100.3"),   # placed in AQ by the range, named bv
+        ]
+        b = bucket_hosts(hosts, "aq")
+        # The range still wins for placement (ADR 138) ...
+        assert [h["host"] for h in b["in_geo"]] == ["srv-aq01", "srv-aq02", "srv-bv01"]
+        # ... and the contradiction is reported, minority first-named.
+        c = override_conflicts(hosts, "aq")
+        assert c == [{"cidr": "198.51.100.0/24", "city": "Base, AQ",
+                      "names": {"AQ": 2, "BV": 1}, "disagreeing": ["srv-bv01"]}]
+
+    def test_only_ranges_touching_the_asked_country_are_reported(self, monkeypatch):
+        _in_range(monkeypatch)
+        hosts = [_host("1", "srv-aq01", "198.51.100.1"), _host("3", "srv-bv01", "198.51.100.3")]
+        bucket_hosts(hosts, "hm")
+        assert override_conflicts(hosts, "hm") == []
+        # Asked about the minority's country, the same range IS relevant.
+        bucket_hosts(hosts, "bv")
+        assert len(override_conflicts(hosts, "bv")) == 1
+
+    def test_no_configured_ranges_means_nothing_to_contradict(self, monkeypatch):
+        monkeypatch.setattr(geo_inventory, "get_extra_dc_nets", lambda: [])
+        hosts = [_host("1", "srv-aq01", "198.51.100.1")]
+        bucket_hosts(hosts, "aq")
+        assert override_conflicts(hosts, "aq") == []
+
+
 class TestGetGeoInventoryWire:
     def _client(self):
         hosts = [
@@ -84,6 +145,20 @@ class TestGetGeoInventoryWire:
         assert "srv-aq02 → Bouvet, BV" in out        # named fr, sits in DE — excluded and said so
         assert "named for another country" in out     # srv-hm01 is in FR but named nl
         assert "`hm`×1" in out
+
+    def test_a_contradicted_range_is_disclosed_in_the_output(self, monkeypatch):
+        _in_range(monkeypatch)
+        hosts = [
+            _host("1", "srv-aq01", "198.51.100.1", "app_free"),
+            _host("3", "srv-bv01", "198.51.100.3", "app_free"),
+        ]
+        c = RecordingClient({"host.get": hosts, "item.get": []})
+        out = run_tool(geo_inventory, "get_geo_inventory", c, country="aq")
+        assert "**2 host(s)** physically in AQ" in out            # placement unchanged
+        assert "Configured range contradicted" in out, out
+        assert "198.51.100.0/24 → Base, AQ" in out
+        assert "`aq`×1, `bv`×1" in out
+        assert "Disagreeing: srv-bv01" in out
 
     def test_a_bad_country_code_is_refused(self):
         out = run_tool(geo_inventory, "get_geo_inventory", self._client(), country="France")

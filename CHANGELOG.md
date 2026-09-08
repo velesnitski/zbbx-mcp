@@ -5,6 +5,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.16.64] - 2026-09-08
+
+### Fixed
+
+- **`get_geo_inventory`** now reports a configured datacenter range whose
+  covered hosts are named for more than one country — the range, its city,
+  the per-country counts and the disagreeing hosts (ADR 139). One over-wide
+  entry had placed a minority of hosts in the wrong country and the tool
+  reported them, confidently, as mislabelled. Placement is unchanged (ADR 138);
+  the contradiction is disclosed as a question for the operator.
+
+### Added
+
+- **`get_trends_batch(hosts=...)`** — an explicit, comma-separated host list.
+  It is a set, not a filter: `max_results` cannot trim it, and names Zabbix
+  does not know are reported rather than dropped. Closes the gap where a named
+  set could only be read through a country filter that ran past the client's
+  display limit, or through `compare_servers`, which has no min or trend.
+
 ## [1.16.63] - 2026-09-08
 
 ### Added

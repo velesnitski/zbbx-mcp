@@ -26,10 +26,13 @@ tool does not know, and says so.
 
 from __future__ import annotations
 
+import ipaddress
+from collections import Counter
+
 import httpx
 
 from zbbx_mcp.classify import classify_host as _classify_host
-from zbbx_mcp.classify import resolve_datacenter
+from zbbx_mcp.classify import get_extra_dc_nets, resolve_datacenter
 from zbbx_mcp.data import (
     excluded_test_note,
     extract_country,
@@ -97,6 +100,53 @@ def bucket_hosts(hosts: list[dict], country: str) -> dict[str, list[dict]]:
     return out
 
 
+def override_conflicts(hosts: list[dict], country: str) -> list[dict]:
+    """Configured ranges, relevant to ``country``, whose hosts are named for
+    more than one country. Pure; ``hosts`` must have been through
+    ``bucket_hosts`` so ``_cc_name`` is set.
+
+    ADR 138 trusts the IP over the hostname. That is right when the range is
+    right and silently wrong when it is not — a single ``/16`` that spans two
+    facilities puts every host in it in one city, and nothing in the output
+    says so. A range covering hosts named for two countries is not proof the
+    range is wrong (a facility can serve two markets), but it is the only
+    signal available that it deserves a look. So it is reported, with the
+    minority named, and the hosts are left where the range put them: a
+    contradicted range is a question, not an answer.
+
+    Only ranges that touch ``country`` are returned — placed in it, or covering
+    hosts named for it — so a query about one country is not noisy about
+    another's.
+    """
+    want = country.strip().upper()
+    nets = get_extra_dc_nets()
+    if not nets:
+        return []
+    covered: dict[tuple[str, str], list[dict]] = {}
+    for h in hosts:
+        try:
+            addr = ipaddress.ip_address(host_ip(h))
+        except ValueError:
+            continue
+        for _prov, city, net in nets:  # most-specific first, as resolve_datacenter searches
+            if addr in net:
+                covered.setdefault((str(net), city), []).append(h)
+                break
+    out: list[dict] = []
+    for (cidr, city), hs in covered.items():
+        cc_dc = datacenter_cc(city)
+        names = Counter(h.get("_cc_name") or "" for h in hs)
+        names.pop("", None)
+        if len(names) < 2:
+            continue
+        if cc_dc != want and want not in names:
+            continue
+        odd = sorted(h["host"] for h in hs if h.get("_cc_name") and h["_cc_name"] != cc_dc)
+        out.append({"cidr": cidr, "city": city, "names": dict(names.most_common()), "disagreeing": odd})
+    out.sort(key=lambda c: c["cidr"])
+    return out
+
+
 def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> None:
     """Register the real-geo inventory tool."""
     if "get_geo_inventory" not in skip:
@@ -141,6 +191,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     hosts, excluded = partition_test_hosts(hosts)
 
                 b = bucket_hosts(hosts, want)
+                conflicts = override_conflicts(hosts, want)
                 keep = [
                     h for h in b["in_geo"]
                     if label_matches(h["_product"], product) and label_matches(h["_tier"], tier)
@@ -151,7 +202,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     return (
                         f"{head}\n\nNo enabled hosts resolve to a datacenter in {want}"
                         + (f" matching {filt}" if filt else "") + "."
-                        + _disclosures(b, want, excluded)
+                        + _disclosures(b, want, excluded, conflicts)
                     )
 
                 ids = [h["hostid"] for h in keep]
@@ -213,23 +264,33 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
 
                 named_in = [h for h in keep if h["_cc_name"] and h["_cc_name"] != want]
                 if named_in:
-                    from collections import Counter
                     by_name = Counter(h["_cc_name"].lower() for h in named_in)
                     parts.append(
                         f"\n_{len(named_in)} of the {len(keep)} are named for another country "
                         f"({', '.join(f'`{k}`×{v}' for k, v in by_name.most_common())}) — "
                         "a hostname-based count would have missed them entirely._"
                     )
-                parts.append(_disclosures(b, want, excluded))
+                parts.append(_disclosures(b, want, excluded, conflicts))
                 return "\n".join(parts)
             except (httpx.HTTPError, ValueError) as e:
                 return f"Error building geo inventory: {e}"
 
 
-def _disclosures(b: dict[str, list[dict]], want: str, excluded: list[dict]) -> str:
+def _disclosures(
+    b: dict[str, list[dict]], want: str, excluded: list[dict], conflicts: list[dict] | None = None,
+) -> str:
     out: list[str] = []
+    for c in conflicts or []:
+        names = ", ".join(f"`{k.lower()}`×{v}" for k, v in c["names"].items())
+        ex = ", ".join(c["disagreeing"][:8])
+        more = len(c["disagreeing"]) - 8
+        out.append(
+            f"\n_**Configured range contradicted by the hosts it covers** — {c['cidr']} → "
+            f"{c['city']} holds hosts named {names}. Every one of them is counted as "
+            f"{c['city']} above. If the minority is right, the range is too wide: narrow it in "
+            f"ZABBIX_DATACENTER_CIDRS. Disagreeing: {ex}{f' (+{more} more)' if more > 0 else ''}._"
+        )
     if b["named_elsewhere"]:
-        from collections import Counter
         where = Counter(h["_city"] for h in b["named_elsewhere"])
         ex = ", ".join(f"{h['host']} → {h['_city']}" for h in b["named_elsewhere"][:6])
         more = len(b["named_elsewhere"]) - 6
