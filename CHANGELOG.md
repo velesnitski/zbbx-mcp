@@ -5,6 +5,26 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.16.63] - 2026-09-08
+
+### Added
+
+- **`get_geo_inventory`** — a country's fleet by where the boxes physically
+  ARE (ADR 138). Every existing `country` filter matches the code in the
+  hostname, which is a naming convention: asked what serves one country it
+  returned hosts sitting in three others and missed a larger set that were in
+  the country but named for a neighbour. This tool filters on the datacenter
+  resolved from the IP (ADR 122), splits Free / Paid and by tier with
+  carrier-NIC traffic and CPU, then **names** the hosts named for the country
+  that sit elsewhere, and the ones that could not be placed at all — neither
+  counted in nor out. 173 tools.
+
+### Notes
+
+- Test fixtures moved to documentation-grade country codes (uninhabited
+  territories) per the hostname guard's policy, rather than widening its
+  allow-list.
+
 ## [1.16.62] - 2026-09-04
 
 ### Fixed

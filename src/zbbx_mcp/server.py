@@ -150,7 +150,7 @@ def _register_resources(mcp: FastMCP) -> None:
             "Scripts": ["get_scripts", "execute_script"],
             "Services & SLA": ["get_services", "get_sla"],
             "Macros": ["get_host_macros", "get_global_macros", "set_host_macro", "delete_host_macro"],
-            "Inventory": ["get_server_map", "get_product_summary", "get_server_load", "get_high_cpu_servers", "get_underloaded_servers", "get_provider_summary", "get_unknown_providers", "identify_providers", "generate_product_map"],
+            "Inventory": ["get_geo_inventory", "get_server_map", "get_product_summary", "get_server_load", "get_high_cpu_servers", "get_underloaded_servers", "get_provider_summary", "get_unknown_providers", "identify_providers", "generate_product_map"],
             "Rollback": ["get_rollback_history", "rollback_last", "rollback_by_index"],
             "Alerts": ["get_alerts", "get_alert_summary"],
             "Users": ["get_users"],

@@ -193,6 +193,7 @@ EXPECTED_TOOLS = {
     "generate_html_report",
     # geo.py
     "detect_regional_anomalies",
+    "get_geo_inventory",
     "get_geo_traffic_trends",
     "get_service_uptime_report",
     "get_service_health_matrix",

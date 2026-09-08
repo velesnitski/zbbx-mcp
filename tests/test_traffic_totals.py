@@ -80,21 +80,21 @@ class TestCarrierTraffic:
 
 
 class TestSummarise:
-    HOSTS = [{"hostid": "1", "host": "srv-nl01"}, {"hostid": "2", "host": "srv-de01"},
-             {"hostid": "3", "host": "srv-fr01"}]
+    HOSTS = [{"hostid": "1", "host": "srv-hm01"}, {"hostid": "2", "host": "srv-bv01"},
+             {"hostid": "3", "host": "srv-aq01"}]
 
     def test_uncovered_hosts_are_named_not_summed_as_zero(self):
         s = summarise(self.HOSTS, {"1": 8_000_000.0, "2": 2_000_000.0}, top=5)
         assert s["servers"] == 3
         assert s["covered"] == 2
-        assert s["uncovered"] == ["srv-fr01"]
+        assert s["uncovered"] == ["srv-aq01"]
         assert s["total_mbps"] == 10.0
         # Average is over COVERED hosts, or the silent one would drag it down.
         assert s["avg_mbps_per_covered"] == 5.0
 
     def test_top_is_ranked_desc(self):
         s = summarise(self.HOSTS, {"1": 1_000_000.0, "2": 9_000_000.0}, top=1)
-        assert s["top"] == [("srv-de01", 9.0)]
+        assert s["top"] == [("srv-bv01", 9.0)]
 
     def test_nothing_covered_has_no_average(self):
         s = summarise(self.HOSTS, {}, top=5)
@@ -106,9 +106,9 @@ class TestSummarise:
 class TestGetTrafficTotalsWire:
     def _client(self):
         hosts = [
-            {"hostid": "1", "host": "srv-nl01", "groups": [{"name": "app_free"}]},
-            {"hostid": "2", "host": "srv-de01", "groups": [{"name": "app_free"}]},
-            {"hostid": "3", "host": "srv-fr01", "groups": [{"name": "app_free"}]},
+            {"hostid": "1", "host": "srv-hm01", "groups": [{"name": "app_free"}]},
+            {"hostid": "2", "host": "srv-bv01", "groups": [{"name": "app_free"}]},
+            {"hostid": "3", "host": "srv-aq01", "groups": [{"name": "app_free"}]},
         ]
         items = [
             _traffic("1", 8_000_000),
@@ -121,7 +121,7 @@ class TestGetTrafficTotalsWire:
         out = run_tool(traffic_totals, "get_traffic_totals", self._client(), group="app_free")
         assert "10.0 Mbps" in out
         assert "2 of 3" in out, out
-        assert "srv-fr01" in out, "the uncovered host must be named"
+        assert "srv-aq01" in out, "the uncovered host must be named"
         assert "not counted as zero" in out
         assert "never collected" in out
 
@@ -143,7 +143,7 @@ class TestAnomaliesNoLongerAssertsZeroConnections:
         # Before: host_conns.get(hid, 0) rendered an unmeasured count as 0, and
         # after the fix a None must survive every comparison downstream.
         monkeypatch.setattr(traffic, "KEY_CONNECTIONS", self.CONN_KEY, raising=False)
-        hosts = [{"hostid": "1", "host": "srv-nl01", "groups": [{"name": "app_free"}],
+        hosts = [{"hostid": "1", "host": "srv-hm01", "groups": [{"name": "app_free"}],
                   "interfaces": [{"ip": "10.0.0.1"}]}]
 
         def items(p):

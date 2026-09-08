@@ -4,7 +4,7 @@ Instructions for Claude Code when working in this repository.
 
 ## Project
 
-Zabbix MCP server — 172 tools across 40+ modules. Python 3.10+, FastMCP framework, async httpx HTTP/2 client.
+Zabbix MCP server — 173 tools across 40+ modules. Python 3.10+, FastMCP framework, async httpx HTTP/2 client.
 
 ## Commands
 
@@ -69,6 +69,7 @@ uv run pytest -k "test_name"               # single test by name
 | `trends_health.py` | 3 | `get_health_assessment`, `get_shutdown_candidates`, `get_capacity_planning` |
 | `trends_compare.py` | 3 | `get_trends_batch`, `get_server_dashboard`, `compare_servers` |
 | `geo_traffic.py` | 4 | `detect_regional_anomalies`, `get_geo_traffic_trends`, `get_expansion_report`, `get_regional_density_map` |
+| `geo_inventory.py` | 1 | `get_geo_inventory` — a country's fleet by resolved DATACENTER, not hostname code; Free/Paid split, mislabelled-out and unresolved hosts named |
 | `geo_health.py` | 6 | `get_service_uptime_report`, `get_service_health_matrix`, `get_latency_estimate`, `get_servers_by_ping` |
 | `health.py` | 4 | `check_connection`, `get_active_problems`, `get_agent_unreachable`, `get_error_rate` |
 | `availability.py` | 2 | `get_host_availability`, `get_recent_changes` |
