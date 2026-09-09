@@ -47,10 +47,10 @@ def _client(known):
 
 class TestExplicitHosts:
     def test_the_list_is_sent_as_an_exact_filter(self):
-        c = _client(["srv-aq01", "srv-aq02", "srv-bv01"])
-        run_tool(trends_compare, "get_trends_batch", c, hosts="srv-aq01, srv-bv01", metrics="cpu")
+        c = _client(["srv-aq9001", "srv-aq9002", "srv-bv9001"])
+        run_tool(trends_compare, "get_trends_batch", c, hosts="srv-aq9001, srv-bv9001", metrics="cpu")
         sent = c.sent("host.get")
-        assert sent["filter"]["host"] == ["srv-aq01", "srv-bv01"]
+        assert sent["filter"]["host"] == ["srv-aq9001", "srv-bv9001"]
 
     def test_max_results_cannot_trim_a_named_set(self):
         names = [f"srv-aq{i:02d}" for i in range(1, 8)]
@@ -62,19 +62,19 @@ class TestExplicitHosts:
             assert n in out
 
     def test_an_unknown_name_is_reported_not_dropped(self):
-        c = _client(["srv-aq01"])
+        c = _client(["srv-aq9001"])
         out = run_tool(trends_compare, "get_trends_batch", c,
-                       hosts="srv-aq01,srv-hm99", metrics="cpu")
-        assert "1 of 2 requested host(s) are not enabled hosts in Zabbix: srv-hm99" in out, out
-        assert "srv-aq01 | cpu" in out
+                       hosts="srv-aq9001,srv-hm9099", metrics="cpu")
+        assert "1 of 2 requested host(s) are not enabled hosts in Zabbix: srv-hm9099" in out, out
+        assert "srv-aq9001 | cpu" in out
 
     def test_all_names_unknown_is_an_answer_about_the_names(self):
-        c = _client(["srv-aq01"])
-        out = run_tool(trends_compare, "get_trends_batch", c, hosts="srv-hm98,srv-hm99")
-        assert "srv-hm98, srv-hm99" in out
+        c = _client(["srv-aq9001"])
+        out = run_tool(trends_compare, "get_trends_batch", c, hosts="srv-hm9098,srv-hm9099")
+        assert "srv-hm9098, srv-hm9099" in out
         assert "No servers match" not in out
 
     def test_without_hosts_nothing_changes(self):
-        c = _client(["srv-aq01", "srv-aq02"])
+        c = _client(["srv-aq9001", "srv-aq9002"])
         run_tool(trends_compare, "get_trends_batch", c, metrics="cpu")
         assert "host" not in c.sent("host.get")["filter"]

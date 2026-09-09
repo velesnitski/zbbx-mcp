@@ -47,20 +47,20 @@ class TestBucketHosts:
                "10.0.0.3": ("P", ""), "10.0.0.4": ("P", "Base, AQ")}
         monkeypatch.setattr(geo_inventory, "resolve_datacenter", lambda ip: geo.get(ip, ("Unknown", "")))
         hosts = [
-            _host("1", "srv-aq01", "10.0.0.1"),   # named aq, in AQ  -> in_geo
-            _host("2", "srv-aq02", "10.0.0.2"),   # named aq, in BV  -> named_elsewhere
-            _host("3", "srv-aq03", "10.0.0.3"),   # named aq, no dc  -> unresolved
-            _host("4", "srv-hm01", "10.0.0.4"),   # named hm, in AQ  -> in_geo (the case a name filter misses)
+            _host("1", "srv-aq9001", "10.0.0.1"),   # named aq, in AQ  -> in_geo
+            _host("2", "srv-aq9002", "10.0.0.2"),   # named aq, in BV  -> named_elsewhere
+            _host("3", "srv-aq9003", "10.0.0.3"),   # named aq, no dc  -> unresolved
+            _host("4", "srv-hm9001", "10.0.0.4"),   # named hm, in AQ  -> in_geo (the case a name filter misses)
         ]
         b = bucket_hosts(hosts, "aq")
-        assert [h["host"] for h in b["in_geo"]] == ["srv-aq01", "srv-hm01"]
-        assert [h["host"] for h in b["named_elsewhere"]] == ["srv-aq02"]
-        assert [h["host"] for h in b["unresolved"]] == ["srv-aq03"]
+        assert [h["host"] for h in b["in_geo"]] == ["srv-aq9001", "srv-hm9001"]
+        assert [h["host"] for h in b["named_elsewhere"]] == ["srv-aq9002"]
+        assert [h["host"] for h in b["unresolved"]] == ["srv-aq9003"]
         assert b["named_elsewhere"][0]["_city"] == "Bouvet, BV"
 
     def test_a_host_named_elsewhere_and_unresolved_is_ignored(self, monkeypatch):
         monkeypatch.setattr(geo_inventory, "resolve_datacenter", lambda ip: ("Unknown", ""))
-        b = bucket_hosts([_host("9", "srv-bv01", "10.9.9.9")], "fr")
+        b = bucket_hosts([_host("9", "srv-bv9001", "10.9.9.9")], "fr")
         assert all(not v for v in b.values())
 
 
@@ -83,28 +83,28 @@ class TestOverrideConflicts:
 
     def test_a_range_whose_hosts_agree_is_silent(self, monkeypatch):
         _in_range(monkeypatch)
-        hosts = [_host("1", "srv-aq01", "198.51.100.1"), _host("2", "srv-aq02", "198.51.100.2")]
+        hosts = [_host("1", "srv-aq9001", "198.51.100.1"), _host("2", "srv-aq9002", "198.51.100.2")]
         bucket_hosts(hosts, "aq")
         assert override_conflicts(hosts, "aq") == []
 
     def test_two_countries_under_one_range_are_named(self, monkeypatch):
         _in_range(monkeypatch)
         hosts = [
-            _host("1", "srv-aq01", "198.51.100.1"),
-            _host("2", "srv-aq02", "198.51.100.2"),
-            _host("3", "srv-bv01", "198.51.100.3"),   # placed in AQ by the range, named bv
+            _host("1", "srv-aq9001", "198.51.100.1"),
+            _host("2", "srv-aq9002", "198.51.100.2"),
+            _host("3", "srv-bv9001", "198.51.100.3"),   # placed in AQ by the range, named bv
         ]
         b = bucket_hosts(hosts, "aq")
         # The range still wins for placement (ADR 138) ...
-        assert [h["host"] for h in b["in_geo"]] == ["srv-aq01", "srv-aq02", "srv-bv01"]
+        assert [h["host"] for h in b["in_geo"]] == ["srv-aq9001", "srv-aq9002", "srv-bv9001"]
         # ... and the contradiction is reported, minority first-named.
         c = override_conflicts(hosts, "aq")
         assert c == [{"cidr": "198.51.100.0/24", "city": "Base, AQ",
-                      "names": {"AQ": 2, "BV": 1}, "disagreeing": ["srv-bv01"]}]
+                      "names": {"AQ": 2, "BV": 1}, "disagreeing": ["srv-bv9001"]}]
 
     def test_only_ranges_touching_the_asked_country_are_reported(self, monkeypatch):
         _in_range(monkeypatch)
-        hosts = [_host("1", "srv-aq01", "198.51.100.1"), _host("3", "srv-bv01", "198.51.100.3")]
+        hosts = [_host("1", "srv-aq9001", "198.51.100.1"), _host("3", "srv-bv9001", "198.51.100.3")]
         bucket_hosts(hosts, "hm")
         assert override_conflicts(hosts, "hm") == []
         # Asked about the minority's country, the same range IS relevant.
@@ -113,7 +113,7 @@ class TestOverrideConflicts:
 
     def test_no_configured_ranges_means_nothing_to_contradict(self, monkeypatch):
         monkeypatch.setattr(geo_inventory, "get_extra_dc_nets", lambda: [])
-        hosts = [_host("1", "srv-aq01", "198.51.100.1")]
+        hosts = [_host("1", "srv-aq9001", "198.51.100.1")]
         bucket_hosts(hosts, "aq")
         assert override_conflicts(hosts, "aq") == []
 
@@ -121,9 +121,9 @@ class TestOverrideConflicts:
 class TestGetGeoInventoryWire:
     def _client(self):
         hosts = [
-            _host("1", "srv-aq01", "10.0.0.1", "app_free"),
-            _host("2", "srv-aq02", "10.0.0.2", "app_free"),
-            _host("3", "srv-hm01", "10.0.0.4", "app_free"),
+            _host("1", "srv-aq9001", "10.0.0.1", "app_free"),
+            _host("2", "srv-aq9002", "10.0.0.2", "app_free"),
+            _host("3", "srv-hm9001", "10.0.0.4", "app_free"),
         ]
         traffic = [{"itemid": "t1", "hostid": "1", "key_": "net.if.in[eth0]", "lastvalue": "8000000", "lastclock": "1760000000"},
                    {"itemid": "t3", "hostid": "3", "key_": "net.if.in[eth0]", "lastvalue": "2000000", "lastclock": "1760000000"}]
@@ -142,15 +142,15 @@ class TestGetGeoInventoryWire:
         out = run_tool(geo_inventory, "get_geo_inventory", self._client(), country="aq")
         assert "**2 host(s)** physically in AQ" in out, out
         assert "10 Mbps" in out                       # 8 + 2, carrier NICs summed
-        assert "srv-aq02 → Bouvet, BV" in out        # named fr, sits in DE — excluded and said so
-        assert "named for another country" in out     # srv-hm01 is in FR but named nl
+        assert "srv-aq9002 → Bouvet, BV" in out        # named aq, sits in BV — excluded and said so
+        assert "named for another country" in out     # srv-hm9001 is in AQ but named hm
         assert "`hm`×1" in out
 
     def test_a_contradicted_range_is_disclosed_in_the_output(self, monkeypatch):
         _in_range(monkeypatch)
         hosts = [
-            _host("1", "srv-aq01", "198.51.100.1", "app_free"),
-            _host("3", "srv-bv01", "198.51.100.3", "app_free"),
+            _host("1", "srv-aq9001", "198.51.100.1", "app_free"),
+            _host("3", "srv-bv9001", "198.51.100.3", "app_free"),
         ]
         c = RecordingClient({"host.get": hosts, "item.get": []})
         out = run_tool(geo_inventory, "get_geo_inventory", c, country="aq")
@@ -158,7 +158,7 @@ class TestGetGeoInventoryWire:
         assert "Configured range contradicted" in out, out
         assert "198.51.100.0/24 → Base, AQ" in out
         assert "`aq`×1, `bv`×1" in out
-        assert "Disagreeing: srv-bv01" in out
+        assert "Disagreeing: srv-bv9001" in out
 
     def test_a_bad_country_code_is_refused(self):
         out = run_tool(geo_inventory, "get_geo_inventory", self._client(), country="France")
