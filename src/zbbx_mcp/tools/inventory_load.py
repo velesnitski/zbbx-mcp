@@ -17,6 +17,7 @@ from zbbx_mcp.data import (
     build_parent_map,
     canonical_host_name,
     extract_country,
+    label_matches,
 )
 from zbbx_mcp.fetch import to_mbps
 from zbbx_mcp.formatters import format_value
@@ -64,9 +65,9 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()):
                     prod, t = _classify_host(h.get("groups", []))
                     if not prod:
                         continue
-                    if product and product.lower() not in prod.lower():
+                    if not label_matches(prod, product):
                         continue
-                    if tier and tier.lower() not in t.lower():
+                    if not label_matches(t, tier):
                         continue
                     if country and extract_country(h.get("host", "")).lower() != country.lower():
                         continue
@@ -221,7 +222,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()):
                     prod, tier = _classify_host(h.get("groups", []))
                     if not prod:
                         continue
-                    if product and product.lower() not in prod.lower():
+                    if not label_matches(prod, product):
                         continue
                     if country and extract_country(h.get("host", "")).lower() != country.lower():
                         continue
@@ -331,7 +332,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()):
                     prod, tier = _classify_host(h.get("groups", []))
                     if not prod:
                         continue
-                    if product and product.lower() not in prod.lower():
+                    if not label_matches(prod, product):
                         continue
                     if country and extract_country(h.get("host", "")).lower() != country.lower():
                         continue
@@ -460,7 +461,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()):
                     prod, tier = _classify_host(h.get("groups", []))
                     if not prod or prod == "Unknown":
                         continue
-                    if product and product.lower() not in prod.lower():
+                    if not label_matches(prod, product):
                         continue
 
                     ip = ""

@@ -15,6 +15,7 @@ import httpx
 
 from zbbx_mcp.classify import classify_host as _classify_host
 from zbbx_mcp.classify import detect_provider
+from zbbx_mcp.fetch import live_items
 from zbbx_mcp.resolver import InstanceResolver
 from zbbx_mcp.utils import safe_output_path
 
@@ -73,22 +74,22 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 tasks = [
                     client.call("item.get", {
                         "hostids": all_ids,
-                        "output": ["hostid", "lastvalue"],
+                        "output": ["hostid", "lastvalue", "lastclock"],
                         "filter": {"key_": "system.cpu.util[,idle]"},
                     }),
                     client.call("item.get", {
                         "hostids": all_ids,
-                        "output": ["hostid", "lastvalue"],
+                        "output": ["hostid", "lastvalue", "lastclock"],
                         "filter": {"key_": "system.cpu.load[percpu,avg5]"},
                     }),
                     client.call("item.get", {
                         "hostids": all_ids,
-                        "output": ["hostid", "lastvalue"],
+                        "output": ["hostid", "lastvalue", "lastclock"],
                         "filter": {"key_": "vm.memory.size[available]"},
                     }),
                     client.call("item.get", {
                         "hostids": all_ids,
-                        "output": ["hostid", "lastvalue"],
+                        "output": ["hostid", "lastvalue", "lastclock"],
                         "filter": {"key_": "vm.memory.size[total]"},
                     }),
                     # Fetch {$COST_MONTH} macro from all hosts
@@ -107,6 +108,11 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
 
                 results = await asyncio.gather(*tasks)
                 cpu_items, load_items, mem_avail_items, mem_total_items = results[:4]
+                # A dead agent's last reading is not a current one: idle 0 became
+                # "CPU 100%" and total memory 0 became "0 GB" (ADR 140).
+                cpu_items, load_items, mem_avail_items, mem_total_items = (
+                    live_items(x) for x in (cpu_items, load_items, mem_avail_items, mem_total_items)
+                )
                 cost_macros = results[4]
                 graphs = results[5] if len(results) > 5 else []
 

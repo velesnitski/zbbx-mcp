@@ -16,6 +16,7 @@ from zbbx_mcp.data import (
     fetch_service_status,
     fetch_trends_batch,
     host_ip,
+    label_matches,
 )
 from zbbx_mcp.excel import BW_MAX
 from zbbx_mcp.resolver import InstanceResolver
@@ -102,7 +103,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()):
                 filtered = []
                 for h in hosts:
                     prod, tier = _classify_host(h.get("groups", []))
-                    if product and product.lower() not in (prod or "").lower():
+                    if not label_matches(prod, product):
                         continue
                     if country and extract_country(h.get("host", "")).lower() != country.lower():
                         continue
@@ -383,9 +384,9 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()):
                 filtered = []
                 for h in hosts:
                     prod, t = _classify_host(h.get("groups", []))
-                    if product and product.lower() not in (prod or "").lower():
+                    if not label_matches(prod, product):
                         continue
-                    if tier and tier.lower() not in (t or "").lower():
+                    if not label_matches(t, tier):
                         continue
                     if country and extract_country(h.get("host", "")).lower() != country.lower():
                         continue
@@ -627,9 +628,9 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()):
                 filtered = []
                 for h in hosts:
                     prod, t = _classify_host(h.get("groups", []))
-                    if product and product.lower() not in (prod or "").lower():
+                    if not label_matches(prod, product):
                         continue
-                    if tier and tier.lower() not in (t or "").lower():
+                    if not label_matches(t, tier):
                         continue
                     if country and extract_country(h.get("host", "")).lower() != country.lower():
                         continue

@@ -432,21 +432,59 @@ async def fetch_service_status(client: ZabbixClient, hostids: list[str]) -> dict
     return result
 
 
-async def fetch_cpu_map(client: ZabbixClient, hostids: list[str]) -> dict[str, float]:
-    """Fetch CPU usage % per host (idle → used). Returns {hostid: cpu_pct}."""
+#: A "last value" older than this is not a current reading. Agent items refresh
+#: every 1–5 minutes; half an hour of silence means the agent is down, and the
+#: value it left behind describes the past, not now (ADR 140).
+LIVE_VALUE_MAX_AGE_S = 1800
+
+
+def live_value(item: dict, now: int | None = None) -> float | None:
+    """``lastvalue`` as a float if the item is reporting, else ``None``. Pure.
+
+    ``None`` for the never-collected sentinel (``lastclock = 0``, ADR 136/137),
+    for a ``lastclock`` older than ``LIVE_VALUE_MAX_AGE_S``, for a missing
+    ``lastclock`` (the caller forgot to request it — fail closed), and for an
+    unparsable value. A caller that reads ``None`` renders "not reporting";
+    one that read the raw ``lastvalue`` printed a dead agent's last idle
+    reading of 0 as "CPU 100% now".
+    """
+    try:
+        clock = int(item.get("lastclock") or 0)
+        if clock <= 0:
+            return None
+        if (now if now is not None else int(_time.time())) - clock > LIVE_VALUE_MAX_AGE_S:
+            return None
+        return float(item.get("lastvalue"))
+    except (TypeError, ValueError):
+        return None
+
+
+def live_items(items, now: int | None = None) -> list[dict]:
+    """Only the items whose ``lastvalue`` is a current reading. Pure."""
+    return [it for it in (items or []) if live_value(it, now) is not None]
+
+
+async def fetch_cpu_map(
+    client: ZabbixClient, hostids: list[str], now: int | None = None,
+) -> dict[str, float]:
+    """CPU usage % per host (idle → used) for hosts whose agent is reporting.
+
+    Returns ``{hostid: cpu_pct}``. A host whose idle item never reported, or
+    whose last report is stale, is left OUT so the caller reads ``None`` and
+    renders it as unknown rather than as ``100 - 0`` (ADR 140).
+    """
     if not hostids:
         return {}
     items = await client.call("item.get", {
         "hostids": hostids,
-        "output": ["hostid", "lastvalue"],
+        "output": ["hostid", "lastvalue", "lastclock"],
         "filter": {"key_": "system.cpu.util[,idle]"},
     })
     result: dict[str, float] = {}
     for it in items:
-        try:
-            result[it["hostid"]] = round(100 - float(it["lastvalue"]), 1)
-        except (ValueError, TypeError):
-            pass
+        v = live_value(it, now)
+        if v is not None:
+            result[it["hostid"]] = round(100 - v, 1)
     return result
 
 
@@ -818,7 +856,7 @@ async def fetch_trends_batch(
         }),
         client.call("item.get", {
             "hostids": hostids,
-            "output": ["itemid", "hostid", "key_", "lastvalue", "value_type"],
+            "output": ["itemid", "hostid", "key_", "lastvalue", "lastclock", "value_type"],
             "filter": {"key_": all_keys, "status": STATUS_ENABLED},
         }),
     )
@@ -878,10 +916,10 @@ async def fetch_trends_batch(
 
         hostname = host_map.get(hid, {}).get("host", "?")
         item = host_metric_item.get(hid, {}).get(metric_name, {})
-        try:
-            current = float(item.get("lastvalue", "0"))
-        except (ValueError, TypeError):
-            current = 0
+        # ``None`` when the item is not reporting: a dead agent's last value is
+        # a fact about the past, and printed as "current" it read idle 0 as
+        # "CPU 100% now" (ADR 140).
+        current = live_value(item, now)
 
         avgs = [float(t["value_avg"]) for t in t_data]
         peaks = [float(t["value_max"]) for t in t_data]
@@ -893,7 +931,7 @@ async def fetch_trends_batch(
 
         # For CPU: invert (idle → used)
         if metric_name == "cpu":
-            current = round(100 - current, 1)
+            current = round(100 - current, 1) if current is not None else None
             avg_val = round(100 - avg_val, 1)
             peak_val = round(100 - min_val, 1)  # min idle = max used
             # max idle = min used. This read max(avgs) — an hourly MEAN — so
@@ -904,14 +942,14 @@ async def fetch_trends_batch(
 
         # For traffic: convert to Mbps (respects ZABBIX_TRAFFIC_UNIT)
         if metric_name == "traffic":
-            current = round(current / _TRAFFIC_DIVISOR, 1)
+            current = round(current / _TRAFFIC_DIVISOR, 1) if current is not None else None
             avg_val = round(avg_val / _TRAFFIC_DIVISOR, 1)
             peak_val = round(peak_val / _TRAFFIC_DIVISOR, 1)
             min_val = round(min_val / _TRAFFIC_DIVISOR, 1)
 
         # For memory: convert to GB
         if metric_name == "memory":
-            current = round(current / GB_BYTES, 1)
+            current = round(current / GB_BYTES, 1) if current is not None else None
             avg_val = round(avg_val / GB_BYTES, 1)
             peak_val = round(peak_val / GB_BYTES, 1)
             min_val = round(min_val / GB_BYTES, 1)
@@ -971,7 +1009,7 @@ async def fetch_trends_batch(
             avg=round(avg_val, 1),
             peak=round(peak_val, 1),
             min_val=round(min_val, 1),
-            current=round(current, 1),
+            current=round(current, 1) if current is not None else None,
             trend_dir=trend_dir,
             daily=daily,
         ))

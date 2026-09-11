@@ -636,3 +636,28 @@ class TestTrafficDiscoveryGuard:
         for term in (TRAFFIC_IN_KEY_SEARCH, TRAFFIC_OUT_KEY_SEARCH):
             assert term.startswith("*") and term.endswith("*"), term
             assert "net.if." in term
+
+
+class TestExactLabelGuard:
+    """Product and tier filters are exact (ADR 137, completed in ADR 140).
+
+    A substring match widens silently: ``tier="Free"`` also admits every tier
+    whose label contains the word, and the caller's count is wrong with no
+    sign that it is. ADR 137 fixed the sites it found; twenty-seven more
+    survived in other modules. This pins the whole tree.
+    """
+
+    PATTERN = re.compile(r"\b(product|tier)\.lower\(\)\s+(not\s+)?in\b")
+
+    def test_no_substring_label_filters(self):
+        hits = []
+        for path in sorted((SRC / "tools").rglob("*.py")):
+            for i, line in enumerate(path.read_text().splitlines(), 1):
+                if self.PATTERN.search(line):
+                    hits.append(f"{path.name}:{i}: {line.strip()}")
+        assert not hits, "substring label filter(s) — use label_matches():\n" + "\n".join(hits)
+
+    def test_guard_is_not_vacuous(self):
+        assert self.PATTERN.search('if product and product.lower() not in prod.lower():')
+        assert self.PATTERN.search('if tier.lower() in (t or "").lower():')
+        assert not self.PATTERN.search("if not label_matches(prod, product):")

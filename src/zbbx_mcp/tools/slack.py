@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 
 import httpx
 
-from zbbx_mcp.data import filter_suppressed, host_ip
+from zbbx_mcp.data import filter_suppressed, host_ip, label_matches
 from zbbx_mcp.resolver import InstanceResolver
 
 SLACK_WEBHOOK_ENV = "SLACK_WEBHOOK_URL"
@@ -115,7 +115,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     prod, tier = _classify_host(h.get("groups", []))
                     if not prod or prod == "Unknown":
                         continue
-                    if product and product.lower() not in prod.lower():
+                    if not label_matches(prod, product):
                         continue
                     key = f"{prod} / {tier}"
                     prod_counts.setdefault(key, {"count": 0})

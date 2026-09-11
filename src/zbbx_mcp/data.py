@@ -577,9 +577,19 @@ class TrendRow:
     avg: float
     peak: float
     min_val: float
-    current: float
+    #: Last collected value, or ``None`` when the item never reported or its
+    #: last report is older than ``LIVE_VALUE_MAX_AGE_S``. A dead agent's last
+    #: reading is not "current": printed as such it turned an idle CPU item that
+    #: stopped at 0 into "100% now" (ADR 140).
+    current: float | None
     trend_dir: str = ""
     daily: dict = field(default_factory=dict)  # date_str -> avg value
+
+    def current_text(self, unit: str = "") -> str:
+        """``"12.3 %"`` or ``"n/a (not reporting)"``; never a stale number."""
+        if self.current is None:
+            return "n/a (not reporting)"
+        return f"{self.current} {unit}".rstrip()
 
     def to_dict(self) -> dict[str, Any]:
         return {

@@ -706,7 +706,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 for h in hosts:
                     if product:
                         prod, _ = _classify_host(h.get("groups", []))
-                        if not prod or product.lower() not in prod.lower():
+                        if not prod or not label_matches(prod, product):
                             continue
                     srv_cc = extract_country(h["host"])
                     if srv_cc:
@@ -783,7 +783,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 for h in hosts:
                     if product:
                         prod, _ = _classify_host(h.get("groups", []))
-                        if not prod or product.lower() not in prod.lower():
+                        if not prod or not label_matches(prod, product):
                             continue
                     srv_cc = extract_country(h["host"])
                     if not srv_cc or srv_cc not in CAPITAL_COORDS:

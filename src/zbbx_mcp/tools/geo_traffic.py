@@ -26,6 +26,7 @@ from zbbx_mcp.data import (
     fetch_trends_batch,
     group_by_country,
     host_ip,
+    label_matches,
 )
 from zbbx_mcp.fetch import physical_traffic_items, to_mbps
 from zbbx_mcp.resolver import InstanceResolver
@@ -200,7 +201,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 for h in hosts:
                     if product:
                         prod, _ = _classify_host(h.get("groups", []))
-                        if not prod or product.lower() not in prod.lower():
+                        if not prod or not label_matches(prod, product):
                             continue
                     ctry = extract_country(h["host"])
                     if ctry:

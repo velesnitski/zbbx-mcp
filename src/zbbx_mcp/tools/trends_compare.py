@@ -78,7 +78,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()):
                     prod, t = _classify_host(h.get("groups", []))
                     if not label_matches(prod, product):
                         continue
-                    if tier and tier.lower() not in (t or "").lower():
+                    if not label_matches(t, tier):
                         continue
                     if country and extract_country(h.get("host", "")).lower() != country.lower():
                         continue
@@ -144,7 +144,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()):
                         parts.append(
                             f"| {r.hostname} | {r.metric} | "
                             f"{r.avg} {u} | {r.peak} {u} | {r.min_val} {u} | "
-                            f"{r.current} {u} | {r.trend_dir} |"
+                            f"{r.current_text(u)} | {r.trend_dir} |"
                         )
 
                     return "\n".join(parts)
@@ -212,7 +212,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()):
                     parts.append(
                         f"**{r.metric.title()}:** "
                         f"avg {r.avg} {u} | peak {r.peak} {u} | "
-                        f"min {r.min_val} {u} | current {r.current} {u} | "
+                        f"min {r.min_val} {u} | current {r.current_text(u)} | "
                         f"trend: {r.trend_dir}"
                     )
 
@@ -295,10 +295,14 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()):
                     data = by_metric[mn]
                     vals_avg = [f"{data[n].avg} {u}" if n in data else "N/A" for n in server_names]
                     vals_peak = [f"{data[n].peak} {u}" if n in data else "N/A" for n in server_names]
-                    vals_now = [f"{data[n].current} {u}" if n in data else "N/A" for n in server_names]
+                    vals_now = [data[n].current_text(u) if n in data else "N/A" for n in server_names]
                     parts.append(f"| {mn} avg | {' | '.join(vals_avg)} |")
                     parts.append(f"| {mn} peak | {' | '.join(vals_peak)} |")
                     parts.append(f"| {mn} now | {' | '.join(vals_now)} |")
+                    vals_min = [f"{data[n].min_val} {u}" if n in data else "N/A" for n in server_names]
+                    vals_trend = [data[n].trend_dir or "n/a" if n in data else "N/A" for n in server_names]
+                    parts.append(f"| {mn} min | {' | '.join(vals_min)} |")
+                    parts.append(f"| {mn} trend | {' | '.join(vals_trend)} |")
 
                 # Efficiency metrics
                 cpu_data = by_metric.get("cpu", {})

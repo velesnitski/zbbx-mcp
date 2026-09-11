@@ -12,7 +12,7 @@ import httpx
 if TYPE_CHECKING:
     from openpyxl import Workbook
 
-from zbbx_mcp.data import extract_country, fetch_all_data
+from zbbx_mcp.data import extract_country, fetch_all_data, label_matches
 from zbbx_mcp.excel import (
     BOLD_FONT,
     BW_GREEN,
@@ -400,7 +400,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                         rp = r.get("Product", "").lower()
                         if country and extract_country(r.get("Host", "")).lower() != country.lower():
                             continue
-                        if product and product.lower() not in rp:
+                        if product and not label_matches(r.get("Product"), product):
                             continue
                         if include_set and not any(p in rp for p in include_set):
                             continue

@@ -705,7 +705,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 unknown_group_sets: list[list[str]] = []
                 for h in hosts:
                     prod, tier = _classify_host(h.get("groups", []))
-                    if not prod or product.lower() not in prod.lower():
+                    if not prod or not label_matches(prod, product):
                         continue
                     if prod == "Unknown":
                         unknown_group_sets.append(

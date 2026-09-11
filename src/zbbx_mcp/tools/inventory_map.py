@@ -11,7 +11,7 @@ from zbbx_mcp.classify import (
     detect_provider,
     resolve_datacenter,
 )
-from zbbx_mcp.data import extract_country
+from zbbx_mcp.data import extract_country, label_matches
 from zbbx_mcp.resolver import InstanceResolver
 
 
@@ -56,9 +56,9 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()):
                     prod, t = _classify_host(h.get("groups", []))
                     if not prod:
                         continue
-                    if product and product.lower() not in prod.lower():
+                    if not label_matches(prod, product):
                         continue
-                    if tier and tier.lower() not in t.lower():
+                    if not label_matches(t, tier):
                         continue
 
                     tree.setdefault(prod, {}).setdefault(t, []).append(h)

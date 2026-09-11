@@ -9,7 +9,7 @@ import httpx
 
 from zbbx_mcp.classify import classify_host as _classify_host
 from zbbx_mcp.classify import detect_provider, resolve_datacenter
-from zbbx_mcp.data import extract_country, fetch_enabled_hosts, host_ip
+from zbbx_mcp.data import extract_country, fetch_enabled_hosts, host_ip, label_matches
 from zbbx_mcp.fetch import physical_traffic_items, to_mbps
 from zbbx_mcp.resolver import InstanceResolver
 from zbbx_mcp.utils import resolve_group_ids
@@ -102,7 +102,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                         continue
                     if product:
                         p, _ = _classify_host(h.get("groups", []))
-                        if product.lower() not in (p or "").lower():
+                        if not label_matches(p, product):
                             continue
 
                     ip = host_ip(h)
@@ -277,7 +277,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                         continue
                     if product:
                         p, _ = _classify_host(h.get("groups", []))
-                        if product.lower() not in (p or "").lower():
+                        if not label_matches(p, product):
                             continue
 
                     ips = sorted({

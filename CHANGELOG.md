@@ -5,6 +5,29 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.16.65] - 2026-09-11
+
+### Fixed
+
+- **A dead agent's last reading is no longer printed as "now"** (ADR 140).
+  The trend tools' `Current` column, the CPU map behind the inventory tools and
+  the infrastructure workbook's live columns read `lastvalue` without its
+  clock, so a host whose agent had stopped showed "CPU 100% now" (its idle
+  item ended at 0) and "0 GB" of memory (an item that never reported). Every
+  such surface now goes through `live_value`, which returns nothing for a
+  never-collected item, a stale clock (30 minutes), or a missing clock; the
+  value renders as `n/a (not reporting)` and the period's history is kept.
+- **Product and tier filters are exact in every module.** ADR 137 fixed the
+  sites it found; 27 substring matches survived in 13 other modules, so a
+  filter for one tier also admitted every tier whose label contains the word
+  and the batch trend tool returned more than twice the set asked for. All
+  use `label_matches` now and a guard test pins the tree.
+
+### Added
+
+- **`compare_servers`** reports `min` and `trend` rows per metric, matching
+  the batch tool's columns.
+
 ## [1.16.64] - 2026-09-08
 
 ### Fixed

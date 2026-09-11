@@ -9,7 +9,7 @@ import httpx
 
 from zbbx_mcp.classify import classify_host as _classify_host
 from zbbx_mcp.classify import detect_provider
-from zbbx_mcp.data import extract_country
+from zbbx_mcp.data import extract_country, label_matches
 from zbbx_mcp.resolver import InstanceResolver
 from zbbx_mcp.utils import safe_output_path
 
@@ -138,7 +138,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     prod, tier = _classify_host(h.get("groups", []))
                     if not prod or prod == "Unknown":
                         continue
-                    if product and product.lower() not in prod.lower():
+                    if not label_matches(prod, product):
                         continue
                     hostname = h.get("host", "")
                     if country and extract_country(hostname).lower() != country.lower():

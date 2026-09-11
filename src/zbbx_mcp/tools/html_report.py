@@ -12,6 +12,7 @@ from zbbx_mcp.data import (
     extract_country,
     fetch_all_data,
     fetch_trends_batch,
+    label_matches,
 )
 from zbbx_mcp.excel import BW_MAX, BW_ORANGE, BW_RED
 from zbbx_mcp.resolver import InstanceResolver
@@ -132,9 +133,9 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                         rp = r.get("Product", "").lower()
                         if country and extract_country(r.get("Host", "")).lower() != country.lower():
                             continue
-                        if product and product.lower() not in rp:
+                        if product and not label_matches(r.get("Product"), product):
                             continue
-                        if tier and tier.lower() not in r.get("Tier", "").lower():
+                        if tier and not label_matches(r.get("Tier"), tier):
                             continue
                         if include_set and not any(p in rp for p in include_set):
                             continue

@@ -14,6 +14,7 @@ from zbbx_mcp.data import (
     fetch_service_status,
     fetch_traffic_map,
     host_ip,
+    label_matches,
     normalize_country,
     resolve_country,
 )
@@ -243,7 +244,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 if cc_filter:
                     data = [h for h in data if resolve_country(h) == cc_filter]
                 if product:
-                    data = [h for h in data if product.lower() in (_classify_host(h.get("groups", []))[0] or "").lower()]
+                    data = [h for h in data if label_matches(_classify_host(h.get("groups", []))[0], product)]
 
                 if not data:
                     return "No hosts found." + _inventory_gap_note(
@@ -675,7 +676,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 if cc_filter:
                     hosts = [h for h in hosts if resolve_country(h) == cc_filter]
                 if product:
-                    hosts = [h for h in hosts if product.lower() in (_classify_host(h.get("groups", []))[0] or "").lower()]
+                    hosts = [h for h in hosts if label_matches(_classify_host(h.get("groups", []))[0], product)]
 
                 if not hosts:
                     return "No hosts match the filters." + _inventory_gap_note(
