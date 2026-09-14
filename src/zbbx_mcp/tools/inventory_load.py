@@ -5,6 +5,13 @@ import socket
 
 import httpx
 
+from zbbx_mcp.budget import (
+    all_names_unknown_message,
+    effective_cap,
+    missing_hosts_note,
+    no_match_message,
+    parse_host_list,
+)
 from zbbx_mcp.classify import (
     classify_host as _classify_host,
 )
@@ -33,6 +40,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()):
             product: str = "",
             tier: str = "",
             country: str = "",
+            hosts: str = "",
             sort_by: str = "cpu",
             max_results: int = 50,
             instance: str = "",
@@ -43,12 +51,17 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()):
                 product: Filter by product name (optional)
                 tier: Filter by tier (e.g., 'Free', 'Premium') (optional)
                 country: Filter by country code in hostname (optional)
+                hosts: Comma-separated exact host names. An explicit list is
+                    never cut by max_results, and names Zabbix does not know
+                    are reported, not dropped (optional)
                 sort_by: Sort by 'cpu' (CPU usage), 'load' (load avg), or 'traffic' (network) (default: cpu)
                 max_results: Maximum results (default: 50)
                 instance: Zabbix instance name (optional, for multi-instance setups)
             """
             try:
                 client = resolver.resolve(instance)
+                wanted = parse_host_list(hosts)
+                wanted_set = set(wanted)
 
                 # Get all enabled hosts with groups and interfaces
                 hosts = await client.call("host.get", {
@@ -59,9 +72,18 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()):
                     "sortfield": "host",
                 })
 
+                # The named set is applied here, not in host.get: the parent
+                # map below needs the whole fleet so a named sub-host can still
+                # inherit its parent's metrics (ADR 142).
+                missing, note = missing_hosts_note(
+                    wanted, (h.get("host", "") for h in hosts),
+                )
+
                 # Filter by product/tier/country
                 filtered = []
                 for h in hosts:
+                    if wanted_set and h.get("host", "") not in wanted_set:
+                        continue
                     prod, t = _classify_host(h.get("groups", []))
                     if not prod:
                         continue
@@ -76,7 +98,9 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()):
                     filtered.append(h)
 
                 if not filtered:
-                    return "No servers match the filters."
+                    if wanted and len(missing) == len(wanted):
+                        return all_names_unknown_message(note)
+                    return note + no_match_message(hosts)
 
                 # Resolve parent hosts for metric inheritance
                 p_map = build_parent_map(hosts)
@@ -155,8 +179,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()):
                     return -(m.get("cpu_used", 0))
 
                 filtered.sort(key=sort_key)
-                filtered = filtered[:max_results]
-
+                filtered = filtered[:effective_cap(max_results, wanted)]
 
                 parts = [
                     "| Server | Country | Product | Tier | IP | Provider | CPU% | Load | Mem Avail | Traffic In |",
@@ -184,7 +207,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()):
                     )
 
                 header = f"**Server Load ({len(filtered)} servers, sorted by {sort_by})**\n\n"
-                return header + "\n".join(parts)
+                return header + note + "\n".join(parts)
             except (httpx.HTTPError, ValueError) as e:
                 return f"Error: {e}"
 

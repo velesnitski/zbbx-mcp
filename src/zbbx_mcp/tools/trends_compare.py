@@ -1,10 +1,23 @@
 """Trend tools: batch metrics, per-server dashboard, side-by-side comparison."""
 
+from collections.abc import Callable
+from itertools import groupby
+
 import httpx
 
+from zbbx_mcp.budget import (
+    all_names_unknown_message,
+    effective_cap,
+    fit_host_blocks,
+    missing_hosts_note,
+    no_match_message,
+    parse_host_list,
+    render_budget,
+)
 from zbbx_mcp.classify import classify_host as _classify_host
 from zbbx_mcp.classify import detect_provider
 from zbbx_mcp.data import (
+    TrendRow,
     day_label,
     extract_country,
     fetch_trends_batch,
@@ -13,6 +26,61 @@ from zbbx_mcp.data import (
 )
 from zbbx_mcp.resolver import InstanceResolver
 from zbbx_mcp.utils import resolve_group_ids
+
+_UNITS = {"cpu": "%", "traffic": "Mbps", "traffic_out": "Mbps", "load": "", "memory": "GB"}
+_COMPACT_COLUMNS = "host|metric|avg|peak|min|now|trend"
+
+
+def _units_line(metrics: list[str]) -> str:
+    """One line stating the unit of every requested metric (compact format)."""
+    parts = []
+    for m in metrics:
+        u = _UNITS.get(m, "")
+        parts.append(f"{m}={u}" if u else f"{m}=ratio")
+    return "units: " + ", ".join(parts)
+
+
+def _host_blocks(
+    rows: list[TrendRow],
+    line: Callable[[TrendRow], str],
+) -> list[tuple[str, str]]:
+    """``[(host, all of that host's rendered lines)]`` in row order.
+
+    Rows arrive sorted by (host, metric); one block per host is what lets the
+    budget fitter show a host with every metric or not at all.
+    """
+    blocks: list[tuple[str, str]] = []
+    for host, group in groupby(rows, key=lambda r: r.hostname):
+        blocks.append((host, "\n".join(line(r) for r in group)))
+    return blocks
+
+
+def _summary_table_line(r: TrendRow) -> str:
+    u = _UNITS.get(r.metric, "")
+    return (
+        f"| {r.hostname} | {r.metric} | "
+        f"{r.avg} {u} | {r.peak} {u} | {r.min_val} {u} | "
+        f"{r.current_text(u)} | {r.trend_dir} |"
+    )
+
+
+def _summary_compact_line(r: TrendRow) -> str:
+    now = "n/a" if r.current is None else f"{r.current}"
+    return f"{r.hostname}|{r.metric}|{r.avg}|{r.peak}|{r.min_val}|{now}|{r.trend_dir or 'n/a'}"
+
+
+def _daily_table_line(r: TrendRow, days: list[str]) -> str:
+    u = _UNITS.get(r.metric, "")
+    vals = " | ".join(
+        f"{r.daily.get(d, '')} {u}".strip() if d in r.daily else ""
+        for d in days
+    )
+    return f"| {r.hostname} | {r.metric} | {vals} |"
+
+
+def _daily_compact_line(r: TrendRow, days: list[str]) -> str:
+    vals = "|".join(f"{r.daily[d]}" if d in r.daily else "" for d in days)
+    return f"{r.hostname}|{r.metric}|{vals}"
 
 
 def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()):
@@ -29,10 +97,15 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()):
             metrics: str = "cpu,traffic,load",
             period: str = "7d",
             aggregation: str = "summary",
+            format: str = "table",
             max_results: int = 50,
             instance: str = "",
         ) -> str:
             """Get trend data (avg/peak/min) for multiple servers and metrics.
+
+            The output is cut to the response budget by the tool itself, whole
+            hosts at a time, and the last line names the hosts left out and
+            the exact hosts= call that fetches them (ADR 142).
 
             Args:
                 country: Country code filter (optional)
@@ -45,11 +118,16 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()):
                 metrics: Comma-separated: cpu, traffic, load, memory (default: cpu,traffic,load)
                 period: 1d, 7d, or 30d (default: 7d)
                 aggregation: 'summary' or 'daily' (default: summary)
+                format: 'table' (markdown, default) or 'compact' — one
+                    host|metric|avg|peak|min|now|trend line per host and
+                    metric, units stated once in the header
                 max_results: Max servers (default: 50)
                 instance: Zabbix instance (optional)
             """
             try:
                 client = resolver.resolve(instance)
+                if format not in ("table", "compact"):
+                    return f"Unknown format '{format}'. Use 'table' or 'compact'."
 
                 # Get and filter hosts
                 params = {
@@ -63,7 +141,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()):
                     if gids is None:
                         return f"Host group '{group}' not found."
                     params["groupids"] = gids
-                wanted = [x.strip() for x in hosts.split(",") if x.strip()] if hosts else []
+                wanted = parse_host_list(hosts)
                 if wanted:
                     params["filter"]["host"] = wanted
 
@@ -72,7 +150,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()):
                 # A caller who names the hosts has already chosen the set; a cap
                 # that trimmed it would drop names silently, which is the bug the
                 # parameter exists to avoid.
-                cap = max(max_results, len(wanted))
+                cap = effective_cap(max_results, wanted)
                 filtered_ids = []
                 for h in found_hosts:
                     prod, t = _classify_host(h.get("groups", []))
@@ -86,18 +164,14 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()):
                     if len(filtered_ids) >= cap:
                         break
 
-                missing = sorted(set(wanted) - {h.get("host", "") for h in found_hosts})
-                note = ""
-                if missing:
-                    note = (
-                        f"_{len(missing)} of {len(wanted)} requested host(s) are not enabled "
-                        f"hosts in Zabbix: {', '.join(missing)}_\n"
-                    )
+                missing, note = missing_hosts_note(
+                    wanted, (h.get("host", "") for h in found_hosts),
+                )
 
                 if not filtered_ids:
                     if wanted and len(missing) == len(wanted):
-                        return note.strip("_\n") + "."
-                    return note + "No servers match the filters."
+                        return all_names_unknown_message(note)
+                    return note + no_match_message(found_hosts)
 
                 metric_list = [m.strip() for m in metrics.split(",") if m.strip()]
                 trend_rows, host_map = await fetch_trends_batch(
@@ -107,8 +181,9 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()):
                 if not trend_rows:
                     return f"No trend data for the last {period}."
 
-                units = {"cpu": "%", "traffic": "Mbps", "load": "", "memory": "GB"}
                 server_count = len(set(r.hostid for r in trend_rows))
+                compact = format == "compact"
+                budget = render_budget()
 
                 if aggregation == "daily":
                     # Collect all unique days across all rows
@@ -117,37 +192,46 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()):
                     ))
                     if not all_days:
                         return "No daily data available."
-
-                    day_cols = " | ".join(day_label(d) for d in all_days)
-                    parts = [
-                        f"**Daily Trends ({period}) for {server_count} servers**\n" + note,
-                        f"| Server | Metric | {day_cols} |",
-                        f"|--------|--------|{'---|' * len(all_days)}",
-                    ]
-                    for r in trend_rows:
-                        u = units.get(r.metric, "")
-                        vals = " | ".join(
-                            f"{r.daily.get(d, '')} {u}".strip() if d in r.daily else ""
-                            for d in all_days
+                    title = f"**Daily Trends ({period}) for {server_count} servers**\n" + note
+                    if compact:
+                        day_cols = "|".join(day_label(d) for d in all_days)
+                        header = "\n".join([
+                            title,
+                            f"host|metric|{day_cols} ({_units_line(metric_list)})",
+                        ])
+                        blocks = _host_blocks(
+                            trend_rows, lambda r: _daily_compact_line(r, all_days),
                         )
-                        parts.append(f"| {r.hostname} | {r.metric} | {vals} |")
-
-                    return "\n".join(parts)
+                    else:
+                        day_cols = " | ".join(day_label(d) for d in all_days)
+                        header = "\n".join([
+                            title,
+                            f"| Server | Metric | {day_cols} |",
+                            f"|--------|--------|{'---|' * len(all_days)}",
+                        ])
+                        blocks = _host_blocks(
+                            trend_rows, lambda r: _daily_table_line(r, all_days),
+                        )
                 else:
-                    parts = [
-                        f"**Trends ({period}) for {server_count} servers**\n" + note,
-                        "| Server | Metric | Avg | Peak | Min | Current | Trend |",
-                        "|--------|--------|-----|------|-----|---------|-------|",
-                    ]
-                    for r in trend_rows:
-                        u = units.get(r.metric, "")
-                        parts.append(
-                            f"| {r.hostname} | {r.metric} | "
-                            f"{r.avg} {u} | {r.peak} {u} | {r.min_val} {u} | "
-                            f"{r.current_text(u)} | {r.trend_dir} |"
-                        )
+                    title = f"**Trends ({period}) for {server_count} servers**\n" + note
+                    if compact:
+                        header = "\n".join([
+                            title,
+                            f"{_COMPACT_COLUMNS} ({_units_line(metric_list)})",
+                        ])
+                        blocks = _host_blocks(trend_rows, _summary_compact_line)
+                    else:
+                        header = "\n".join([
+                            title,
+                            "| Server | Metric | Avg | Peak | Min | Current | Trend |",
+                            "|--------|--------|-----|------|-----|---------|-------|",
+                        ])
+                        blocks = _host_blocks(trend_rows, _summary_table_line)
 
-                    return "\n".join(parts)
+                # The cut is the tool's own, so it can be stated: whole hosts,
+                # in order, and a closing line that names the rest (ADR 142).
+                text, _omitted = fit_host_blocks(header, blocks, budget)
+                return text
             except (httpx.HTTPError, ValueError) as e:
                 return f"Error: {e}"
 
