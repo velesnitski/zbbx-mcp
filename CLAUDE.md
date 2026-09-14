@@ -4,7 +4,7 @@ Instructions for Claude Code when working in this repository.
 
 ## Project
 
-Zabbix MCP server — 173 tools across 40+ modules. Python 3.10+, FastMCP framework, async httpx HTTP/2 client.
+Zabbix MCP server — 174 tools across 40+ modules. Python 3.10+, FastMCP framework, async httpx HTTP/2 client.
 
 ## Commands
 
@@ -27,6 +27,7 @@ uv run pytest -k "test_name"               # single test by name
 | `data.py` | Shared data fetching, `ServerRow`, `extract_country()`, constants, region maps |
 | `fetch.py` | Shared fetch helpers (`fetch_traffic_map`, `fetch_cpu_map`, `fetch_enabled_hosts`) |
 | `classify.py` | Host classification + provider detection. Table loaded from `data/provider_cidrs.json` (generated — see `scripts/gen_provider_cidrs.py`); override with `ZABBIX_PROVIDER_CIDRS`. No tools/ imports |
+| `app_map.py` | The product's catalogue as a map the tool is given (`ZABBIX_APP_MAP`): dataclasses, fail-closed loader, age vs predicate window, IP join over every interface. No tools/ imports (ADR 143) |
 | `rollback.py` | Pre-mutation snapshots, `SNAPSHOT_CONFIG` |
 | `excel.py` | Shared Excel formatting (bandwidth thresholds, color fills) |
 | `formatters.py` | Output formatters (severity labels, host/trigger formatting) |
@@ -70,6 +71,7 @@ uv run pytest -k "test_name"               # single test by name
 | `trends_compare.py` | 3 | `get_trends_batch`, `get_server_dashboard`, `compare_servers` |
 | `geo_traffic.py` | 4 | `detect_regional_anomalies`, `get_geo_traffic_trends`, `get_expansion_report`, `get_regional_density_map` |
 | `geo_inventory.py` | 1 | `get_geo_inventory` — a country's fleet by resolved DATACENTER, not hostname code; Free/Paid split, mislabelled-out and unresolved hosts named |
+| `app_view.py` | 1 | `get_app_view` — what the client app offers per audience / section / entry, joined to Zabbix by member IP; unmatched members named, agents not reporting named, stale map flagged (ADR 143) |
 | `geo_health.py` | 6 | `get_service_uptime_report`, `get_service_health_matrix`, `get_latency_estimate`, `get_servers_by_ping` |
 | `health.py` | 4 | `check_connection`, `get_active_problems`, `get_agent_unreachable`, `get_error_rate` |
 | `availability.py` | 2 | `get_host_availability`, `get_recent_changes` |
@@ -109,6 +111,7 @@ uv run pytest -k "test_name"               # single test by name
 | `ZABBIX_READ_ONLY` | Disable write operations |
 | `ZABBIX_PROVIDER_CIDRS` | Provider → CIDR map (inline JSON or a file path) searched before the generated table, most-specific-first. **This is where accurate detection comes from** — the built-in table resolves little of any specific deployment. Draft one with the `build_provider_overrides` tool. Unset = generated table only, ADR 120 |
 | `ZABBIX_DATACENTER_CIDRS` | Datacenter ranges as `{"Provider": [["cidr", "City, CC"], …]}` (inline JSON or a file path), most-specific-first. **The built-in table is empty** — unset means no city is reported. Draft one with the `build_datacenter_overrides` tool, ADR 122 |
+| `ZABBIX_APP_MAP` | The product's catalogue (inline JSON or a file path) written by a private exporter — audiences → sections → entries → members by IP. Read per call, fail-closed; unset = `get_app_view` says so, ADR 143 |
 | `ZBBX_SENSITIVE_STRINGS` | Optional deny-list (file path or inline `a,b,c`) of identifiers that must not appear in fixtures. Enforced by the fixture guard when set; skipped loudly when unset — ADR 119 |
 
 ## Adding a new tool

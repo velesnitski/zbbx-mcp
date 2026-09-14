@@ -191,6 +191,8 @@ EXPECTED_TOOLS = {
     "get_capacity_planning",
     # html_report.py
     "generate_html_report",
+    # app_view.py
+    "get_app_view",
     # geo.py
     "detect_regional_anomalies",
     "get_geo_inventory",
