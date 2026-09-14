@@ -83,8 +83,8 @@ class TestLoader:
          "entry without a key"),
         ({"generated_at": "2026-01-01T00:00:00Z",
           "audiences": {"default": {"sections": [{"name": "Free", "entries": [
-              {"key": "aq_free", "members": [{"ip": "198.51.100.1"}, {"load": 0.1}]}]}]}}},
-         "member without an ip"),
+              {"key": "aq_free", "members": [{"ip": "198.51.100.1"}, {"ip": 7}]}]}]}}},
+         "member ip must be a string"),
         ({"generated_at": "2026-01-01T00:00:00Z",
           "audiences": {"default": {"sections": [{"name": "Free", "entries": [
               {"key": "aq_free", "members": [{"ip": "198.51.100.1", "clients": "many"}]}]}]}}},
@@ -186,3 +186,25 @@ class TestAge:
     ])
     def test_window_is_parsed_from_the_predicate(self, predicate, want):
         assert predicate_window_s(predicate) == want
+
+
+class TestMembersWithoutAddress:
+    """The exporter keeps a member whose address column is NULL (it is still
+    something the product offers) and writes ``"ip": null``. That is a count
+    here, not a rejection — and not a silent drop either."""
+
+    def test_null_and_empty_ip_are_counted_not_rejected(self):
+        m, why = load_app_map(json.dumps({
+            "generated_at": "2026-01-01T00:00:00Z",
+            "audiences": {"default": {"sections": [{"name": "Free", "entries": [
+                {"key": "aq_free", "members": [
+                    {"ip": "198.51.100.1", "load": 0.2},
+                    {"ip": None, "load": 0.5},        # exporter: address column NULL
+                    {"ip": "  "},                     # blank is the same thing
+                ]},
+            ]}]}},
+        }))
+        assert m is not None, why
+        e = m.audiences["default"].sections[0].entries[0]
+        assert [x.ip for x in e.members] == ["198.51.100.1"]
+        assert e.without_address == 2

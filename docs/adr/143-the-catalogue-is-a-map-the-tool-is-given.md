@@ -41,12 +41,20 @@ gitignored `*.local.json`, the same arrangement ADR 120/122 use for
 provider and datacenter ranges.
 
 **The loader fails closed and does not cache.** Unusable input — a missing
-file, malformed JSON, an entry without a key, a member without an address,
-a map without `generated_at` — means no map, never a partial one. A
-half-read catalogue would report some entries against the product's data
+file, malformed JSON, an entry without a key, a member whose address is not
+a string, a map without `generated_at` — means no map, never a partial one.
+A half-read catalogue would report some entries against the product's data
 and silently omit the rest, which is the exact defect this tool exists to
 remove. The exporter rewrites the file on its own schedule, so the map is
 read on every call; a copy held in memory would defeat the age check.
+
+**A member listed with no address is a count, not a defect.** The exporter
+keeps a member whose address column is empty — the product still offers it —
+and writes it with a null `ip`. Rejecting the whole map for it would hide the
+catalogue behind one unfilled row; dropping the member would understate what
+the product offers. The entry carries such members as `without_address`; the
+tool counts them in `members`, prints them under their own heading, and never
+lists them as matched or unmatched, because there was nothing to join on.
 
 **The join is by address, over every interface.** `host_ip` takes a host's
 first non-loopback interface, which is right for "where is this box" and

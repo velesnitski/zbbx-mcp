@@ -69,6 +69,7 @@ def scope_entries(aud: Audience, section: str = "", entry: str = "") -> list[tup
 
 def entry_stats(
     matched: list[dict], unmatched: list[str], per_host: dict[str, float], cpu: dict[str, float],
+    without_address: int = 0,
 ) -> dict:
     """Fold one entry's joined hosts into figures with explicit coverage. Pure.
 
@@ -76,13 +77,15 @@ def entry_stats(
     shortfall is carried as ``covered`` so the caller can print ``k/n``.
     ``silent`` is the matched hosts with no live CPU reading — the shared
     definition of "agent not reporting" (ADR 140), named rather than rendered
-    as 0 % CPU.
+    as 0 % CPU. ``without_address`` is the members the map lists with no IP:
+    offered, counted, joinable to nothing.
     """
     bps = [per_host[str(h["hostid"])] for h in matched if str(h["hostid"]) in per_host]
     cpus = [cpu[h["hostid"]] for h in matched if h["hostid"] in cpu]
     return {
         "matched": len(matched),
         "unmatched": list(unmatched),
+        "without_address": without_address,
         "covered": len(bps),
         "bps": float(sum(bps)),
         "median_bps": float(median(bps)) if bps else None,
@@ -101,9 +104,10 @@ def rollup(stats: list[dict]) -> dict:
     cpus = [v for s in stats for v in s["_cpus"]]
     return {
         "entries": len(stats),
-        "members": sum(s["matched"] + len(s["unmatched"]) for s in stats),
+        "members": sum(s["matched"] + len(s["unmatched"]) + s["without_address"] for s in stats),
         "matched": sum(s["matched"] for s in stats),
         "unmatched": sum(len(s["unmatched"]) for s in stats),
+        "without_address": sum(s["without_address"] for s in stats),
         "covered": len(bps),
         "bps": float(sum(bps)),
         "median_bps": float(median(bps)) if bps else None,
@@ -238,13 +242,15 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
 
                 stats: list[tuple[Section, Entry, dict]] = []
                 notes_unmatched: list[str] = []
+                notes_no_address: list[str] = []
                 notes_silent: list[str] = []
                 for s, e, matched, unmatched in joined:
-                    st = entry_stats(matched, unmatched, per_host, cpu)
+                    st = entry_stats(matched, unmatched, per_host, cpu, e.without_address)
                     stats.append((s, e, st))
                     clients = [m.clients for m in e.members if m.clients is not None]
                     parts.append(
-                        f"| {s.name} / {e.title} (`{e.key}`) | {e.code or '?'} | {len(e.members)} "
+                        f"| {s.name} / {e.title} (`{e.key}`) | {e.code or '?'} "
+                        f"| {len(e.members) + e.without_address} "
                         f"| {st['matched']} | {len(unmatched)} | {_mbps(st['bps'])}{_cov(st)} "
                         f"| {_mbps(st['median_bps'])} | {_cpu(st['cpu_med'], st['cpu_max'])} "
                         f"| {len(st['silent'])} | "
@@ -253,6 +259,8 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     )
                     if unmatched:
                         notes_unmatched.append(f"- `{e.key}`: {', '.join(unmatched)}")
+                    if e.without_address:
+                        notes_no_address.append(f"- `{e.key}`: ×{e.without_address}")
                     if st["silent"]:
                         notes_silent.append(f"- `{e.key}`: {', '.join(st['silent'])}")
 
@@ -263,6 +271,13 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                         "carries the address on any interface. Not in any figure above:"
                     )
                     parts.extend(notes_unmatched)
+                if notes_no_address:
+                    parts.append("")
+                    parts.append(
+                        "**Members without an address** — listed by the map with no IP, so there "
+                        "is nothing to join on. Counted in `members` only:"
+                    )
+                    parts.extend(notes_no_address)
                 if notes_silent:
                     parts.append("")
                     parts.append(

@@ -5,6 +5,48 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.16.66] - 2026-09-14
+
+### Added
+
+- **`get_app_view`** (ADR 143) — what the client application offers per
+  audience / section / entry, read from a catalogue map the deployment
+  supplies through `ZABBIX_APP_MAP` (a gitignored file or inline JSON written
+  by a private exporter; the public code knows only the shape). Members are
+  joined to enabled hosts by address over every interface. Per entry: members
+  / matched / unmatched, carrier traffic with coverage, median per server, CPU
+  median and max, agents not reporting, the map's own display load and client
+  counts; then section and audience rollups and the top matched servers.
+  Unmatched members and members the map lists without an address are named,
+  never absorbed; a map older than its predicate's freshness window is flagged
+  as stale. The loader fails closed and reads the file on every call.
+- **`Reading`** (ADR 141). `reading.read_item(item, now)` is the one function
+  that turns a Zabbix item into a value: `Reading(value, age_s, state)`, where
+  `value` is a float only while `live`; `never`, `stale`, `unparsable` and
+  `missing_clock` all read as `None` and render as `n/a (not reporting)`.
+  `live_value`, `live_items`, the value maps and the CPU, connection and
+  carrier-traffic readers go through it, and a guard test pins every remaining
+  direct read of `lastvalue` to an explicit allow-list that states its reason.
+- **`get_trends_batch(format="compact")`** — one
+  `host|metric|avg|peak|min|now|trend` line per host and metric, units stated
+  once in the header. About three fifths of the table's characters.
+- **`hosts=`** on `get_server_load` and `get_traffic_report` (previously
+  `get_trends_batch` and `compare_servers` only): an exact set, never trimmed
+  by `max_results`; unknown names are reported, not dropped.
+
+### Changed
+
+- **The tool owns its output budget** (ADR 142). `get_trends_batch` fits its
+  own output to `ZABBIX_RESPONSE_BUDGET` whole hosts at a time and ends with
+  one line naming the hosts not shown and the `hosts=` call that fetches them;
+  a host is shown with every metric or not at all. The server's wrapper reads
+  the same figure from `budget.response_budget()`, so a tool that stops inside
+  it is never cut mid-host after the fact.
+- **A filter that matches nothing lists what exists.** `get_trends_batch`,
+  `get_server_load` and `get_traffic_report` name the product and tier labels
+  present in the fleet instead of a bare "no servers match", so a misspelled
+  label and a genuinely empty set no longer read the same.
+
 ## [1.16.65] - 2026-09-11
 
 ### Fixed

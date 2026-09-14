@@ -68,6 +68,10 @@ class Entry:
     code: str
     members: tuple[Member, ...] = ()
     display_load: float | None = None
+    # Members the map lists with no address. The exporter keeps them (it
+    # reports them as members_without_ip) because the product offers them;
+    # this side cannot join them to anything, so they are a count, not a row.
+    without_address: int = 0
 
 
 @dataclass(frozen=True)
@@ -129,12 +133,17 @@ def _parse_generated_at(raw) -> datetime:
     return dt.astimezone(timezone.utc)
 
 
-def _parse_member(raw, where: str) -> Member:
+def _parse_member(raw, where: str) -> Member | None:
+    """``None`` for a member the map lists without an address (``ip`` null or
+    empty) — offered by the product, unjoinable here; the entry counts it. A
+    non-string ``ip`` is a malformed map, not a missing address."""
     if not isinstance(raw, dict):
         raise ValueError(f"{where}: member must be an object")
     ip = raw.get("ip")
-    if not isinstance(ip, str) or not ip.strip():
-        raise ValueError(f"{where}: member without an ip")
+    if ip is None or (isinstance(ip, str) and not ip.strip()):
+        return None
+    if not isinstance(ip, str):
+        raise ValueError(f"{where}: member ip must be a string, got {type(ip).__name__}")
     return Member(
         ip=ip.strip(),
         load=_opt_float(raw.get("load"), f"{where}: member {ip} load"),
@@ -152,12 +161,14 @@ def _parse_entry(raw, where: str) -> Entry:
     members = raw.get("members", [])
     if not isinstance(members, list):
         raise ValueError(f"{where}/{key}: members must be a list")
+    parsed = [_parse_member(m, f"{where}/{key}") for m in members]
     return Entry(
         key=key,
         title=str(raw.get("title") or key),
         code=str(raw.get("code") or "").strip(),
-        members=tuple(_parse_member(m, f"{where}/{key}") for m in members),
+        members=tuple(m for m in parsed if m is not None),
         display_load=_opt_float(raw.get("display_load"), f"{where}/{key}: display_load"),
+        without_address=sum(1 for m in parsed if m is None),
     )
 
 

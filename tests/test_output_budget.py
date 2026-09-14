@@ -269,15 +269,18 @@ class TestTrendsBatchBudget:
 
 # --- hosts= on the load and traffic reports -------------------------------------
 
+# A last value is a reading only while the item reports (ADR 141).
+LIVE = str(int(time.time()))
+
 
 def _load_client(hosts: list[dict]) -> RecordingClient:
     def item_get(p):
         key = (p.get("filter") or {}).get("key_") or []
         if "system.cpu.util[,idle]" in key:
             return [{"hostid": h, "itemid": f"c{h}", "key_": "system.cpu.util[,idle]",
-                     "lastvalue": "60", "units": "%"} for h in p.get("hostids", [])]
-        return [{"hostid": h, "key_": "net.if.in[eth0]", "lastvalue": "8000000", "units": "bps"}
-                for h in p.get("hostids", [])]
+                     "lastvalue": "60", "lastclock": LIVE, "units": "%"} for h in p.get("hostids", [])]
+        return [{"hostid": h, "key_": "net.if.in[eth0]", "lastvalue": "8000000", "lastclock": LIVE,
+                 "units": "bps"} for h in p.get("hostids", [])]
 
     return RecordingClient({"host.get": hosts, "item.get": item_get})
 
@@ -290,7 +293,7 @@ def _traffic_client(hosts: list[dict]) -> RecordingClient:
     def item_get(p):
         key = (p.get("filter") or {}).get("key_")
         if isinstance(key, (list, tuple)):
-            return [{"hostid": h["hostid"], "lastvalue": "8000000"} for h in hosts]
+            return [{"hostid": h["hostid"], "lastvalue": "8000000", "lastclock": LIVE} for h in hosts]
         return []
 
     return RecordingClient({"host.get": hosts, "item.get": item_get})

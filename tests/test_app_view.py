@@ -139,6 +139,24 @@ class TestGetAppViewWire:
         assert "- srv-aq9001 — 8 Mbps — `aq_free`" in out
         assert "srv-tf9001" not in out                       # not in the map — not in the view
 
+    def test_members_without_an_address_are_counted_and_named(self, monkeypatch):
+        # The exporter writes "ip": null for a member whose address column is
+        # NULL. Offered by the product, joinable to nothing: it is in the
+        # members count and in a note, never in matched/unmatched.
+        _given(monkeypatch, parse_app_map({
+            "generated_at": (datetime.now(timezone.utc) - timedelta(minutes=1)).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "predicate": "heartbeat within 300 s",
+            "audiences": {"default": {"sections": [{"name": "Free", "entries": [
+                {"key": "aq_free", "title": "Base – Free", "code": "AQ",
+                 "members": [{"ip": "198.51.100.1"}, {"ip": None, "load": 0.5}]},
+            ]}]}},
+        }))
+        out = run_tool(app_view, "get_app_view", _client())
+        assert "| Free / Base – Free (`aq_free`) | AQ | 2 | 1 | 0 |" in out, out
+        assert "**Members without an address**" in out and "- `aq_free`: ×1" in out
+        assert "| **Section Free** | 1 | 2 | 1 | 0 |" in out, out
+        assert "**Unmatched members**" not in out
+
     def test_second_interface_joins(self, monkeypatch):
         _given(monkeypatch, _map())
         out = run_tool(app_view, "get_app_view", _client(), section="Paid")
