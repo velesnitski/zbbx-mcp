@@ -11,6 +11,8 @@ Every check passed. None of them looked at the thing that was wrong.
 Figures below are illustrative, not measurements.
 """
 
+import time
+
 from zbbx_mcp.cpu_load import (
     FLAT_MIN_HOURS,
     cpu_pct_from_items,
@@ -20,7 +22,10 @@ from zbbx_mcp.cpu_load import (
 from zbbx_mcp.tools.diagnose import _classify_verdict
 
 
-def _item(key, value, clock=1_760_000_000):
+def _item(key, value, clock=None):
+    # A reading is current only while the item reports (ADR 140/141): the
+    # default clock is "just now"; an explicit 0 is the never-collected sentinel.
+    clock = int(time.time()) if clock is None else clock
     return {"key_": key, "lastvalue": str(value), "lastclock": str(clock)}
 
 

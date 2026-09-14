@@ -29,7 +29,7 @@ from zbbx_mcp.data import (
     label_matches,
     partition_test_hosts,
 )
-from zbbx_mcp.fetch import TRAFFIC_DIVISOR, is_physical_traffic_in_key, physical_traffic_items
+from zbbx_mcp.fetch import TRAFFIC_DIVISOR, is_physical_traffic_in_key, live_value, physical_traffic_items
 from zbbx_mcp.resolver import InstanceResolver
 from zbbx_mcp.uptime import (
     compute_host_uptime,
@@ -428,13 +428,9 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 service2_map = build_value_map(service2_items, lambda v: int(float(v)))
                 service3_map: dict[str, int] = {}
                 for i in service3_items:
-                    try:
-                        val = int(float(i["lastvalue"]))
-                        hid = i["hostid"]
-                        if val > service3_map.get(hid, 0):
-                            service3_map[hid] = val
-                    except (ValueError, TypeError, KeyError):
-                        pass
+                    v = live_value(i, _now)
+                    if v is not None and int(v) > service3_map.get(i["hostid"], 0):
+                        service3_map[i["hostid"]] = int(v)
 
                 # Traffic-validation: if server has real traffic, treat as up
                 # regardless of check item state (fixes false positives from

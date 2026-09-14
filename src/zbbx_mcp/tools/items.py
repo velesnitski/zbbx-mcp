@@ -328,7 +328,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 q = search if "*" in search else f"*{search}*"
                 items = await client.call("item.get", {
                     "hostids": hids,
-                    "output": ["itemid", "hostid", "name", "key_", "lastvalue", "units", "status"],
+                    "output": ["itemid", "hostid", "name", "key_", "lastvalue", "lastclock", "units", "status"],
                     "search": {"name": q, "key_": q},
                     "searchWildcardsEnabled": True,
                     "searchByAny": True,
@@ -347,15 +347,18 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 for item in items:
                     hostname = host_map.get(item["hostid"], "?")
                     value = format_value(item.get("lastvalue", ""), item.get("units", ""))
+                    # The value's own timestamp sits beside it: a listing of every
+                    # value type cannot judge liveness, so it shows the age (ADR 141).
                     lines.append(
-                        f"| {hostname} | {item.get('name', '?')} | `{item.get('key_', '?')}` | {value} |"
+                        f"| {hostname} | {item.get('name', '?')} | `{item.get('key_', '?')}` | {value} | "
+                        f"{_ts(item.get('lastclock', '0'))} |"
                     )
 
                 total = len(items)
                 header = f"**{total} items** matching '{search}' across {len(hosts)} hosts"
                 if total >= max_results:
                     header += f" (limit {max_results})"
-                table = "| Host | Item | Key | Value |\n|------|------|-----|-------|\n"
+                table = "| Host | Item | Key | Value | Updated |\n|------|------|-----|-------|---------|\n"
                 return (
                     f"{header}\n\n{table}" + "\n".join(lines)
                     + excluded_test_note(excluded)

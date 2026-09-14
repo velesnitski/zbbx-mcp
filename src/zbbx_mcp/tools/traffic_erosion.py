@@ -38,7 +38,7 @@ from zbbx_mcp.data import (
     label_matches,
     partition_test_hosts,
 )
-from zbbx_mcp.fetch import TRAFFIC_DIVISOR, physical_traffic_items
+from zbbx_mcp.fetch import TRAFFIC_DIVISOR, physical_traffic_items, rank_by_last_value
 from zbbx_mcp.resolver import InstanceResolver
 
 _IFACE_CANDIDATES = 3     # top-N interfaces per host by current value (bound trend volume)
@@ -399,19 +399,12 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 if not traffic_items:
                     return "No traffic items found." + excluded_test_note(excluded)
 
-                def _lv(it: dict) -> float:
-                    try:
-                        return float(it.get("lastvalue", "0") or 0)
-                    except (ValueError, TypeError):
-                        return 0.0
-
                 by_host_items: dict[str, list[dict]] = {}
                 for it in traffic_items:
                     by_host_items.setdefault(it["hostid"], []).append(it)
                 shortlist: list[dict] = []
                 for items in by_host_items.values():
-                    items.sort(key=_lv, reverse=True)
-                    shortlist.extend(items[:_IFACE_CANDIDATES])
+                    shortlist.extend(rank_by_last_value(items)[:_IFACE_CANDIDATES])
 
                 now = int(_time.time())
                 time_from = now - wk * _WEEK

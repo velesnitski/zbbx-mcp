@@ -26,6 +26,7 @@ from zbbx_mcp.data import (
     filter_suppressed,
     host_ip,
 )
+from zbbx_mcp.fetch import live_value
 from zbbx_mcp.formatters import format_age, normalize_problem_name
 from zbbx_mcp.resolver import InstanceResolver
 
@@ -58,6 +59,7 @@ def _split_iface_metrics(
     in_items: list[dict],
     out_items: list[dict],
     physical_keys: frozenset[str],
+    now: int | None = None,
 ) -> dict[str, dict]:
     """Bucket per-host net.if.in / net.if.out items into physical vs tunnel.
 
@@ -90,10 +92,9 @@ def _split_iface_metrics(
                 continue
             if iface in _IGNORED_IFACES or iface.startswith("docker") or iface.startswith("br-"):
                 continue
-            try:
-                val = float(it.get("lastvalue", "0") or 0)
-            except (ValueError, TypeError):
-                val = 0.0
+            val = live_value(it, now)
+            if val is None:
+                continue  # not reporting is not zero bytes (ADR 141)
             hid = it.get("hostid")
             if not hid:
                 continue
@@ -297,13 +298,13 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
 
                 in_items = await client.call("item.get", {
                     "hostids": host_ids,
-                    "output": ["hostid", "key_", "lastvalue"],
+                    "output": ["hostid", "key_", "lastvalue", "lastclock"],
                     "search": {"key_": "net.if.in["},
                     "filter": {"status": "0"},
                 })
                 out_items = await client.call("item.get", {
                     "hostids": host_ids,
-                    "output": ["hostid", "key_", "lastvalue"],
+                    "output": ["hostid", "key_", "lastvalue", "lastclock"],
                     "search": {"key_": "net.if.out["},
                     "filter": {"status": "0"},
                 })

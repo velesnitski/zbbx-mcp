@@ -4,6 +4,8 @@ what it could not count.
 Fixtures use neutral names. Figures are illustrative.
 """
 
+import time
+
 from tests.wiretest import RecordingClient, run_tool
 from zbbx_mcp.data import label_matches
 from zbbx_mcp.fetch import connections_from_items
@@ -33,7 +35,13 @@ class TestLabelMatches:
         assert not label_matches("", "Free")
 
 
-def _conn(hid, value, clock=1_760_000_000):
+def _live() -> int:
+    # "Just now": a reading is current only while the item reports (ADR 140/141).
+    return int(time.time())
+
+
+def _conn(hid, value, clock=None):
+    clock = _live() if clock is None else clock
     return {"hostid": hid, "lastvalue": str(value), "lastclock": str(clock)}
 
 
@@ -56,7 +64,8 @@ class TestConnectionsFromItems:
         assert connections_from_items(None) == {}
 
 
-def _traffic(hid, value, clock=1_760_000_000, key="net.if.in[eth0]"):
+def _traffic(hid, value, clock=None, key="net.if.in[eth0]"):
+    clock = _live() if clock is None else clock
     return {"itemid": f"{hid}{key}", "hostid": hid, "key_": key,
             "lastvalue": str(value), "lastclock": str(clock)}
 

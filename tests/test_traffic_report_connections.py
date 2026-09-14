@@ -11,10 +11,14 @@ and the third instance of this class found in one day (ADR 126, ADR 128).
 
 from __future__ import annotations
 
+import time
+
 from tests.wiretest import RecordingClient, run_tool
 from zbbx_mcp.tools import traffic as traffic_mod
 
 CONN_KEY = "sessions_total"
+# "Just now": a last value is a reading only while the item reports (ADR 141).
+LIVE = str(int(time.time()))
 HOSTS = [
     {"hostid": "1", "host": "edge-aq9001", "groups": [{"name": "prod"}],
      "interfaces": [{"ip": "192.0.2.1"}]},
@@ -28,7 +32,7 @@ def _run(monkeypatch, conn_rows):
     # without one models a response that no longer occurs. Fill a live clock
     # where absent so each test keeps its original meaning — an EXPLICIT
     # lastclock "0" is left alone, because that is the sentinel under test.
-    conn_rows = [{"lastclock": "1760000000", **r} for r in conn_rows]
+    conn_rows = [{"lastclock": LIVE, **r} for r in conn_rows]
     monkeypatch.setattr(traffic_mod, "KEY_CONNECTIONS", CONN_KEY, raising=False)
 
     def item_get(params):
@@ -36,8 +40,8 @@ def _run(monkeypatch, conn_rows):
         if key == CONN_KEY:
             return conn_rows
         if isinstance(key, (list, tuple)):          # traffic keys
-            return [{"hostid": "1", "lastvalue": "8000000"},
-                    {"hostid": "2", "lastvalue": "4000000"}]
+            return [{"hostid": "1", "lastvalue": "8000000", "lastclock": LIVE},
+                    {"hostid": "2", "lastvalue": "4000000", "lastclock": LIVE}]
         return []
 
     return run_tool(traffic_mod, "get_traffic_report",
@@ -81,10 +85,10 @@ class TestAbsentIsNotZero:
         def item_get(params):
             key = (params.get("filter") or {}).get("key_")
             if key == CONN_KEY:
-                return [{"hostid": "2", "lastvalue": "5", "lastclock": "1760000000"}]
+                return [{"hostid": "2", "lastvalue": "5", "lastclock": LIVE}]
             if isinstance(key, (list, tuple)):
-                return [{"hostid": "1", "lastvalue": "8000000"},
-                        {"hostid": "2", "lastvalue": "4000000"}]
+                return [{"hostid": "1", "lastvalue": "8000000", "lastclock": LIVE},
+                        {"hostid": "2", "lastvalue": "4000000", "lastclock": LIVE}]
             return []
 
         out = run_tool(traffic_mod, "get_traffic_report",

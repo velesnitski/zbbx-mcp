@@ -42,6 +42,9 @@ from zbbx_mcp.data import (
     extract_country,
 )
 from zbbx_mcp.excel import BW_MAX, classify_bandwidth
+from zbbx_mcp.reading import LIVE_VALUE_MAX_AGE_S as LIVE_VALUE_MAX_AGE_S
+from zbbx_mcp.reading import Reading as Reading
+from zbbx_mcp.reading import read_item
 
 # Traffic unit: bits/sec (default) or bytes/sec — configurable per deployment
 _TRAFFIC_BYTES = os.environ.get("ZABBIX_TRAFFIC_UNIT", "").lower() == "bytes"
@@ -294,7 +297,7 @@ async def fetch_traffic_map(client: ZabbixClient, hostids: list[str]) -> dict[st
     try:
         items = await client.call("item.get", {
             "hostids": hostids,
-            "output": ["hostid", "lastvalue", "key_"],
+            "output": ["hostid", "lastvalue", "lastclock", "key_"],
             "tags": [{"tag": "Application", "value": "Network interfaces", "operator": "1"}],
             "filter": {"status": STATUS_ENABLED},
             "search": {"key_": "*net.if.in[*"},   # explicit wildcards, ADR 094
@@ -307,22 +310,23 @@ async def fetch_traffic_map(client: ZabbixClient, hostids: list[str]) -> dict[st
     if not items:
         items = await client.call("item.get", {
             "hostids": hostids,
-            "output": ["hostid", "lastvalue", "key_"],
+            "output": ["hostid", "lastvalue", "lastclock", "key_"],
             "filter": {"key_": TRAFFIC_IN_KEYS},
         })
 
+    # This map corroborates liveness ("has traffic, so it is up") in several
+    # tools, so a dead agent's last rate must not count as traffic (ADR 141).
     result: dict[str, float] = {}
     for it in items:
-        try:
-            # Virtual/tunnel interfaces are filtered out by the shared predicate.
-            if not is_physical_traffic_in_key(it.get("key_", "")):
-                continue
-            mbps = float(it.get("lastvalue", 0)) / _TRAFFIC_DIVISOR
-            hid = it["hostid"]
-            if hid not in result or mbps > result[hid]:
-                result[hid] = mbps
-        except (ValueError, TypeError, IndexError):
-            pass
+        # Virtual/tunnel interfaces are filtered out by the shared predicate.
+        if not is_physical_traffic_in_key(it.get("key_", "")):
+            continue
+        raw, hid = live_value(it), it.get("hostid")
+        if raw is None or hid is None:
+            continue
+        mbps = raw / _TRAFFIC_DIVISOR
+        if hid not in result or mbps > result[hid]:
+            result[hid] = mbps
     return result
 
 
@@ -413,11 +417,9 @@ async def fetch_service_status(client: ZabbixClient, hostids: list[str]) -> dict
             continue
         hid = it["hostid"]
         host_total[hid] = host_total.get(hid, 0) + 1
-        try:
-            if int(float(it.get("lastvalue", 0))) == 1:
-                host_ok[hid] = host_ok.get(hid, 0) + 1
-        except (ValueError, TypeError):
-            pass
+        v = live_value(it, now)
+        if v is not None and int(v) == 1:
+            host_ok[hid] = host_ok.get(hid, 0) + 1
 
     result: dict[str, int] = {}
     for hid in host_total:
@@ -432,31 +434,34 @@ async def fetch_service_status(client: ZabbixClient, hostids: list[str]) -> dict
     return result
 
 
-#: A "last value" older than this is not a current reading. Agent items refresh
-#: every 1–5 minutes; half an hour of silence means the agent is down, and the
-#: value it left behind describes the past, not now (ADR 140).
-LIVE_VALUE_MAX_AGE_S = 1800
-
-
 def live_value(item: dict, now: int | None = None) -> float | None:
     """``lastvalue`` as a float if the item is reporting, else ``None``. Pure.
 
-    ``None`` for the never-collected sentinel (``lastclock = 0``, ADR 136/137),
-    for a ``lastclock`` older than ``LIVE_VALUE_MAX_AGE_S``, for a missing
+    A view over :func:`read_item` (ADR 141) for callers that only need the
+    number: ``None`` for the never-collected sentinel (ADR 136/137), for a
+    ``lastclock`` older than ``LIVE_VALUE_MAX_AGE_S`` (ADR 140), for a missing
     ``lastclock`` (the caller forgot to request it — fail closed), and for an
-    unparsable value. A caller that reads ``None`` renders "not reporting";
-    one that read the raw ``lastvalue`` printed a dead agent's last idle
-    reading of 0 as "CPU 100% now".
+    unparsable value. A caller that wants to say *why* uses ``read_item``.
     """
-    try:
-        clock = int(item.get("lastclock") or 0)
-        if clock <= 0:
-            return None
-        if (now if now is not None else int(_time.time())) - clock > LIVE_VALUE_MAX_AGE_S:
-            return None
-        return float(item.get("lastvalue"))
-    except (TypeError, ValueError):
-        return None
+    return read_item(item, now).value
+
+
+def rank_by_last_value(items) -> list[dict]:
+    """``items`` busiest-first by raw ``lastvalue``. A ranking, not a reading.
+
+    Callers use it to choose WHICH interface's history to analyse; the number
+    itself never leaves this function. A stale interface still ranks by the
+    traffic it carried, because the history behind it is what the caller goes
+    on to read — a dead host's carrier NIC is still its carrier NIC (ADR 135),
+    and ranking by a live reading of ``None`` would hand the analysis an idle
+    interface's history instead.
+    """
+    def _key(it: dict) -> float:
+        try:
+            return float(it.get("lastvalue") or 0)
+        except (TypeError, ValueError):
+            return 0.0
+    return sorted(items or [], key=_key, reverse=True)
 
 
 def live_items(items, now: int | None = None) -> list[dict]:
@@ -570,7 +575,7 @@ async def fetch_all_data(
     def _item_call(key):
         if not key:
             return _noop()
-        return client.call("item.get", {"hostids": all_ids, "output": ["hostid", "lastvalue"],
+        return client.call("item.get", {"hostids": all_ids, "output": ["hostid", "lastvalue", "lastclock"],
                                          "filter": {"key_": key, "status": STATUS_ENABLED}})
 
     def _service_item_call(key):
@@ -590,9 +595,9 @@ async def fetch_all_data(
         _item_call(KEY_MEM_AVAIL),
         _item_call(KEY_CONNECTIONS),
         # Traffic: filter by known physical interface keys
-        client.call("item.get", {"hostids": all_ids, "output": ["hostid", "lastvalue"],
+        client.call("item.get", {"hostids": all_ids, "output": ["hostid", "lastvalue", "lastclock"],
                                   "filter": {"key_": TRAFFIC_IN_KEYS, "status": STATUS_ENABLED}}),
-        client.call("item.get", {"hostids": all_ids, "output": ["hostid", "lastvalue"],
+        client.call("item.get", {"hostids": all_ids, "output": ["hostid", "lastvalue", "lastclock"],
                                   "filter": {"key_": TRAFFIC_OUT_KEYS, "status": STATUS_ENABLED}}),
         _item_call(KEY_AGENT_VERSION),
         _service_item_call(KEY_service_PRIMARY),
@@ -637,7 +642,9 @@ async def fetch_all_data(
                 bw_limit_map[m["hostid"]] = float(m["value"])
         except (ValueError, TypeError, KeyError):
             pass
-    version_map = build_value_map(version_items, lambda v: str(v))
+    # Agent version is text, not a measurement — the one raw read, at the boundary.
+    version_map = {i["hostid"]: str(i["lastvalue"]) for i in version_items
+                   if "hostid" in i and "lastvalue" in i}
     # Drop stale/unsupported service-check items so a broken poller doesn't
     # masquerade as a service-down signal in the report.
     _now = int(_time.time())
@@ -660,46 +667,32 @@ async def fetch_all_data(
             fallback_out: Any
             fallback_in, fallback_out = await asyncio.gather(
                 physical_traffic_items(
-                    client, missing_hosts, output=("hostid", "lastvalue")),
+                    client, missing_hosts, output=("hostid", "lastvalue", "lastclock")),
                 client.call("item.get", {
                     "hostids": missing_hosts,
-                    "output": ["hostid", "lastvalue"],
+                    "output": ["hostid", "lastvalue", "lastclock"],
                     "search": {"name": "Outgoing network traffic"},
                     "filter": {"status": STATUS_ENABLED},
                 }),
                 return_exceptions=True,
             )
-            if isinstance(fallback_in, list):
-                for i in fallback_in:
-                    try:
-                        val = float(i["lastvalue"])
-                        hid = i["hostid"]
-                        if val > in_traffic_map.get(hid, 0):
-                            in_traffic_map[hid] = val
-                    except (ValueError, TypeError, KeyError):
-                        pass
-            if isinstance(fallback_out, list):
-                for i in fallback_out:
-                    try:
-                        val = float(i["lastvalue"])
-                        hid = i["hostid"]
-                        if val > out_traffic_map.get(hid, 0):
-                            out_traffic_map[hid] = val
-                    except (ValueError, TypeError, KeyError):
-                        pass
+            for fallback, traffic_map in ((fallback_in, in_traffic_map),
+                                          (fallback_out, out_traffic_map)):
+                if not isinstance(fallback, list):
+                    continue
+                for i in fallback:
+                    val, hid = live_value(i, _now), i.get("hostid")
+                    if val is not None and hid and val > traffic_map.get(hid, 0):
+                        traffic_map[hid] = val
         except (ValueError, KeyError, OSError):
             pass  # Fallback is best-effort
 
     # service protocol check: any item with value 1 = OK
     service3_map: dict[str, int] = {}
     for i in service3_items:
-        try:
-            val = int(float(i["lastvalue"]))
-            hid = i["hostid"]
-            if val > service3_map.get(hid, 0):
-                service3_map[hid] = val
-        except (ValueError, TypeError, KeyError):
-            pass
+        v = live_value(i, _now)
+        if v is not None and int(v) > service3_map.get(i["hostid"], 0):
+            service3_map[i["hostid"]] = int(v)
 
     # Templates per host
     template_map: dict[str, str] = {}
@@ -1018,7 +1011,7 @@ async def fetch_trends_batch(
     return rows, host_map
 
 
-def connections_from_items(items) -> dict[str, float]:
+def connections_from_items(items, now: int | None = None) -> dict[str, float]:
     """``{hostid: session_count}`` from connection items. Pure, no API call.
 
     Honours the never-collected sentinel. Zabbix marks an item that has never
@@ -1028,17 +1021,15 @@ def connections_from_items(items) -> dict[str, float]:
     physically impossible and therefore a tell that the number was never
     measured. Such hosts are left OUT of the map, so the caller reads ``None``
     and renders "unknown", the same as a host with no item at all (ADR 137;
-    the same sentinel as ``cpu_pct_from_items``, ADR 136).
+    the same sentinel as ``cpu_pct_from_items``, ADR 136). A stale count is
+    left out for the same reason (ADR 140/141).
 
     Requires ``lastclock`` in the item ``output``. A caller that omits it gets
     every item treated as never-collected, which fails closed rather than open.
     """
     out: dict[str, float] = {}
     for it in items or []:
-        try:
-            if int(it.get("lastclock") or 0) <= 0:
-                continue
-            out[str(it["hostid"])] = float(it.get("lastvalue"))
-        except (KeyError, TypeError, ValueError):
-            continue
+        v = live_value(it, now)
+        if v is not None and it.get("hostid") is not None:
+            out[str(it["hostid"])] = v
     return out

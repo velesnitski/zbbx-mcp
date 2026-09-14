@@ -22,6 +22,8 @@ from zbbx_mcp.classify import detect_provider
 from zbbx_mcp.data import (
     KEY_CONNECTIONS,
     TRAFFIC_IN_KEYS,
+    build_max_map,
+    build_value_map,
     canonical_host_name,
     countries_for_region,
     extract_country,
@@ -29,7 +31,14 @@ from zbbx_mcp.data import (
     host_ip,
     label_matches,
 )
-from zbbx_mcp.fetch import connections_from_items, physical_traffic_items, to_kbps, to_mbps
+from zbbx_mcp.fetch import (
+    connections_from_items,
+    physical_traffic_items,
+    rank_by_last_value,
+    read_item,
+    to_kbps,
+    to_mbps,
+)
 from zbbx_mcp.resolver import InstanceResolver
 
 # Per-host interface shortlist size for detect_traffic_drops. Bounds the
@@ -108,7 +117,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 # Phase 2: traffic + connections + CPU in parallel (3 calls)
                 traffic_task = client.call("item.get", {
                     "hostids": all_ids,
-                    "output": ["hostid", "lastvalue"],
+                    "output": ["hostid", "lastvalue", "lastclock"],
                     "filter": {"key_": TRAFFIC_IN_KEYS, "status": "0"},
                 })
                 async def _empty():
@@ -121,7 +130,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 }) if KEY_CONNECTIONS else _empty()
                 cpu_task = client.call("item.get", {
                     "hostids": all_ids,
-                    "output": ["hostid", "lastvalue"],
+                    "output": ["hostid", "lastvalue", "lastclock"],
                     "filter": {"key_": "system.cpu.util[,idle]", "status": "0"},
                 })
 
@@ -129,26 +138,12 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     traffic_task, conn_task, cpu_task
                 )
 
-                # Build per-host metrics (max traffic across interfaces)
-                host_traffic: dict[str, float] = {}
-                for i in traffic_items:
-                    try:
-                        val = float(i.get("lastvalue", "0"))
-                    except (ValueError, TypeError):
-                        continue
-                    hid = i["hostid"]
-                    if val > host_traffic.get(hid, 0):
-                        host_traffic[hid] = val
-
-                # Never-collected items are left out, so they read None (ADR 137).
+                # Per-host metrics (max traffic across interfaces). Items that
+                # are not reporting are left out of every map, so they read
+                # None rather than as a figure (ADR 137/140/141).
+                host_traffic: dict[str, float] = build_max_map(traffic_items)
                 host_conns: dict[str, float] = connections_from_items(conn_items)
-
-                host_cpu: dict[str, float] = {}
-                for i in cpu_items:
-                    try:
-                        host_cpu[i["hostid"]] = round(100 - float(i["lastvalue"]), 1)
-                    except (ValueError, TypeError):
-                        pass
+                host_cpu: dict[str, float] = build_value_map(cpu_items, lambda v: round(100 - v, 1))
 
                 # Group hosts by Zabbix group
                 group_members: dict[str, list[str]] = {}
@@ -345,7 +340,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 traffic_items, conn_items = await asyncio.gather(
                     client.call("item.get", {
                         "hostids": all_ids,
-                        "output": ["hostid", "lastvalue"],
+                        "output": ["hostid", "lastvalue", "lastclock"],
                         "filter": {"key_": TRAFFIC_IN_KEYS, "status": "0"},
                     }),
                     client.call("item.get", {
@@ -355,15 +350,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     }) if KEY_CONNECTIONS else _empty_list(),
                 )
 
-                host_traffic: dict[str, float] = {}
-                for i in traffic_items:
-                    try:
-                        val = float(i.get("lastvalue", "0"))
-                    except (ValueError, TypeError):
-                        continue
-                    hid = i["hostid"]
-                    if val > host_traffic.get(hid, 0):
-                        host_traffic[hid] = val
+                host_traffic: dict[str, float] = build_max_map(traffic_items)
 
                 # Never-collected items are left out, so they read None (ADR 137).
                 host_conns: dict[str, float] = connections_from_items(conn_items)
@@ -577,33 +564,27 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 if not traffic_items:
                     return "No traffic items found."
 
-                def _lv(it: dict) -> float:
-                    try:
-                        return float(it.get("lastvalue", "0") or 0)
-                    except (ValueError, TypeError):
-                        return 0.0
-
                 by_host_items: dict[str, list[dict]] = {}
                 for it in traffic_items:
                     by_host_items.setdefault(it["hostid"], []).append(it)
                 shortlist: list[dict] = []
                 for items in by_host_items.values():
-                    items.sort(key=_lv, reverse=True)
-                    shortlist.extend(items[:_IFACE_CANDIDATES])
+                    shortlist.extend(rank_by_last_value(items)[:_IFACE_CANDIDATES])
 
                 # Agent reachability per host (cheap) — rules out host-down so a
                 # dead box is not mislabelled as a traffic block (corroboration).
                 ping_items = await client.call("item.get", {
                     "hostids": filtered_ids,
-                    "output": ["hostid", "lastvalue"],
+                    "output": ["hostid", "lastvalue", "lastclock"],
                     "filter": {"key_": "agent.ping", "status": "0"},
                 })
+                # A stale "1" is a silent agent, not a reachable one; a ping
+                # that never reported says nothing either way (ADR 141).
                 agent_up: dict[str, bool] = {}
                 for it in ping_items:
-                    try:
-                        agent_up[it["hostid"]] = int(float(it.get("lastvalue", "0"))) == 1
-                    except (ValueError, TypeError):
-                        pass
+                    r = read_item(it)
+                    if r.state in ("live", "stale"):
+                        agent_up[it["hostid"]] = r.value == 1.0
 
                 now = int(_time.time())
                 baseline_start = now - baseline_days * 86400

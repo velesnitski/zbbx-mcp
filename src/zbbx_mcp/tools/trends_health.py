@@ -19,6 +19,7 @@ from zbbx_mcp.data import (
     label_matches,
 )
 from zbbx_mcp.excel import BW_MAX
+from zbbx_mcp.fetch import live_value
 from zbbx_mcp.resolver import InstanceResolver
 from zbbx_mcp.utils import resolve_group_ids
 
@@ -146,10 +147,9 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()):
                 for item in service1_items:
                     if is_service_check_stale(item, now_ts):
                         continue
-                    try:
-                        service1_map[item["hostid"]] = int(float(item["lastvalue"]))
-                    except (ValueError, TypeError, KeyError):
-                        pass
+                    v = live_value(item, now_ts)
+                    if v is not None:
+                        service1_map[item["hostid"]] = int(v)
 
                 # Build per-host metrics
                 host_metrics: dict[str, dict] = {}

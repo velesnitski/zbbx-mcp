@@ -25,7 +25,7 @@ from zbbx_mcp.data import (
     host_ip,
     label_matches,
 )
-from zbbx_mcp.fetch import TRAFFIC_DIVISOR
+from zbbx_mcp.fetch import TRAFFIC_DIVISOR, rank_by_last_value
 from zbbx_mcp.resolver import InstanceResolver
 from zbbx_mcp.uptime import retention_too_short
 from zbbx_mcp.utils import safe_output_path
@@ -354,7 +354,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 if KEY_service_PRIMARY:
                     service_items = await client.call("item.get", {
                         "hostids": [h["hostid"] for h in hosts],
-                        "output": ["hostid", "lastvalue"],
+                        "output": ["hostid", "lastvalue", "lastclock"],
                         "filter": {"key_": KEY_service_PRIMARY, "status": "0"},
                     })
                     service_map = build_value_map(service_items, lambda v: int(float(v)))
@@ -561,21 +561,14 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 })
 
                 # Busiest interface per host. This said "pick best (highest
-                # value)" but used setdefault, which keeps the FIRST item the
-                # API returned — on a multi-NIC or bonded host that is often an
-                # idle interface, so the whole peak/trough analysis ran on a
-                # flat series (ADR 097).
-                def _lastval(it: dict) -> float:
-                    try:
-                        return float(it.get("lastvalue", "0") or 0)
-                    except (ValueError, TypeError):
-                        return 0.0
-
+                # value)" but used setdefault on the API's order, which keeps
+                # the FIRST item returned — on a multi-NIC or bonded host that
+                # is often an idle interface, so the whole peak/trough analysis
+                # ran on a flat series (ADR 097). Ranked busiest-first now, so
+                # the first one seen per host is the carrier (ADR 141).
                 best_by_host: dict[str, dict] = {}
-                for it in items:
-                    cur = best_by_host.get(it["hostid"])
-                    if cur is None or _lastval(it) > _lastval(cur):
-                        best_by_host[it["hostid"]] = it
+                for it in rank_by_last_value(items):
+                    best_by_host.setdefault(it["hostid"], it)
                 item_ids = [it["itemid"] for it in best_by_host.values()]
 
                 if not item_ids:

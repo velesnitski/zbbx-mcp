@@ -661,3 +661,104 @@ class TestExactLabelGuard:
         assert self.PATTERN.search('if product and product.lower() not in prod.lower():')
         assert self.PATTERN.search('if tier.lower() in (t or "").lower():')
         assert not self.PATTERN.search("if not label_matches(prod, product):")
+
+
+class TestReadingBoundaryGuard:
+    """ADR 141 — a tool cannot obtain a bare last value.
+
+    Zabbix keeps ``lastvalue`` forever; read without ``lastclock`` it is
+    indistinguishable from a live reading. ADR 136, 137 and 140 each removed
+    that defect from one surface, and it came back each time because tools
+    read ``item["lastvalue"]`` directly. ``reading.read_item`` is now the one
+    place that turns an item into a value (``fetch.live_value`` is a view over
+    it, ``fetch.rank_by_last_value`` the one sort key), and this guard fails
+    the suite when any other module reads the raw field.
+
+    The allow-list is the complete set of raw reads that remain, keyed by
+    module and the code fragment on the line, each with the reason it stays.
+    An entry that no longer matches anything fails too, so the list cannot
+    outlive the code it excuses.
+    """
+
+    PATTERN = re.compile(r"""\[\s*["']lastvalue["']\s*\]|\.get\(\s*["']lastvalue["']""")
+    #: The type, and the I/O helpers built directly on it.
+    BOUNDARY = {"reading.py", "fetch.py"}
+
+    #: (module, fragment on the line) -> why a raw read is honest there.
+    ALLOWED = {
+        ("tools/items.py", 'format_value(item.get("lastvalue"'):
+            "generic listing of every value type (text, logs, versions): no float to "
+            "judge; the value's own lastclock is printed beside it as its age",
+        ("tools/hosts.py", 'lv = it.get("lastvalue")'):
+            "monthly cost figure from a snapshot item (ADR 106), not a metric: rendered "
+            "with an explicit source marker; the agent window does not apply",
+        ("tools/domains.py", 'val = it.get("lastvalue", "")'):
+            "cert/whois/https checks run on their own (hourly-to-daily) schedule: a 0/1 "
+            "flag, not an agent reading; the tool corroborates with a live probe",
+        ("tools/domains.py", 'int(float(it.get("lastvalue", "-1")))'):
+            "same scheduled cert check; a per-class window is future work",
+        ("tools/diagnose.py", 'https_item.get("lastvalue"'):
+            "domain-mode https check on its own schedule; its age is taken from the "
+            "open problem's clock, not from the item",
+        ("tools/web_scenarios.py", 'it.get("lastvalue", "")'):
+            "web-scenario items are produced by the Zabbix server at each scenario's "
+            "own delay, not by an agent; a per-class window is future work",
+    }
+
+    def _hits(self):
+        hits = []
+        for path in sorted(SRC.rglob("*.py")):
+            if path.name in self.BOUNDARY:
+                continue
+            for i, line in enumerate(path.read_text().splitlines(), 1):
+                if self.PATTERN.search(line):
+                    hits.append((path.relative_to(SRC).as_posix(), i, line.strip()))
+        return hits
+
+    def _excused(self, module, line):
+        return any(m == module and frag in line for (m, frag) in self.ALLOWED)
+
+    def test_every_raw_read_is_allow_listed(self):
+        bad = [f"{m}:{i}: {line}" for m, i, line in self._hits() if not self._excused(m, line)]
+        assert not bad, (
+            "raw lastvalue read(s) outside the boundary — go through "
+            "fetch.read_item / live_value (or rank_by_last_value for a sort key). See ADR 141:\n"
+            + "\n".join(bad)
+        )
+
+    def test_every_allow_list_entry_still_matches_a_read(self):
+        hits = self._hits()
+        dead = [f"{m}: {frag}" for (m, frag) in self.ALLOWED
+                if not any(hm == m and frag in line for hm, _, line in hits)]
+        assert not dead, "allow-list entries with no matching read — remove them:\n" + "\n".join(dead)
+
+    def test_guard_is_not_vacuous(self):
+        assert self.PATTERN.search('cpu = round(100 - float(it["lastvalue"]), 1)')
+        assert self.PATTERN.search("val = item.get('lastvalue', '0')")
+        assert self.PATTERN.search('it[ "lastvalue" ] = str(100 - v)')
+        # Requesting the field is not reading it.
+        assert not self.PATTERN.search('"output": ["hostid", "lastvalue", "lastclock"],')
+        assert not self.PATTERN.search('"lastclock", "lastns", "lastvalue", "prevvalue",')
+        # The scanner sees at least the excused sites, and the boundary is where
+        # the raw reads actually live.
+        assert len({(m, i) for m, i, _ in self._hits()}) >= len(self.ALLOWED)
+        assert "def read_item" in (SRC / "reading.py").read_text()
+        assert self.PATTERN.search((SRC / "reading.py").read_text())
+
+    def test_live_value_is_a_view_over_read_item(self):
+        from zbbx_mcp.fetch import LIVE_VALUE_MAX_AGE_S, Reading, live_value, read_item
+        now = 1_800_000_000
+        live = {"lastvalue": "12.34", "lastclock": str(now - 60)}
+        r = read_item(live, now)
+        assert r == Reading(12.34, 60, "live") and r.text("%") == "12.3 %"
+        assert live_value(live, now) == r.value
+        for item, state in (
+            ({"lastvalue": "7"}, "missing_clock"),
+            ({"lastvalue": "7", "lastclock": "0"}, "never"),
+            ({"lastvalue": "7", "lastclock": str(now - LIVE_VALUE_MAX_AGE_S - 1)}, "stale"),
+            ({"lastvalue": "n/a", "lastclock": str(now)}, "unparsable"),
+        ):
+            r = read_item(item, now)
+            assert (r.state, r.value, live_value(item, now)) == (state, None, None), item
+            assert r.text("%") == "n/a (not reporting)"
+        assert read_item({"lastvalue": "7", "lastclock": str(now - 86400)}, now).age_s == 86400

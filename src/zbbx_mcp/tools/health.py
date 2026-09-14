@@ -9,6 +9,7 @@ from zbbx_mcp.data import (
     fetch_traffic_map,
     filter_suppressed,
 )
+from zbbx_mcp.fetch import read_item
 from zbbx_mcp.formatters import normalize_problem_name
 from zbbx_mcp.resolver import InstanceResolver
 from zbbx_mcp.tag_filter import parse_tag_filter
@@ -283,18 +284,16 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     ping = ping_map.get(hid)
                     if not ping:
                         continue  # no agent.ping item
-                    try:
-                        val = int(float(ping.get("lastvalue", "0")))
-                        last = int(ping.get("lastclock", "0"))
-                    except (ValueError, TypeError):
-                        continue
                     # Skip hosts with real traffic — agent.ping may be deprecated there
                     if traffic_map.get(hid, 0) >= 5:
                         continue
-                    stale_hours = round((now - last) / 3600, 1) if last > 0 else 0
-                    if val != 1 or stale_hours > 1:
+                    # A ping is a reading with an age (ADR 141): a value older
+                    # than the live window is silence, not "1 = reachable".
+                    r = read_item(ping, now)
+                    stale_hours = round(r.age_s / 3600, 1) if r.age_s is not None else 0
+                    if r.value != 1:
                         ip = next((i["ip"] for i in h.get("interfaces", []) if i.get("ip") != "127.0.0.1"), "")
-                        unreachable.append((h["host"], ip, val, stale_hours))
+                        unreachable.append((h["host"], ip, r.value, stale_hours))
 
                 if not unreachable:
                     return f"All agents reachable ({len(ping_map)} checked)."
@@ -304,7 +303,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 lines.append("| Host | IP | Ping | Last Seen |")
                 lines.append("|------|----|------|----------|")
                 for host, ip, val, hours in shown:
-                    status = "DOWN" if val != 1 else "STALE"
+                    status = "DOWN" if val is not None else "STALE"
                     lines.append(f"| {host} | {ip} | {status} | {hours}h ago |")
                 if len(unreachable) > max_results:
                     lines.append(f"\n*{len(unreachable) - max_results} more omitted*")

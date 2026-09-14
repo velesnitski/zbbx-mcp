@@ -1,5 +1,7 @@
 """Traffic, disruption-wave, and shutdown-headroom tests (split from test_analytics, ADR 074)."""
 
+import time
+
 from tests.wiretest import RecordingClient, run_tool
 from zbbx_mcp.tools import traffic as traffic_mod
 
@@ -410,8 +412,13 @@ class TestDisruptionWaveDetection:
         waves = _compute_waves(drops, min_hosts=3, min_subnets=3)
         assert waves[0]["severity"] == "medium"
 
+_LIVE = str(int(time.time()))
+
+
 class TestPhysicalNicRegexFallback:
     """Pure-helper tests for #129 — NIC name regex fallback in _split_iface_metrics."""
+
+    # Interfaces must be reporting to be bucketed at all (ADR 141).
 
     def test_unused_secondary_nic_classified_physical(self):
         from zbbx_mcp.tools.correlation import _split_iface_metrics
@@ -419,9 +426,9 @@ class TestPhysicalNicRegexFallback:
         # eno3 / enp130s0f0 are physical NICs not in the curated TRAFFIC_IN_KEYS
         # list. Without the regex they would fall into the tunnel bucket.
         items = [
-            {"hostid": "h1", "key_": "net.if.in[eno3]", "lastvalue": "0"},
-            {"hostid": "h1", "key_": "net.if.in[enp130s0f0]", "lastvalue": "0"},
-            {"hostid": "h1", "key_": "net.if.in[tun0]", "lastvalue": "0"},
+            {"hostid": "h1", "key_": "net.if.in[eno3]", "lastvalue": "0", "lastclock": _LIVE},
+            {"hostid": "h1", "key_": "net.if.in[enp130s0f0]", "lastvalue": "0", "lastclock": _LIVE},
+            {"hostid": "h1", "key_": "net.if.in[tun0]", "lastvalue": "0", "lastclock": _LIVE},
         ]
         per_host = _split_iface_metrics(items, [], frozenset())
         # Only tun0 should land in tunnel_names.
@@ -432,8 +439,8 @@ class TestPhysicalNicRegexFallback:
         from zbbx_mcp.tools.correlation import _split_iface_metrics
 
         items = [
-            {"hostid": "h1", "key_": "net.if.in[enx00aa11bb22cc]", "lastvalue": "0"},
-            {"hostid": "h1", "key_": "net.if.in[gre1]", "lastvalue": "0"},
+            {"hostid": "h1", "key_": "net.if.in[enx00aa11bb22cc]", "lastvalue": "0", "lastclock": _LIVE},
+            {"hostid": "h1", "key_": "net.if.in[gre1]", "lastvalue": "0", "lastclock": _LIVE},
         ]
         per_host = _split_iface_metrics(items, [], frozenset())
         assert per_host["h1"]["tunnel_names"] == ["gre1"]
@@ -443,7 +450,7 @@ class TestPhysicalNicRegexFallback:
 
         # Matching the curated key takes precedence; the regex is only a fallback.
         items = [
-            {"hostid": "h1", "key_": "net.if.in[eth0]", "lastvalue": "100"},
+            {"hostid": "h1", "key_": "net.if.in[eth0]", "lastvalue": "100", "lastclock": _LIVE},
         ]
         per_host = _split_iface_metrics(items, [], frozenset({"net.if.in[eth0]"}))
         assert per_host["h1"]["physical_bps"] == 100
@@ -453,8 +460,8 @@ class TestPhysicalNicRegexFallback:
         from zbbx_mcp.tools.correlation import _split_iface_metrics
 
         items = [
-            {"hostid": "h1", "key_": "net.if.in[gre1]", "lastvalue": "0"},
-            {"hostid": "h1", "key_": "net.if.in[mytun0]", "lastvalue": "0"},
+            {"hostid": "h1", "key_": "net.if.in[gre1]", "lastvalue": "0", "lastclock": _LIVE},
+            {"hostid": "h1", "key_": "net.if.in[mytun0]", "lastvalue": "0", "lastclock": _LIVE},
         ]
         per_host = _split_iface_metrics(items, [], frozenset())
         assert sorted(per_host["h1"]["tunnel_names"]) == ["gre1", "mytun0"]

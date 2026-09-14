@@ -30,6 +30,8 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 
+from zbbx_mcp.reading import read_item
+
 __all__ = [
     "CPU_BUSY_PCT",
     "FLAT_MAX_SPREAD_PP",
@@ -45,18 +47,20 @@ _UTIL_KEY = "system.cpu.util"
 _IDLE_KEY = "system.cpu.util[,idle]"
 
 
-def cpu_pct_from_items(items) -> float | None:
+def cpu_pct_from_items(items, now: int | None = None) -> float | None:
     """Utilisation from an already-fetched item list. Makes no API call.
 
     Returns ``None`` when no usable item exists — including when the item is
-    present but has **never collected**.
+    present but has **never collected**, or has stopped reporting.
 
     Zabbix reports a never-collected item with ``lastclock = 0`` and
     ``lastvalue`` empty or ``0``. Read without checking the clock, that renders
     as a real measurement of zero: a load average of ``0`` timestamped
     1970-01-01 reads as a perfectly idle host rather than as a host nothing is
     known about. The epoch-zero sentinel is the tell, and it has to be honoured
-    at every point a ``lastvalue`` is consumed.
+    at every point a ``lastvalue`` is consumed — which is why the read goes
+    through ``read_item`` (ADR 141), where a dead agent's last idle reading of
+    0 is not "100% busy now" either (ADR 140).
     """
     direct: float | None = None
     idle: float | None = None
@@ -64,12 +68,9 @@ def cpu_pct_from_items(items) -> float | None:
         key = (it.get("key_") or "").strip()
         if key not in (_UTIL_KEY, _IDLE_KEY):
             continue
-        try:
-            if int(it.get("lastclock") or 0) <= 0:
-                continue  # never collected — not a value of zero
-            value = float(it.get("lastvalue"))
-        except (TypeError, ValueError):
-            continue
+        value = read_item(it, now).value
+        if value is None:
+            continue  # never collected, stale or unparsable — not a value of zero
         if key == _UTIL_KEY:
             direct = round(value, 1)
         else:

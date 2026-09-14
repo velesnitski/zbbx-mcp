@@ -52,7 +52,7 @@ from zbbx_mcp.data import (
     label_matches,
     partition_test_hosts,
 )
-from zbbx_mcp.fetch import TRAFFIC_DIVISOR, physical_traffic_items
+from zbbx_mcp.fetch import TRAFFIC_DIVISOR, physical_traffic_items, rank_by_last_value
 from zbbx_mcp.resolver import InstanceResolver
 
 _IFACE_CANDIDATES = 3      # top-N interfaces per host — bound the trend fetch
@@ -554,19 +554,12 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                         + excluded_test_note(excluded)
                     )
 
-                def _lv(it: dict) -> float:
-                    try:
-                        return float(it.get("lastvalue", "0") or 0)
-                    except (ValueError, TypeError):
-                        return 0.0
-
                 by_host_items: dict[str, list[dict]] = {}
                 for it in traffic_items:
                     by_host_items.setdefault(it["hostid"], []).append(it)
                 shortlist: list[str] = []
                 for items in by_host_items.values():
-                    items.sort(key=_lv, reverse=True)
-                    shortlist.extend(i["itemid"] for i in items[:_IFACE_CANDIDATES])
+                    shortlist.extend(i["itemid"] for i in rank_by_last_value(items)[:_IFACE_CANDIDATES])
 
                 now = int(_time.time())
                 # value_MAX, never value_avg: averaging erases the clipping this
@@ -641,8 +634,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                         out_by_host.setdefault(it["hostid"], []).append(it)
                     out_short: list[str] = []
                     for items in out_by_host.values():
-                        items.sort(key=_lv, reverse=True)
-                        out_short.extend(i["itemid"] for i in items[:_IFACE_CANDIDATES])
+                        out_short.extend(i["itemid"] for i in rank_by_last_value(items)[:_IFACE_CANDIDATES])
                     out_trends = await client.call("trend.get", {
                         "itemids": out_short,
                         "time_from": now - total_h * 3600,

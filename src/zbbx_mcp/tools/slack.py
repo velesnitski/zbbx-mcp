@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 import httpx
 
 from zbbx_mcp.data import filter_suppressed, host_ip, label_matches
+from zbbx_mcp.fetch import live_value
 from zbbx_mcp.resolver import InstanceResolver
 
 SLACK_WEBHOOK_ENV = "SLACK_WEBHOOK_URL"
@@ -129,14 +130,14 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 if include_high_cpu and host_map:
                     cpu_items = await client.call("item.get", {
                         "hostids": list(host_map.keys()),
-                        "output": ["hostid", "lastvalue"],
+                        "output": ["hostid", "lastvalue", "lastclock"],
                         "filter": {"key_": "system.cpu.util[,idle]"},
                     })
                     for item in cpu_items:
-                        try:
-                            cpu = round(100 - float(item["lastvalue"]), 1)
-                        except (ValueError, TypeError):
-                            continue
+                        idle = live_value(item)
+                        if idle is None:
+                            continue  # a dead agent's idle 0 is not "CPU 100%" (ADR 141)
+                        cpu = round(100 - idle, 1)
                         if cpu >= cpu_threshold:
                             h = host_map.get(item["hostid"])
                             if h:

@@ -1,5 +1,14 @@
 """Outage correlation, cluster, and host-flood tests (split from test_analytics, ADR 074)."""
 
+import time
+
+NOW = int(time.time())
+
+
+def _if(hid, key, lastvalue, clock=None):
+    """A live interface item — a value without a fresh clock is not a reading (ADR 141)."""
+    return {"hostid": hid, "key_": key, "lastvalue": lastvalue,
+            "lastclock": str(NOW if clock is None else clock)}
 
 
 class TestIdleRelayDetection:
@@ -12,12 +21,12 @@ class TestIdleRelayDetection:
         from zbbx_mcp.tools.correlation import _split_iface_metrics
 
         items = [
-            {"hostid": "h1", "key_": "net.if.in[eth0]", "lastvalue": "20000"},
-            {"hostid": "h1", "key_": "net.if.in[tun0]", "lastvalue": "0"},
-            {"hostid": "h1", "key_": "net.if.in[gre1]", "lastvalue": "0"},
-            {"hostid": "h1", "key_": "net.if.in[lo]", "lastvalue": "999"},  # ignored
+            _if("h1", "net.if.in[eth0]", "20000"),
+            _if("h1", "net.if.in[tun0]", "0"),
+            _if("h1", "net.if.in[gre1]", "0"),
+            _if("h1", "net.if.in[lo]", "999"),  # ignored
         ]
-        per_host = _split_iface_metrics(items, [], self._phys())
+        per_host = _split_iface_metrics(items, [], self._phys(), now=NOW)
         assert per_host["h1"]["physical_bps"] == 20000
         assert per_host["h1"]["tunnel_bps"] == 0
         assert per_host["h1"]["tunnel_count"] == 2
@@ -27,27 +36,28 @@ class TestIdleRelayDetection:
         from zbbx_mcp.tools.correlation import _split_iface_metrics
 
         items = [
-            {"hostid": "h1", "key_": "net.if.in[docker0]", "lastvalue": "1"},
-            {"hostid": "h1", "key_": "net.if.in[br-abc]", "lastvalue": "1"},
+            _if("h1", "net.if.in[docker0]", "1"),
+            _if("h1", "net.if.in[br-abc]", "1"),
         ]
-        per_host = _split_iface_metrics(items, [], self._phys())
+        per_host = _split_iface_metrics(items, [], self._phys(), now=NOW)
         assert per_host == {}
 
     def test_split_handles_garbage_values(self):
         from zbbx_mcp.tools.correlation import _split_iface_metrics
 
         items = [
-            {"hostid": "h1", "key_": "net.if.in[eth0]", "lastvalue": ""},
-            {"hostid": "h1", "key_": "net.if.in[tun0]", "lastvalue": None},
-            {"hostid": "h1", "key_": "not-a-net-key", "lastvalue": "5"},
-            {"hostid": "h1", "key_": "net.if.in[", "lastvalue": "5"},  # malformed
+            _if("h1", "net.if.in[eth0]", ""),
+            _if("h1", "net.if.in[tun0]", None),
+            _if("h1", "net.if.in[gre1]", "0", clock=NOW - 86400),   # agent silent a day
+            _if("h1", "net.if.in[not-a-net-key]", "5")
+            | {"key_": "not-a-net-key"},
+            _if("h1", "net.if.in[", "5"),  # malformed
         ]
-        per_host = _split_iface_metrics(items, [], self._phys())
-        # eth0 zero is still a recorded physical, no tunnel flagged
-        assert per_host["h1"]["physical_bps"] == 0.0
-        assert per_host["h1"]["tunnel_bps"] == 0.0
-        assert per_host["h1"]["tunnel_count"] == 1
-        assert per_host["h1"]["tunnel_names"] == ["tun0"]
+        per_host = _split_iface_metrics(items, [], self._phys(), now=NOW)
+        # An unreadable or stale value is not a reading of zero: nothing is
+        # recorded for it, so a silent tunnel cannot flag a relay as idle
+        # (ADR 141). Nothing crashes either.
+        assert per_host == {}
 
     def test_idle_relay_flagged_when_tunnels_silent(self):
         from zbbx_mcp.tools.correlation import _find_idle_relays

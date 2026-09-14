@@ -9,7 +9,7 @@ import httpx
 
 from zbbx_mcp.classify import classify_host as _classify_host
 from zbbx_mcp.classify import detect_provider
-from zbbx_mcp.data import extract_country, label_matches
+from zbbx_mcp.data import build_value_map, extract_country, label_matches
 from zbbx_mcp.resolver import InstanceResolver
 from zbbx_mcp.utils import safe_output_path
 
@@ -66,17 +66,17 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 tasks = [
                     client.call("item.get", {
                         "hostids": all_ids,
-                        "output": ["hostid", "lastvalue"],
+                        "output": ["hostid", "lastvalue", "lastclock"],
                         "filter": {"key_": "system.cpu.util[,idle]"},
                     }),
                     client.call("item.get", {
                         "hostids": all_ids,
-                        "output": ["hostid", "lastvalue"],
+                        "output": ["hostid", "lastvalue", "lastclock"],
                         "filter": {"key_": "system.cpu.load[percpu,avg5]"},
                     }),
                     client.call("item.get", {
                         "hostids": all_ids,
-                        "output": ["hostid", "lastvalue"],
+                        "output": ["hostid", "lastvalue", "lastclock"],
                         "filter": {"key_": "vm.memory.size[available]"},
                     }),
                 ]
@@ -115,22 +115,10 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                                         host_tabs.setdefault(hid, set()).add(f"{dname} / {tab}")
 
                 # Build metrics maps
-                cpu_map, load_map, mem_map = {}, {}, {}
-                for i in cpu_items:
-                    try:
-                        cpu_map[i["hostid"]] = round(100 - float(i["lastvalue"]), 1)
-                    except (ValueError, TypeError):
-                        pass
-                for i in load_items:
-                    try:
-                        load_map[i["hostid"]] = round(float(i["lastvalue"]), 2)
-                    except (ValueError, TypeError):
-                        pass
-                for i in mem_items:
-                    try:
-                        mem_map[i["hostid"]] = round(float(i["lastvalue"]) / 1_073_741_824, 1)
-                    except (ValueError, TypeError):
-                        pass
+                # Hosts that are not reporting get no figure (ADR 140/141).
+                cpu_map = build_value_map(cpu_items, lambda v: round(100 - v, 1))
+                load_map = build_value_map(load_items, lambda v: round(v, 2))
+                mem_map = build_value_map(mem_items, lambda v: round(v / 1_073_741_824, 1))
 
                 # Build rows
                 rows = []

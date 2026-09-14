@@ -15,7 +15,7 @@ import httpx
 
 from zbbx_mcp.classify import classify_host as _classify_host
 from zbbx_mcp.classify import detect_provider
-from zbbx_mcp.fetch import live_items
+from zbbx_mcp.data import build_value_map
 from zbbx_mcp.resolver import InstanceResolver
 from zbbx_mcp.utils import safe_output_path
 
@@ -108,11 +108,6 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
 
                 results = await asyncio.gather(*tasks)
                 cpu_items, load_items, mem_avail_items, mem_total_items = results[:4]
-                # A dead agent's last reading is not a current one: idle 0 became
-                # "CPU 100%" and total memory 0 became "0 GB" (ADR 140).
-                cpu_items, load_items, mem_avail_items, mem_total_items = (
-                    live_items(x) for x in (cpu_items, load_items, mem_avail_items, mem_total_items)
-                )
                 cost_macros = results[4]
                 graphs = results[5] if len(results) > 5 else []
 
@@ -139,27 +134,12 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                         host_tab[hid] = f"{ctx['dashboard']} / {ctx['tab']}"
 
                 # Build metrics
-                cpu_map, load_map, mem_avail_map, mem_total_map = {}, {}, {}, {}
-                for i in cpu_items:
-                    try:
-                        cpu_map[i["hostid"]] = round(float(i["lastvalue"]), 1)
-                    except (ValueError, TypeError):
-                        pass
-                for i in load_items:
-                    try:
-                        load_map[i["hostid"]] = round(float(i["lastvalue"]), 2)
-                    except (ValueError, TypeError):
-                        pass
-                for i in mem_avail_items:
-                    try:
-                        mem_avail_map[i["hostid"]] = round(float(i["lastvalue"]) / 1_073_741_824, 1)
-                    except (ValueError, TypeError):
-                        pass
-                for i in mem_total_items:
-                    try:
-                        mem_total_map[i["hostid"]] = round(float(i["lastvalue"]) / 1_073_741_824, 1)
-                    except (ValueError, TypeError):
-                        pass
+                # A dead agent's last reading is not a current one: idle 0 became
+                # "CPU 100%" and total memory 0 became "0 GB" (ADR 140/141).
+                cpu_map = build_value_map(cpu_items, lambda v: round(v, 1))
+                load_map = build_value_map(load_items, lambda v: round(v, 2))
+                mem_avail_map = build_value_map(mem_avail_items, lambda v: round(v / 1_073_741_824, 1))
+                mem_total_map = build_value_map(mem_total_items, lambda v: round(v / 1_073_741_824, 1))
 
                 # Build rows
                 rows = []

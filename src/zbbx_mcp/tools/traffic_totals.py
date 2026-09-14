@@ -29,11 +29,11 @@ from zbbx_mcp.data import (
     label_matches,
     partition_test_hosts,
 )
-from zbbx_mcp.fetch import physical_traffic_items, to_mbps
+from zbbx_mcp.fetch import physical_traffic_items, read_item, to_mbps
 from zbbx_mcp.resolver import InstanceResolver
 
 
-def carrier_traffic(items: list[dict]) -> tuple[dict[str, float], int]:
+def carrier_traffic(items: list[dict], now: int | None = None) -> tuple[dict[str, float], int]:
     """``({hostid: carrier_bps}, never_collected)`` from traffic items. Pure.
 
     The carrier is the busiest interface per host. An item with
@@ -44,16 +44,15 @@ def carrier_traffic(items: list[dict]) -> tuple[dict[str, float], int]:
     per_host: dict[str, float] = {}
     never = 0
     for it in items or []:
-        try:
-            if int(it.get("lastclock") or 0) <= 0:
-                never += 1
-                continue
-            hid = str(it["hostid"])
-            val = float(it.get("lastvalue"))
-        except (KeyError, TypeError, ValueError):
+        r = read_item(it, now)
+        if r.state in ("never", "missing_clock"):
+            never += 1
             continue
-        if val > per_host.get(hid, -1.0):
-            per_host[hid] = val
+        if r.value is None or it.get("hostid") is None:
+            continue  # stale or unparsable: not a rate of zero either (ADR 141)
+        hid = str(it["hostid"])
+        if r.value > per_host.get(hid, -1.0):
+            per_host[hid] = r.value
     return per_host, never
 
 

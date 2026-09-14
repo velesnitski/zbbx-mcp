@@ -12,6 +12,7 @@ import time as _time
 import httpx
 
 from zbbx_mcp.data import GB_DECIMAL, MB_DECIMAL, fetch_enabled_hosts
+from zbbx_mcp.fetch import live_value
 from zbbx_mcp.resolver import InstanceResolver
 
 
@@ -105,7 +106,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     # Fetch items
                     params = {
                         "hostids": all_ids,
-                        "output": ["itemid", "hostid", "key_", "lastvalue"],
+                        "output": ["itemid", "hostid", "key_", "lastvalue", "lastclock"],
                         "filter": {"status": "0"},
                     }
                     if "search" in cfg:
@@ -118,6 +119,10 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                         params["filter"].update(cfg["filter"])
 
                     items = await client.call("item.get", params)
+                    # "Current" is a reading, not a bare last value: an item that
+                    # stopped reporting has no current to regress from (ADR 141).
+                    for it in items:
+                        it["_current"] = live_value(it, now)
 
                     # Handle disk: accept both pfree and pused items
                     if "filter_key" in cfg:
@@ -125,22 +130,19 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                         pused_items = [it for it in items if "pused" in it.get("key_", "")]
                         # Convert pused → pfree equivalent (100 - pused)
                         for it in pused_items:
-                            try:
-                                it["lastvalue"] = str(100 - float(it.get("lastvalue", 0)))
+                            if it["_current"] is not None:
+                                it["_current"] = 100 - it["_current"]
                                 it["_converted"] = True
-                            except (ValueError, TypeError):
-                                pass
                         items = pfree_items + pused_items
 
                     # Deduplicate: one item per host (pick the one with lowest current value)
                     best_item: dict[str, dict] = {}
                     for it in items:
                         hid = it["hostid"]
-                        try:
-                            val = float(it.get("lastvalue", 0))
-                        except (ValueError, TypeError):
+                        val = it["_current"]
+                        if val is None:
                             continue
-                        if hid not in best_item or val < float(best_item[hid].get("lastvalue", 0)):
+                        if hid not in best_item or val < best_item[hid]["_current"]:
                             best_item[hid] = it
 
                     if not best_item:
@@ -194,10 +196,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                         if len(points) < 14:
                             continue
 
-                        try:
-                            current = float(it.get("lastvalue", 0))
-                        except (ValueError, TypeError):
-                            continue
+                        current = it["_current"]
 
                         # Simple linear regression: least squares
                         n = len(points)

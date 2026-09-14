@@ -14,12 +14,14 @@ from zbbx_mcp.classify import (
 )
 from zbbx_mcp.data import (
     TRAFFIC_IN_KEYS,
+    build_max_map,
     build_parent_map,
+    build_value_map,
     canonical_host_name,
     extract_country,
     label_matches,
 )
-from zbbx_mcp.fetch import to_mbps
+from zbbx_mcp.fetch import live_value, to_mbps
 from zbbx_mcp.formatters import format_value
 from zbbx_mcp.resolver import InstanceResolver
 
@@ -88,7 +90,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()):
                 items, net_items = await asyncio.gather(
                     client.call("item.get", {
                         "hostids": lookup_ids,
-                        "output": ["hostid", "itemid", "key_", "lastvalue", "units"],
+                        "output": ["hostid", "itemid", "key_", "lastvalue", "lastclock", "units"],
                         "filter": {"key_": [
                             "system.cpu.util[,idle]",
                             "system.cpu.load[percpu,avg1]",
@@ -98,7 +100,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()):
                     }),
                     client.call("item.get", {
                         "hostids": lookup_ids,
-                        "output": ["hostid", "key_", "lastvalue", "units"],
+                        "output": ["hostid", "key_", "lastvalue", "lastclock", "units"],
                         "filter": {"key_": TRAFFIC_IN_KEYS, "status": "0"},
                     }),
                 )
@@ -109,10 +111,9 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()):
                     hid = item["hostid"]
                     m = metrics.setdefault(hid, {})
                     key = item["key_"]
-                    try:
-                        val = float(item.get("lastvalue", "0"))
-                    except (ValueError, TypeError):
-                        val = 0
+                    val = live_value(item)
+                    if val is None:
+                        continue  # not reporting: no figure, not a figure of zero (ADR 141)
                     if "idle" in key:
                         m["cpu_used"] = round(100 - val, 1)
                     elif "load" in key:
@@ -123,10 +124,9 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()):
                 for item in net_items:
                     hid = item["hostid"]
                     m = metrics.setdefault(hid, {})
-                    try:
-                        val = float(item.get("lastvalue", "0"))
-                    except (ValueError, TypeError):
-                        val = 0
+                    val = live_value(item)
+                    if val is None:
+                        continue
                     # Keep highest traffic interface
                     current = m.get("traffic_bps", 0)
                     if val > current:
@@ -239,18 +239,13 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()):
 
                 items = await client.call("item.get", {
                     "hostids": hids + parent_ids,
-                    "output": ["hostid", "lastvalue"],
+                    "output": ["hostid", "lastvalue", "lastclock"],
                     "filter": {"key_": "system.cpu.util[,idle]"},
                 })
 
-                # Build CPU map with parent fallback
-                cpu_by_host: dict[str, float] = {}
-                for item in items:
-                    try:
-                        idle = float(item.get("lastvalue", "100"))
-                    except (ValueError, TypeError):
-                        continue
-                    cpu_by_host[item["hostid"]] = round(100 - idle, 1)
+                # Build CPU map with parent fallback; a host that is not
+                # reporting has no CPU figure (ADR 140/141).
+                cpu_by_host: dict[str, float] = build_value_map(items, lambda v: round(100 - v, 1))
 
                 # Find overloaded servers
                 overloaded = []
@@ -352,34 +347,20 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()):
                 items, traffic_items = await asyncio.gather(
                     client.call("item.get", {
                         "hostids": lookup_ids,
-                        "output": ["hostid", "lastvalue"],
+                        "output": ["hostid", "lastvalue", "lastclock"],
                         "filter": {"key_": "system.cpu.util[,idle]"},
                     }),
                     client.call("item.get", {
                         "hostids": lookup_ids,
-                        "output": ["hostid", "lastvalue"],
+                        "output": ["hostid", "lastvalue", "lastclock"],
                         "filter": {"key_": TRAFFIC_IN_KEYS, "status": "0"},
                     }),
                 )
 
-                # Traffic: max per host
-                traffic_map: dict[str, float] = {}
-                for i in traffic_items:
-                    try:
-                        val = float(i["lastvalue"])
-                        hid = i["hostid"]
-                        if val > traffic_map.get(hid, 0):
-                            traffic_map[hid] = val
-                    except (ValueError, TypeError):
-                        pass
-
-                # Build CPU map with parent fallback
-                cpu_by_host: dict[str, float] = {}
-                for item in items:
-                    try:
-                        cpu_by_host[item["hostid"]] = round(100 - float(item.get("lastvalue", "0")), 1)
-                    except (ValueError, TypeError):
-                        pass
+                # Traffic: max per host; CPU with parent fallback. Hosts that
+                # are not reporting are left out of both (ADR 140/141).
+                traffic_map: dict[str, float] = build_max_map(traffic_items)
+                cpu_by_host: dict[str, float] = build_value_map(items, lambda v: round(100 - v, 1))
 
                 underloaded = []
                 for hid, h in host_map.items():
@@ -690,13 +671,13 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()):
                 # Get disk utilization from both standard and custom keys
                 import asyncio as _aio
                 vfs_task = client.call("item.get", {
-                    "output": ["itemid", "hostid", "key_", "lastvalue"],
+                    "output": ["itemid", "hostid", "key_", "lastvalue", "lastclock"],
                     "search": {"key_": "*vfs.fs.size*"},   # explicit wildcards, ADR 094
                     "searchWildcardsEnabled": True,
                     "filter": {"status": "0"},
                 })
                 custom_task = client.call("item.get", {
-                    "output": ["itemid", "hostid", "key_", "lastvalue"],
+                    "output": ["itemid", "hostid", "key_", "lastvalue", "lastclock"],
                     "filter": {"key_": "disk.fs.root", "status": "0"},
                 })
                 vfs_items, custom_items = await _aio.gather(vfs_task, custom_task)
@@ -705,16 +686,13 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()):
                 host_disk: dict[str, dict] = {}
                 for it in (vfs_items if isinstance(vfs_items, list) else []):
                     key = it.get("key_", "")
+                    v = live_value(it)
+                    if v is None:
+                        continue  # not reporting (ADR 141)
                     if ",pused]" in key:
-                        try:
-                            pct = float(it.get("lastvalue", 0))
-                        except (ValueError, TypeError):
-                            continue
+                        pct = v
                     elif ",pfree]" in key:
-                        try:
-                            pct = 100 - float(it.get("lastvalue", 0))
-                        except (ValueError, TypeError):
-                            continue
+                        pct = 100 - v
                     else:
                         continue
                     hid = it["hostid"]
@@ -723,9 +701,8 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()):
                         host_disk[hid] = {"pct": round(pct, 1), "mount": mount}
 
                 for it in (custom_items if isinstance(custom_items, list) else []):
-                    try:
-                        pct = float(it.get("lastvalue", 0))
-                    except (ValueError, TypeError):
+                    pct = live_value(it)
+                    if pct is None:
                         continue
                     hid = it["hostid"]
                     if hid not in host_disk or pct > host_disk[hid]["pct"]:
@@ -807,19 +784,19 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()):
             try:
                 client = resolver.resolve(instance)
                 items = await client.call("item.get", {
-                    "output": ["hostid", "lastvalue"],
+                    "output": ["hostid", "lastvalue", "lastclock"],
                     "filter": {"key_": "vm.memory.size[available]", "status": "0"},
                 })
 
                 host_mem: dict[str, float] = {}
                 for it in items:
-                    try:
-                        avail_gb = float(it.get("lastvalue", 0)) / 1_073_741_824
-                        hid = it["hostid"]
-                        if hid not in host_mem or avail_gb < host_mem[hid]:
-                            host_mem[hid] = round(avail_gb, 2)
-                    except (ValueError, TypeError):
-                        pass
+                    v = live_value(it)
+                    if v is None:
+                        continue  # a never-collected total is not "0 GB" (ADR 140/141)
+                    avail_gb = v / 1_073_741_824
+                    hid = it["hostid"]
+                    if hid not in host_mem or avail_gb < host_mem[hid]:
+                        host_mem[hid] = round(avail_gb, 2)
 
                 if not host_mem:
                     return "No memory data found."

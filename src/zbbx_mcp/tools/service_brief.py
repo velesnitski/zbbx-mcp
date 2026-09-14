@@ -27,6 +27,7 @@ from zbbx_mcp.data import (
     fetch_trends_batch,
     is_hidden_product,
 )
+from zbbx_mcp.fetch import live_value
 from zbbx_mcp.resolver import InstanceResolver
 from zbbx_mcp.utils import safe_output_path
 
@@ -153,7 +154,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
 
             cpu_task = client.call("item.get", {
                 "hostids": all_ids,
-                "output": ["hostid", "lastvalue"],
+                "output": ["hostid", "lastvalue", "lastclock"],
                 "filter": {"key_": "system.cpu.util[,idle]", "status": STATUS_ENABLED},
             })
 
@@ -176,11 +177,8 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     continue
                 hid = it["hostid"]
                 key = it["key_"]
-                try:
-                    val = int(float(it.get("lastvalue", 0)))
-                except (ValueError, TypeError):
-                    val = 0
-                host_checks.setdefault(hid, {})[key] = val
+                v = live_value(it, now_ts)
+                host_checks.setdefault(hid, {})[key] = int(v) if v is not None else 0
 
             # 7-day traffic trends (chunked)
             trend_rows = []

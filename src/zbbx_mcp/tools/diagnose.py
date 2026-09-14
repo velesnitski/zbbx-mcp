@@ -36,7 +36,7 @@ from zbbx_mcp.data import (
     host_ip,
     partition_test_hosts,
 )
-from zbbx_mcp.fetch import is_physical_traffic_in_key, to_mbps
+from zbbx_mcp.fetch import is_physical_traffic_in_key, read_item, to_mbps
 from zbbx_mcp.formatters import format_age, format_severity
 from zbbx_mcp.resolver import InstanceResolver
 from zbbx_mcp.tools.correlation import subnet24
@@ -456,16 +456,13 @@ async def _collect_diagnosis_inner(
         # should not override the parent's live agent.
         ping = _freshest_agent_ping(items)
         if ping:
-            try:
-                agent_ping_val = int(float(ping.get("lastvalue", "0")))
-            except (ValueError, TypeError):
-                pass
-            try:
-                last = int(ping.get("lastclock", "0"))
-                if last > 0:
-                    agent_ping_age_min = (now - last) / 60.0
-            except (ValueError, TypeError):
-                pass
+            # A reading, not a bare value: a stale ping is "silent for N
+            # minutes", never "1 = reachable" (ADR 141).
+            r = read_item(ping, now)
+            if r.value is not None:
+                agent_ping_val = int(r.value)
+            if r.age_s is not None:
+                agent_ping_age_min = r.age_s / 60.0
 
         if rotation_days > 0:
             records = await client.call("auditlog.get", {
@@ -508,7 +505,7 @@ async def _collect_diagnosis_inner(
     # CPU level is free — it comes out of the item list already fetched. The
     # flat-run check needs hourly trends, so it rides on `seasonal`, the same
     # flag the single-host path already uses to opt into one extra read.
-    cpu_pct = cpu_pct_from_items(items)
+    cpu_pct = cpu_pct_from_items(items, now)
     cpu_flat_hours = 0
     if seasonal and cpu_pct is not None:
         cpu_item = next(
@@ -598,11 +595,13 @@ def _render_full_report(
     if mode == "server":
         lines.append("### Agent")
         agent_val = facts["agent_ping_val"]
-        if agent_val is None:
+        age_min = facts["agent_ping_age_min"]
+        if agent_val is None and age_min is None:
             lines.append("- No `agent.ping` item — not measured")
+        elif agent_val is None:
+            lines.append(f"- agent.ping silent for {age_min:.1f}m (✗ not reporting)")
         else:
             state = "✓ reachable" if agent_val == 1 else "✗ DOWN"
-            age_min = facts["agent_ping_age_min"]
             age = f"{age_min:.1f}m ago" if age_min is not None else "?"
             lines.append(f"- agent.ping = {agent_val} ({state}, last update {age})")
         lines.append("")

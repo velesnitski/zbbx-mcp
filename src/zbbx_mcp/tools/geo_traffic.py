@@ -28,7 +28,7 @@ from zbbx_mcp.data import (
     host_ip,
     label_matches,
 )
-from zbbx_mcp.fetch import physical_traffic_items, to_mbps
+from zbbx_mcp.fetch import physical_traffic_items, rank_by_last_value, to_mbps
 from zbbx_mcp.resolver import InstanceResolver
 
 
@@ -57,17 +57,9 @@ async def _detect_regional_acute(
     traffic_items = await physical_traffic_items(
         client, all_ids, output=("itemid", "hostid", "lastvalue"))
 
-    def _lv(it: dict) -> float:
-        try:
-            return float(it.get("lastvalue", "0") or 0)
-        except (ValueError, TypeError):
-            return 0.0
-
     main_item: dict[str, dict] = {}
-    for it in traffic_items:
-        hid = it["hostid"]
-        if hid not in main_item or _lv(it) > _lv(main_item[hid]):
-            main_item[hid] = it
+    for it in rank_by_last_value(traffic_items):
+        main_item.setdefault(it["hostid"], it)
     if not main_item:
         return "No traffic items found for acute analysis."
 

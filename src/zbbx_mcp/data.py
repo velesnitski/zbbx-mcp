@@ -47,6 +47,7 @@ from zbbx_mcp.country import (  # noqa: F401 — re-exports for back-compat
     normalize_country,
     resolve_country,
 )
+from zbbx_mcp.reading import read_item
 
 __all__ = [
     "ServerRow", "FetchResult", "TrendRow",
@@ -464,27 +465,33 @@ def host_ip(h: dict) -> str:
     """Extract first non-loopback IP from host interfaces."""
     return next((i["ip"] for i in h.get("interfaces", []) if i.get("ip") != "127.0.0.1"), "")
 
-def build_value_map(items: list[dict], transform=float) -> dict[str, Any]:
-    """Build hostid → value map from Zabbix item results."""
+def build_value_map(items: list[dict], transform=float, now: int | None = None) -> dict[str, Any]:
+    """hostid → ``transform(value)`` for the items that are reporting.
+
+    Reads through ``read_item`` (ADR 141): an item without a recent
+    ``lastclock`` contributes nothing, so a caller that did not request the
+    clock gets an empty map, never a map of stale numbers. ``transform`` is
+    applied to the parsed float.
+    """
     m: dict[str, Any] = {}
     for i in items:
+        v = read_item(i, now).value
+        if v is None:
+            continue
         try:
-            m[i["hostid"]] = transform(i["lastvalue"])
+            m[i["hostid"]] = transform(v)
         except (ValueError, TypeError, KeyError):
             pass
     return m
 
-def build_max_map(items: list[dict]) -> dict[str, float]:
-    """Build hostid → max(value) map (for traffic with multiple interfaces)."""
+def build_max_map(items: list[dict], now: int | None = None) -> dict[str, float]:
+    """hostid → max(live value) — traffic across interfaces. Same rule as above."""
     m: dict[str, float] = {}
     for i in items:
-        try:
-            val = float(i["lastvalue"])
-            hid = i["hostid"]
-            if val > m.get(hid, 0):
-                m[hid] = val
-        except (ValueError, TypeError, KeyError):
-            pass
+        v = read_item(i, now).value
+        hid = i.get("hostid")
+        if v is not None and hid and v > m.get(hid, 0):
+            m[hid] = v
     return m
 
 @dataclass(slots=True)

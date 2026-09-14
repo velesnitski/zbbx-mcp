@@ -2,6 +2,7 @@
 Fixtures are neutral; cities are illustrative."""
 
 import ipaddress
+import time
 
 from tests.wiretest import RecordingClient, run_tool
 from zbbx_mcp.tools import geo_inventory
@@ -11,6 +12,9 @@ from zbbx_mcp.tools.geo_inventory import (
     is_free_tier,
     override_conflicts,
 )
+
+# A last value is a reading only while the item reports (ADR 141).
+LIVE = str(int(time.time()))
 
 
 class TestDatacenterCc:
@@ -125,8 +129,8 @@ class TestGetGeoInventoryWire:
             _host("2", "srv-aq9002", "10.0.0.2", "app_free"),
             _host("3", "srv-hm9001", "10.0.0.4", "app_free"),
         ]
-        traffic = [{"itemid": "t1", "hostid": "1", "key_": "net.if.in[eth0]", "lastvalue": "8000000", "lastclock": "1760000000"},
-                   {"itemid": "t3", "hostid": "3", "key_": "net.if.in[eth0]", "lastvalue": "2000000", "lastclock": "1760000000"}]
+        traffic = [{"itemid": "t1", "hostid": "1", "key_": "net.if.in[eth0]", "lastvalue": "8000000", "lastclock": LIVE},
+                   {"itemid": "t3", "hostid": "3", "key_": "net.if.in[eth0]", "lastvalue": "2000000", "lastclock": LIVE}]
         cpu = [{"hostid": "1", "lastvalue": "90"}, {"hostid": "3", "lastvalue": "70"}]
 
         def items(p):

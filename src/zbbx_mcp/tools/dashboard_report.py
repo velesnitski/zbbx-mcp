@@ -9,7 +9,7 @@ import httpx
 
 from zbbx_mcp.classify import classify_host as _classify_host
 from zbbx_mcp.classify import detect_provider
-from zbbx_mcp.data import KEY_CONNECTIONS, host_ip
+from zbbx_mcp.data import KEY_CONNECTIONS, build_max_map, build_value_map, host_ip
 from zbbx_mcp.fetch import physical_traffic_items, to_mbps
 from zbbx_mcp.resolver import InstanceResolver
 from zbbx_mcp.utils import safe_output_path
@@ -95,26 +95,26 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     }),
                     client.call("item.get", {
                         "hostids": list(all_hostids),
-                        "output": ["hostid", "lastvalue"],
+                        "output": ["hostid", "lastvalue", "lastclock"],
                         "filter": {"key_": "system.cpu.util[,idle]", "status": "0"},
                     }),
                     client.call("item.get", {
                         "hostids": list(all_hostids),
-                        "output": ["hostid", "lastvalue"],
+                        "output": ["hostid", "lastvalue", "lastclock"],
                         "filter": {"key_": "system.cpu.load[percpu,avg5]", "status": "0"},
                     }),
                     client.call("item.get", {
                         "hostids": list(all_hostids),
-                        "output": ["hostid", "lastvalue"],
+                        "output": ["hostid", "lastvalue", "lastclock"],
                         "filter": {"key_": "vm.memory.size[available]", "status": "0"},
                     }),
                     client.call("item.get", {
                         "hostids": list(all_hostids),
-                        "output": ["hostid", "lastvalue"],
+                        "output": ["hostid", "lastvalue", "lastclock"],
                         "filter": {"key_": KEY_CONNECTIONS, "status": "0"},
                     }) if KEY_CONNECTIONS else _empty(),
                     physical_traffic_items(
-                        client, list(all_hostids), output=("hostid", "lastvalue")),
+                        client, list(all_hostids), output=("hostid", "lastvalue", "lastclock")),
                     client.call("usermacro.get", {
                         "hostids": list(all_hostids),
                         "output": ["hostid", "value"],
@@ -128,42 +128,13 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 host_map = {h["hostid"]: h for h in host_list}
 
                 # Build metrics maps
-                cpu_map: dict[str, float] = {}
-                for i in cpu_items:
-                    try:
-                        cpu_map[i["hostid"]] = round(100 - float(i["lastvalue"]), 1)
-                    except (ValueError, TypeError):
-                        pass
-
-                load_map: dict[str, float] = {}
-                for i in load_items:
-                    try:
-                        load_map[i["hostid"]] = round(float(i["lastvalue"]), 2)
-                    except (ValueError, TypeError):
-                        pass
-
-                mem_map: dict[str, float] = {}
-                for i in mem_items:
-                    try:
-                        mem_map[i["hostid"]] = round(float(i["lastvalue"]) / 1_073_741_824, 1)
-                    except (ValueError, TypeError):
-                        pass
-
-                conn_map: dict[str, float] = {}
-                for i in conn_items:
-                    try:
-                        conn_map[i["hostid"]] = float(i["lastvalue"])
-                    except (ValueError, TypeError):
-                        pass
-
-                traffic_map: dict[str, float] = {}
-                for i in traffic_items:
-                    try:
-                        val = float(i["lastvalue"])
-                        if val > traffic_map.get(i["hostid"], 0):
-                            traffic_map[i["hostid"]] = val
-                    except (ValueError, TypeError):
-                        pass
+                # A dead agent's last reading is not a current one (ADR 140/141):
+                # every map below leaves out the hosts that are not reporting.
+                cpu_map: dict[str, float] = build_value_map(cpu_items, lambda v: round(100 - v, 1))
+                load_map: dict[str, float] = build_value_map(load_items, lambda v: round(v, 2))
+                mem_map: dict[str, float] = build_value_map(mem_items, lambda v: round(v / 1_073_741_824, 1))
+                conn_map: dict[str, float] = build_value_map(conn_items)
+                traffic_map: dict[str, float] = build_max_map(traffic_items)
 
                 cost_map: dict[str, float] = {}
                 for m in cost_macros:

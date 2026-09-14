@@ -52,21 +52,33 @@ class TestExtractCountry:
         assert extract_country("he13") == ""
 
 
+# The map builders read through ``read_item`` (ADR 141): a value is a reading
+# only while the item reports, so every fixture carries a fresh clock.
+NOW = 1_800_000_000
+
+
+def _it(hid, value, clock=NOW):
+    return {"hostid": hid, "lastvalue": value, "lastclock": str(clock)}
+
+
 class TestBuildValueMap:
     def test_basic(self):
-        items = [{"hostid": "1", "lastvalue": "42.5"}]
-        result = build_value_map(items)
-        assert result["1"] == 42.5
+        assert build_value_map([_it("1", "42.5")], now=NOW)["1"] == 42.5
 
     def test_transform(self):
-        items = [{"hostid": "1", "lastvalue": "95"}]
-        result = build_value_map(items, lambda v: round(100 - float(v), 1))
+        result = build_value_map([_it("1", "95")], lambda v: round(100 - float(v), 1), now=NOW)
         assert result["1"] == 5.0
 
     def test_skips_invalid(self):
-        items = [{"hostid": "1", "lastvalue": "not_a_number"}]
-        result = build_value_map(items)
-        assert "1" not in result
+        assert "1" not in build_value_map([_it("1", "not_a_number")], now=NOW)
+
+    def test_missing_clock_fails_closed(self):
+        # A caller that did not request lastclock gets nothing, not stale numbers.
+        assert build_value_map([{"hostid": "1", "lastvalue": "42.5"}], now=NOW) == {}
+
+    def test_stale_and_never_collected_are_absent(self):
+        items = [_it("1", "42.5", clock=NOW - 86400), _it("2", "0", clock=0), _it("3", "7")]
+        assert build_value_map(items, now=NOW) == {"3": 7.0}
 
     def test_empty(self):
         assert build_value_map([]) == {}
@@ -74,22 +86,18 @@ class TestBuildValueMap:
 
 class TestBuildMaxMap:
     def test_picks_max(self):
-        items = [
-            {"hostid": "1", "lastvalue": "100"},
-            {"hostid": "1", "lastvalue": "500"},
-            {"hostid": "1", "lastvalue": "200"},
-        ]
-        result = build_max_map(items)
-        assert result["1"] == 500.0
+        items = [_it("1", "100"), _it("1", "500"), _it("1", "200")]
+        assert build_max_map(items, now=NOW)["1"] == 500.0
 
     def test_multiple_hosts(self):
-        items = [
-            {"hostid": "1", "lastvalue": "100"},
-            {"hostid": "2", "lastvalue": "200"},
-        ]
-        result = build_max_map(items)
+        result = build_max_map([_it("1", "100"), _it("2", "200")], now=NOW)
         assert result["1"] == 100.0
         assert result["2"] == 200.0
+
+    def test_a_stale_interface_does_not_win(self):
+        # The busiest interface a day ago is not the busiest one now.
+        items = [_it("1", "900", clock=NOW - 86400), _it("1", "100")]
+        assert build_max_map(items, now=NOW) == {"1": 100.0}
 
 
 class TestParseTime:
