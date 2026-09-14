@@ -9,6 +9,7 @@ from typing import Any
 
 from mcp.server.fastmcp import FastMCP
 
+from zbbx_mcp.budget import response_budget
 from zbbx_mcp.client import ZabbixClient
 from zbbx_mcp.config import load_all_configs, load_global_policy
 from zbbx_mcp.logging import INSTANCE_ID, logged, setup_logging, setup_sentry
@@ -67,7 +68,7 @@ def _compress_response(text: str) -> str:
         return text
 
     compact = os.environ.get("ZABBIX_COMPACT", "").lower() in ("1", "true", "yes")
-    budget = int(os.environ.get("ZABBIX_RESPONSE_BUDGET", "6000"))
+    budget = response_budget()  # the one reader of the setting (ADR 142)
 
     if compact:
         # Strip markdown bold/headers

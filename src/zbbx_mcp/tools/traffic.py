@@ -17,6 +17,13 @@ from zbbx_mcp.anomaly import (
     pick_traffic_interface,
     seasonal_floor,
 )
+from zbbx_mcp.budget import (
+    all_names_unknown_message,
+    effective_cap,
+    missing_hosts_note,
+    no_match_message,
+    parse_host_list,
+)
 from zbbx_mcp.classify import classify_host as _classify_host
 from zbbx_mcp.classify import detect_provider
 from zbbx_mcp.data import (
@@ -307,6 +314,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
             product: str = "",
             tier: str = "",
             country: str = "",
+            hosts: str = "",
             sort_by: str = "traffic",
             max_results: int = 50,
             instance: str = "",
@@ -318,12 +326,17 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 product: Filter by product name (optional)
                 tier: Filter by tier name (optional)
                 country: Filter by country code in hostname (optional)
+                hosts: Comma-separated exact host names. An explicit list is
+                    never cut by max_results, and names Zabbix does not know
+                    are reported, not dropped (optional)
                 sort_by: Sort by 'traffic' (desc), 'bw_per_client', or 'connections' (default: traffic)
                 max_results: Maximum results (default: 50)
                 instance: Zabbix instance name (optional, for multi-instance setups)
             """
             try:
                 client = resolver.resolve(instance)
+                wanted = parse_host_list(hosts)
+                wanted_set = set(wanted)
 
                 hosts = await client.call("host.get", {
                     "output": ["hostid", "host"],
@@ -333,6 +346,35 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 })
                 host_map = {h["hostid"]: h for h in hosts}
                 all_ids = list(host_map.keys())
+
+                # The named set is applied client-side so the canonical fold
+                # below still sees the whole fleet; an empty match is reported
+                # before any traffic is read, naming what exists (ADR 142).
+                missing, missing_note = missing_hosts_note(
+                    wanted, (h.get("host", "") for h in hosts),
+                )
+
+                def _in_scope(h: dict) -> bool:
+                    if wanted_set and h.get("host", "") not in wanted_set:
+                        return False
+                    prod, host_tier = _classify_host(h.get("groups", []))
+                    if not label_matches(prod, product):
+                        return False
+                    if not label_matches(host_tier, tier):
+                        return False
+                    if group:
+                        if not any(g["name"].lower() == group.lower() for g in h.get("groups", [])):
+                            return False
+                    return not (
+                        country
+                        and extract_country(h.get("host", "")).lower() != country.lower()
+                    )
+
+                in_scope = {h["hostid"] for h in hosts if _in_scope(h)}
+                if not in_scope:
+                    if wanted and len(missing) == len(wanted):
+                        return all_names_unknown_message(missing_note)
+                    return missing_note + no_match_message(hosts)
 
                 async def _empty_list():
                     return []
@@ -358,18 +400,9 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 rows = []
                 for hid, traffic in host_traffic.items():
                     h = host_map.get(hid)
-                    if not h:
+                    if not h or hid not in in_scope:
                         continue
                     prod, host_tier = _classify_host(h.get("groups", []))
-                    if not label_matches(prod, product):
-                        continue
-                    if not label_matches(host_tier, tier):
-                        continue
-                    if group:
-                        if not any(g["name"].lower() == group.lower() for g in h.get("groups", [])):
-                            continue
-                    if country and extract_country(h.get("host", "")).lower() != country.lower():
-                        continue
 
                     # None, not 0: a host that carries no connections item has
                     # not reported zero sessions, it has reported nothing. The
@@ -428,10 +461,13 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 else:
                     rows.sort(key=lambda r: -r["traffic"])
 
-                rows = rows[:max_results]
+                rows = rows[:effective_cap(max_results, wanted)]
 
                 if not rows:
-                    return "No traffic data found."
+                    return (
+                        missing_note + f"No traffic data found for the "
+                        f"{len(in_scope)} host(s) matching the filters."
+                    )
 
                 parts = [
                     "| Server | Product | Provider | Traffic | Connections | BW/Client |",
@@ -461,7 +497,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     note = ("\n\n_No connections key configured "
                             "(ZABBIX_CONNECTIONS_KEY), so the Connections and "
                             "BW/Client columns are not measured._")
-                return header + "\n".join(parts) + note
+                return header + missing_note + "\n".join(parts) + note
             except (httpx.HTTPError, ValueError) as e:
                 return f"Error: {e}"
 
