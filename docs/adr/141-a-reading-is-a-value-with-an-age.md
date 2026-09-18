@@ -96,3 +96,8 @@ fixture that means "never collected" still says `0`.
 The window is still one constant. The scheduled-check sites on the allow-list
 are the argument for a second one; adding it is a change to `read_item`, in
 one place, and the guard will show exactly which sites it should reach.
+
+`read_item` treats an absent `lastvalue` as `unparsable`, explicitly, before
+it tries to parse one; an absent clock is checked as absent rather than by
+membership in a tuple. Both are the same behaviour the tests already pinned,
+written so that the type checker can see it.

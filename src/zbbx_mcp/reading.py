@@ -74,7 +74,7 @@ def read_item(item: dict, now: int | None = None) -> Reading:
     - ``live`` — a current reading.
     """
     raw_clock = item.get("lastclock")
-    if raw_clock in (None, ""):
+    if raw_clock is None or raw_clock == "":
         return Reading(None, None, "missing_clock")
     try:
         clock = int(raw_clock)
@@ -85,8 +85,11 @@ def read_item(item: dict, now: int | None = None) -> Reading:
     age = (now if now is not None else int(_time.time())) - clock
     if age > LIVE_VALUE_MAX_AGE_S:
         return Reading(None, age, "stale")
+    raw_value = item.get("lastvalue")
+    if raw_value is None:
+        return Reading(None, age, "unparsable")
     try:
-        value = float(item.get("lastvalue"))
+        value = float(raw_value)
     except (TypeError, ValueError):
         return Reading(None, age, "unparsable")
     return Reading(value, age, "live")
