@@ -702,6 +702,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                         "extras": extras,
                         "new": new_val,
                         "desc": desc,
+                        "ips": ip_count,
                     })
 
                 # Build response
@@ -714,10 +715,9 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 lines.append("| Cluster | Current | Base | +Extras | New | IPs |")
                 lines.append("|---------|---------|------|---------|-----|-----|")
                 for u in sorted(updates, key=lambda x: -x["extras"])[:25]:
-                    ip_count = u["desc"].split()[3]
                     lines.append(
                         f"| {u['host']} | ${u['current']:.2f} | ${u['base']:.2f} | "
-                        f"${u['extras']:.2f} | ${u['new']:.2f} | {ip_count} |"
+                        f"${u['extras']:.2f} | ${u['new']:.2f} | {u['ips']} |"
                     )
                 if len(updates) > 25:
                     lines.append(f"*+{len(updates) - 25} more clusters*")

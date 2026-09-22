@@ -235,8 +235,13 @@ async def physical_traffic_items(
     *,
     direction: str = "in",
     output: tuple[str, ...] = ("itemid", "hostid", "key_", "lastvalue"),
+    physical_only: bool = True,
 ) -> list[dict]:
     """Every physical-NIC traffic item for ``hostids``. The one definition.
+
+    ``physical_only=False`` returns every ``net.if.<direction>[...]`` item
+    instead, for a caller that classifies interfaces itself (the role
+    analysis needs the tunnel NICs the physical filter exists to drop).
 
     Discovery is by item **key**, never by item **name**. Zabbix's stock
     *Linux by Zabbix agent* template names these ``Interface enp3s0: Bits
@@ -266,6 +271,8 @@ async def physical_traffic_items(
         "searchWildcardsEnabled": True,
         "filter": {"status": STATUS_ENABLED},
     })
+    if not physical_only:
+        return list(items or [])
     keep = (is_physical_traffic_in_key if direction == "in"
             else is_physical_traffic_out_key)
     return [it for it in items or [] if keep(it.get("key_", ""))]
