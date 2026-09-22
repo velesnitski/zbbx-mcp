@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.16.68] - 2026-09-23
+
+### Security
+
+- **`anyio` raised to 4.14.2 or later** (ADR 145): the transitive dependency
+  below that version carries CVE-2026-63374 (critical) and CVE-2026-64847.
+  The floor is declared in `pyproject`, not only in the lock, so an install
+  from source cannot resolve back below it. No code change.
+
 ## [1.16.67] - 2026-09-22
 
 ### Fixed

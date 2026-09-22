@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "zbbx-mcp"
-version = "1.16.67"
+version = "1.16.68"
 description = "Zabbix MCP server for Claude Code, GitHub Copilot, Codex CLI, n8n, and any MCP-compatible client"
 readme = "README.md"
 license = "MIT"
@@ -27,6 +27,7 @@ classifiers = [
 keywords = ["zabbix", "mcp", "monitoring", "claude", "copilot", "codex"]
 dependencies = [
     "mcp>=1.28.1,<2.0.0",
+    "anyio>=4.14.2",  # GHSA advisory floor, ADR 145
     "httpx[http2]>=0.27.0",
     "openpyxl>=3.1.0",
     "sentry-sdk>=2.0",
