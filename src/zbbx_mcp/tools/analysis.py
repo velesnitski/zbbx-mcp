@@ -60,8 +60,11 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 hosts = await fetch_enabled_hosts(client, extra_output=["name"])
 
                 hostids = [h["hostid"] for h in hosts]
+                # Tunnel NICs are the endpoint signal, so the physical filter
+                # must stay off here; the loop below sorts interfaces itself.
                 items = await physical_traffic_items(
-                    client, hostids, output=("hostid", "lastvalue", "lastclock", "key_"))
+                    client, hostids, output=("hostid", "lastvalue", "lastclock", "key_"),
+                    physical_only=False)
 
                 # Build per-host traffic maps
                 host_phys: dict[str, float] = {}

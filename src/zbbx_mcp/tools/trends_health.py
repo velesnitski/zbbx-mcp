@@ -129,12 +129,13 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()):
                     "filter": {"key_": KEY_service_PRIMARY, "status": "0"},
                 }) if KEY_service_PRIMARY else _empty()
 
-                (trend_rows, _), service1_items = await asyncio.gather(
+                trend_res, service1_items = await asyncio.gather(
                     trend_rows_task, service1_task,
                     return_exceptions=True,
                 )
-                if isinstance(trend_rows, BaseException):
-                    trend_rows = []
+                # Check before unpacking: a failed fetch is the exception
+                # object itself, not a (rows, host_map) pair.
+                trend_rows = [] if isinstance(trend_res, BaseException) else trend_res[0]
                 service1_items = service1_items if isinstance(service1_items, list) else []
 
                 # Skip stale/unsupported check items so broken monitoring
