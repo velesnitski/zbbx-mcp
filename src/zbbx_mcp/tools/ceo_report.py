@@ -238,7 +238,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     if not cc or tr.metric != "traffic":
                         continue
                     country_avg[cc] = country_avg.get(cc, 0) + tr.avg
-                    country_now[cc] = country_now.get(cc, 0) + tr.current
+                    country_now[cc] = country_now.get(cc, 0) + (tr.current or 0)  # None = not reporting (ADR 140)
                     if tr.daily:
                         ct = country_daily.setdefault(cc, {})
                         for day, val in tr.daily.items():
@@ -795,7 +795,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 for i, (prov, cnt) in enumerate(prov_sorted[:8]):
                     html.append(f'<span style="color:{colors[i % len(colors)]}">&#9632;</span> {prov} ({cnt}) &nbsp; ')
                 html.append('</div>')
-                if top_prov[1] / prov_total > 0.25:
+                if prov_total and top_prov[1] / prov_total > 0.25:
                     html.append(f'<div class="alert alert-yellow"><b>Concentration risk:</b> {top_prov[0]} hosts {top_prov[1]} servers ({top_prov[1]*100//prov_total}%). Consider diversifying.</div>')
                 html.append('</div>')
 
