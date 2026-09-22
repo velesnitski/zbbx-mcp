@@ -9,7 +9,7 @@ Zabbix MCP server — 174 tools across 40+ modules. Python 3.10+, FastMCP framew
 ## Commands
 
 ```bash
-uv run pytest                              # run all tests (~180 tests, ~2s)
+uv run pytest                              # run all tests (~1,600 tests, ~15s)
 uv run pytest tests/test_registration.py   # tool registration only
 uv run pytest tests/test_server.py         # JSON-RPC subprocess test
 uv run pytest -k "test_name"               # single test by name

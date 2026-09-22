@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.16.67] - 2026-09-22
+
+### Fixed
+
+- **`generate_ceo_report`** no longer fails when a traffic item has trend
+  history but no live reading (an ADR 140 site that was never updated raised
+  `TypeError`) or when no enabled host has an address (division by zero).
+  Both surfaced on the first day the module had an end-to-end test (ADR 144).
+
+### Added
+
+- **Wire tests for every report generator** and in-process tests for the
+  fetch layer, the server wrapper, the client and the Excel helpers
+  (ADR 144). 187 tests; line coverage 42 % → 54 % overall, core modules
+  78 % → 94 %, tool modules 35 % → 46 %. What remains uncovered is listed in
+  the ADR rather than assumed.
+
 ## [1.16.66] - 2026-09-14
 
 ### Added
