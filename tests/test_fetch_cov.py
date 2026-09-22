@@ -456,11 +456,14 @@ class TestFetchTrendsBatch:
             ],
             "trend.get": lambda p: [_trend(i, k, 2_000_000) for i in p["itemids"] for k in range(2)],
         })
+        before = int(time.time())
         rows, _ = await fetch_trends_batch(c, ["9001"], ["traffic"], "1d")
+        after = int(time.time())
         p = c.sent("trend.get")
         assert p["itemids"] == ["i-eth1"]
         assert p["limit"] == 24 * 30
-        assert NOW - 86400 - 5 <= p["time_from"] <= NOW - 86400 + 5
+        # Bracketed by clocks read around the call: a slow runner must not fail this.
+        assert before - 86400 <= p["time_from"] <= after - 86400
         assert len(rows) == 1
         assert (rows[0].current, rows[0].avg, rows[0].trend_dir) == (5.0, 2.0, "")
 

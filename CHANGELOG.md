@@ -13,14 +13,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   history but no live reading (an ADR 140 site that was never updated raised
   `TypeError`) or when no enabled host has an address (division by zero).
   Both surfaced on the first day the module had an end-to-end test (ADR 144).
+- **`get_health_assessment`** degraded instead of raising when the trend
+  fetch failed: the gathered result was unpacked before its exception was
+  checked.
+- **`import_cluster_ip_fees`** printed `+` in the address-count column of its
+  plan table instead of the count.
+- **`analyze_server_roles`** could never report `endpoint` or `mixed`: it
+  received physical-interface items only, so the tunnel branch was
+  unreachable. The shared item helper takes `physical_only` (default
+  unchanged for every other caller).
 
 ### Added
 
 - **Wire tests for every report generator** and in-process tests for the
   fetch layer, the server wrapper, the client and the Excel helpers
-  (ADR 144). 187 tests; line coverage 42 % → 54 % overall, core modules
-  78 % → 94 %, tool modules 35 % → 46 %. What remains uncovered is listed in
-  the ADR rather than assumed.
+  (ADR 144), plus wire tests for the cost import and audit, health, analysis,
+  geo-traffic and predictive tools. 267 tests; line coverage 42 % → 67 %
+  overall, core modules 78 % → 94 %, tool modules 35 % → 62 %. What remains
+  uncovered is listed in the ADR rather than assumed.
 
 ## [1.16.66] - 2026-09-14
 

@@ -52,9 +52,17 @@ sweep are the check that the rule held.
 
 ## Consequences
 
-Line coverage moved from 42 % to 54 % overall, the core modules from 78 % to
-94 %, the tool modules from 35 % to 46 %; 187 tests were added. The executive
-report no longer fails on a stale traffic reading or an empty fleet.
+Line coverage moved from 42 % to 67 % overall, the core modules from 78 % to
+94 %, the tool modules from 35 % to 62 %; 267 tests were added. Five defects
+surfaced on the first day their modules had an end-to-end test, none of them
+reachable by a unit test of a pure function: the executive report's optional
+current value and empty-fleet division; the health assessment unpacking a
+gathered result before checking it for an exception, so a failed trend fetch
+raised instead of degrading; a plan table printing a `+` token where an
+address count belonged; and a role analysis whose tunnel branch could never
+run because the shared helper handed it physical interfaces only. The last
+is the pattern ADR 141 describes from the other side — a shared helper whose
+default silently narrowed what one caller was written to see.
 
 What remains uncovered is named rather than assumed. The service-check
 branches of three reports depend on environment variables read when the
