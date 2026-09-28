@@ -435,7 +435,12 @@ class TestFetchTrendsBatch:
         c = RecordingClient({"host.get": [{"hostid": "9001", "host": "srv-aq9001"}], "item.get": []})
         rows, hosts = await fetch_trends_batch(c, ["9001"])
         keys = c.sent("item.get")["filter"]["key_"]
-        assert KEY_CPU_IDLE in keys and KEY_CPU_LOAD in keys and TRAFFIC_IN_KEYS[0] in keys
+        assert KEY_CPU_IDLE in keys and KEY_CPU_LOAD in keys
+        # Traffic is not an exact key any more: it is discovered by NIC-key
+        # prefix through the physical-NIC search (ADR 147), never by list.
+        assert TRAFFIC_IN_KEYS[0] not in keys
+        searches = [p for m, p in c.calls if m == "item.get" and "search" in p]
+        assert [p["search"]["key_"] for p in searches] == ["*net.if.in[*"]
         assert KEY_MEM_AVAIL not in keys
         assert rows == [] and hosts == {"9001": {"hostid": "9001", "host": "srv-aq9001"}}
         assert not any(m == "trend.get" for m, _ in c.calls)

@@ -134,6 +134,74 @@ def _suppress_until_from_hours(suppress_hours: float, now: int) -> int | None:
     return now + int(suppress_hours * 3600)
 
 
+def compound_parent(host: str) -> str | None:
+    """The parent of a ``parent child`` compound host name, else ``None``.
+
+    A VIP sub-host is registered as ``<parent> <label>``: its own triggers
+    (per-address service checks) live on the sub-host, while the agent, CPU
+    and memory triggers live on the parent, which is the physical machine.
+    A caller asking for a sub-host's problems is asking about that machine,
+    so the parent is included and named (ADR 146). Pure.
+    """
+    head, sep, tail = host.strip().partition(" ")
+    if not sep or not tail.strip() or " " in tail.strip():
+        return None
+    return head
+
+
+async def _hostids_for(client, host: str) -> tuple[list[str], str | None]:
+    """Host ids matching ``host`` (exact, then wildcard search), plus the
+    parent's id when ``host`` is a compound sub-host name. Returns
+    ``(ids, parent_name)``; ``parent_name`` is set only when the parent was
+    found and added."""
+    hosts = await client.call("host.get", {
+        "output": ["hostid"],
+        "filter": {"host": [host]},
+    })
+    if not hosts:
+        hosts = await client.call("host.get", {
+            "output": ["hostid"],
+            "search": {"host": host, "name": host},
+            "searchByAny": True, "searchWildcardsEnabled": True,
+        })
+    ids = [h["hostid"] for h in hosts or []]
+    parent = compound_parent(host)
+    parent_added: str | None = None
+    if ids and parent:
+        parents = await client.call("host.get", {
+            "output": ["hostid"], "filter": {"host": [parent]},
+        })
+        for h in parents or []:
+            if h["hostid"] not in ids:
+                ids.append(h["hostid"])
+                parent_added = parent
+    return ids, parent_added
+
+
+async def attach_hosts(client, problems: list[dict]) -> list[dict]:
+    """Resolve each problem's trigger to its host(s) and store the names in
+    ``_host``. ``problem.get`` cannot select hosts itself; one ``trigger.get``
+    over the distinct trigger ids does it for the whole list. A trigger that
+    resolves to nothing leaves ``_host`` unset rather than guessed."""
+    tids = list(dict.fromkeys(p.get("objectid") for p in problems if p.get("objectid")))
+    if not tids:
+        return problems
+    triggers = await client.call("trigger.get", {
+        "triggerids": tids,
+        "output": ["triggerid"],
+        "selectHosts": ["hostid", "host"],
+    })
+    by_trigger = {
+        t["triggerid"]: ", ".join(h.get("host", "") for h in t.get("hosts", []) if h.get("host"))
+        for t in triggers or []
+    }
+    for p in problems:
+        name = by_trigger.get(p.get("objectid"), "")
+        if name:
+            p["_host"] = name
+    return problems
+
+
 def _format_event_list(events: list) -> str:
     """Format event.get results with OK/PROBLEM state labels."""
     if not events:
@@ -144,8 +212,9 @@ def _format_event_list(events: list) -> str:
         state = _EVENT_VALUE_LABEL.get(e.get("value", "1"), "?")
         ack = " [ACK]" if e.get("acknowledged") == "1" else ""
         clock = _ts(e.get("clock", "0"))
+        where = f"`{e['_host']}` · " if e.get("_host") else ""
         lines.append(
-            f"- **[{severity}]** {e.get('name', 'Unknown')} [{state}]{ack} — {clock} "
+            f"- **[{severity}]** {where}{e.get('name', 'Unknown')} [{state}]{ack} — {clock} "
             f"(eventid: {e.get('eventid', '?')})"
         )
     return "\n".join(lines)
@@ -198,6 +267,7 @@ async def _resolved_events(
     """Return problem+recovery events from event.get (includes OK transitions)."""
     params = {
         "output": ["eventid", "name", "severity", "clock", "value", "acknowledged"],
+        "selectHosts": ["hostid", "host"],
         "source": 0, "object": 0,
         "sortfield": ["clock"],
         "sortorder": ["DESC"],
@@ -226,12 +296,10 @@ async def _resolved_events(
         params["hostids"] = [h["hostid"] for h in host_result]
         params["groupids"] = [g["groupid"] for g in group_result]
     elif host:
-        hosts = await client.call("host.get", {
-            "output": ["hostid"], "filter": {"host": [host]},
-        })
-        if not hosts:
+        hids, _parent = await _hostids_for(client, host)
+        if not hids:
             return f"Host '{host}' not found."
-        params["hostids"] = [h["hostid"] for h in hosts]
+        params["hostids"] = hids
     elif group:
         gids = await resolve_group_ids(client, group)
         if gids is None:
@@ -239,6 +307,10 @@ async def _resolved_events(
         params["groupids"] = gids
 
     data = await client.call("event.get", params)
+    for e in data or []:
+        names = ", ".join(h.get("host", "") for h in e.get("hosts", []) or [] if h.get("host"))
+        if names:
+            e["_host"] = names
     result = _format_event_list(data)
     count = len(data)
     if count == 0:
@@ -313,7 +385,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     )
 
                 params = {
-                    "output": ["eventid", "name", "severity", "clock", "acknowledged", "suppressed"],
+                    "output": ["eventid", "objectid", "name", "severity", "clock", "acknowledged", "suppressed"],
                     "sortfield": ["eventid"],
                     "sortorder": ["DESC"],
                     "limit": max_results,
@@ -338,31 +410,23 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     params["evaltype"] = 0
 
                 # Resolve host and group filters in parallel when both are specified
+                parent_added: str | None = None
                 if host and group:
-                    host_result, group_result = await asyncio.gather(
-                        client.call("host.get", {"output": ["hostid"], "filter": {"host": [host]}}),
+                    (hids, parent_added), group_result = await asyncio.gather(
+                        _hostids_for(client, host),
                         client.call("hostgroup.get", {"output": ["groupid"], "filter": {"name": [group]}}),
                     )
-                    if not host_result:
+                    if not hids:
                         return f"Host '{host}' not found."
                     if not group_result:
                         return f"Host group '{group}' not found."
-                    params["hostids"] = [h["hostid"] for h in host_result]
+                    params["hostids"] = hids
                     params["groupids"] = [g["groupid"] for g in group_result]
                 elif host:
-                    hosts = await client.call("host.get", {
-                        "output": ["hostid"],
-                        "filter": {"host": [host]},
-                    })
-                    if not hosts:
-                        hosts = await client.call("host.get", {
-                            "output": ["hostid"],
-                            "search": {"host": host, "name": host},
-                            "searchByAny": True, "searchWildcardsEnabled": True,
-                        })
-                    if not hosts:
+                    hids, parent_added = await _hostids_for(client, host)
+                    if not hids:
                         return f"Host '{host}' not found."
-                    params["hostids"] = [h["hostid"] for h in hosts]
+                    params["hostids"] = hids
                 elif group:
                     gids = await resolve_group_ids(client, group)
                     if gids is None:
@@ -371,14 +435,19 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
 
                 data = await client.call("problem.get", params)
                 data = filter_suppressed(data, include_suppressed)
+                data = await attach_hosts(client, data)
 
                 result = format_problem_list(data)
                 count = len(data)
                 if count == 0:
+                    if parent_added:
+                        return f"No problems found on `{host}` or its parent `{parent_added}`."
                     return result
                 header = f"**Found: {count} problems**"
                 if count >= max_results:
                     header += f" (showing first {max_results}, more may exist)"
+                if parent_added:
+                    header += f"\n_`{host}` is a sub-host; problems of its parent `{parent_added}` are included and named._"
                 return f"{header}\n\n{result}"
             except (httpx.HTTPError, ValueError) as e:
                 return f"Error querying Zabbix: {e}"

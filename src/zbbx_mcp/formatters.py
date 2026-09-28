@@ -161,6 +161,10 @@ def format_host_list(hosts: list) -> str:
 
 
 def format_problem_list(problems: list) -> str:
+    """One line per problem. A problem that carries ``_host`` (the host the
+    trigger belongs to, resolved by the caller) is prefixed with it — a list
+    of twelve problems across a group is unreadable without the host, and a
+    host filter cannot be checked against it (ADR 146)."""
     if not problems:
         return "No problems found."
     lines = []
@@ -168,8 +172,10 @@ def format_problem_list(problems: list) -> str:
         severity = format_severity(p.get("severity", "0"))
         ack = " [ACK]" if p.get("acknowledged") == "1" else ""
         clock = _ts(p.get("clock", "0"))
+        host = p.get("_host")
+        where = f"`{host}` · " if host else ""
         lines.append(
-            f"- **[{severity}]** {p.get('name', 'Unknown')}{ack} — {clock} "
+            f"- **[{severity}]** {where}{p.get('name', 'Unknown')}{ack} — {clock} "
             f"(eventid: {p.get('eventid', '?')})"
         )
     return "\n".join(lines)

@@ -145,7 +145,10 @@ class TestWire:
         assert abs(trend["time_from"] - (NOW - 7 * 86400)) < 120
         assert trend["limit"] == 7 * 24 * 30
         discovery = next(p for m, p in c.calls if m == "item.get" and "itemid" in p.get("output", []))
-        assert KEY_CPU in discovery["filter"]["key_"] and "net.if.in[eth0]" in discovery["filter"]["key_"]
+        assert KEY_CPU in discovery["filter"]["key_"]
+        # Traffic items are found by NIC-key prefix, not by an exact key list (ADR 147).
+        traffic_search = next(p for m, p in c.calls if m == "item.get" and "search" in p)
+        assert traffic_search["search"]["key_"] == "*net.if.in[*"
         assert discovery["filter"]["status"] == "0"
 
 

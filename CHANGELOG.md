@@ -5,6 +5,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.16.69] - 2026-09-28
+
+### Fixed
+
+- **Trend tools no longer report a host on the stock agent template as
+  having no traffic** (ADR 147). The batch trend fetch behind
+  `get_trends_batch`, `compare_servers`, `get_server_dashboard`, the
+  executive, HTML and service reports and the regional trend tools resolved
+  traffic through an exact list of unquoted keys; quoted interface keys
+  never matched. Traffic is now discovered by NIC-key prefix through the
+  same physical-interface definition every other traffic reader uses.
+
+### Added
+
+- **`get_problems` names the host on every line** (ADR 146), for the live
+  listing and the resolved view alike, so a group listing can be read and a
+  host filter can be checked against it. A query for a `parent label`
+  sub-host includes its parent machine's problems and states that it did.
+
 ## [1.16.68] - 2026-09-23
 
 ### Security

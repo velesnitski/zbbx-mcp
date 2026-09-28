@@ -195,6 +195,8 @@ PHYSICAL_IFACE_PREFIXES = ("eth", "eno", "enp", "ens", "bond", "ppp")
 # checks for exactly that mistake.
 TRAFFIC_IN_KEY_SEARCH = "*net.if.in[*"
 TRAFFIC_OUT_KEY_SEARCH = "*net.if.out[*"
+# Trend metrics that are found by NIC-key prefix rather than by exact key.
+_TRAFFIC_DIRECTION = {"traffic": "in", "traffic_out": "out"}
 
 
 def is_physical_traffic_in_key(key: str) -> bool:
@@ -836,44 +838,82 @@ async def fetch_trends_batch(
     if metrics is None:
         metrics = ["cpu", "traffic", "load"]
 
-    # Build key list from metric names
+    # Build key list from metric names. Traffic is the exception: its items
+    # are discovered by key prefix through the one physical-NIC definition
+    # (ADR 105/109), never by an exact key list — the stock agent template
+    # writes ``net.if.in["enp3s0"]``, quoted, and an exact list of unquoted
+    # keys reported every such host as having no NIC at all (ADR 147).
+    traffic_metrics = [m for m in metrics if m in _TRAFFIC_DIRECTION]
     all_keys: list[str] = []
     metric_key_map: dict[str, str] = {}  # item_key -> metric_name
     for m in metrics:
+        if m in _TRAFFIC_DIRECTION:
+            continue
         keys = METRIC_KEYS.get(m, [])
         all_keys.extend(keys)
         for k in keys:
             metric_key_map[k] = m
 
-    if not all_keys:
+    if not all_keys and not traffic_metrics:
         return [], {}
 
+    item_output = ("itemid", "hostid", "key_", "lastvalue", "lastclock", "value_type")
+
+    async def _exact_items() -> list[dict]:
+        if not all_keys:
+            return []
+        got = await client.call("item.get", {
+            "hostids": hostids,
+            "output": list(item_output),
+            "filter": {"key_": all_keys, "status": STATUS_ENABLED},
+        })
+        return list(got or [])
+
     # Get host details + items in parallel
-    host_data, items = await asyncio.gather(
+    host_data, exact_items, *traffic_lists = await asyncio.gather(
         client.call("host.get", {
             "hostids": hostids,
             "output": ["hostid", "host"],
         }),
-        client.call("item.get", {
-            "hostids": hostids,
-            "output": ["itemid", "hostid", "key_", "lastvalue", "lastclock", "value_type"],
-            "filter": {"key_": all_keys, "status": STATUS_ENABLED},
-        }),
+        _exact_items(),
+        *(physical_traffic_items(client, hostids, direction=_TRAFFIC_DIRECTION[m],
+                                 output=item_output) for m in traffic_metrics),
     )
 
     host_map = {h["hostid"]: h for h in host_data}
+
+    # One list, each item seen once, tagged with the metric it serves.
+    items: list[dict] = []
+    seen: set[str] = set()
+    for lst in (exact_items or [], *traffic_lists):
+        for item in lst or []:
+            iid = item.get("itemid")
+            if iid in seen:
+                continue
+            seen.add(iid)
+            items.append(item)
+
+    def _metric_for(key: str) -> str | None:
+        name = metric_key_map.get(key)
+        if name:
+            return name
+        if "traffic" in traffic_metrics and is_physical_traffic_in_key(key):
+            return "traffic"
+        if "traffic_out" in traffic_metrics and is_physical_traffic_out_key(key):
+            return "traffic_out"
+        return None
 
     # Pick best item per host per metric (max lastvalue for traffic, first for others)
     host_metric_item: dict[str, dict[str, dict]] = {}  # hostid -> metric -> item
     for item in items:
         hid = item["hostid"]
-        metric_name = metric_key_map.get(item["key_"])
+        metric_name = _metric_for(item["key_"])
         if not metric_name:
             continue
         existing = host_metric_item.setdefault(hid, {}).get(metric_name)
         if existing is None:
             host_metric_item[hid][metric_name] = item
-        elif metric_name == "traffic":
+        elif metric_name in _TRAFFIC_DIRECTION:
             try:
                 if float(item.get("lastvalue", "0")) > float(existing.get("lastvalue", "0")):
                     host_metric_item[hid][metric_name] = item
