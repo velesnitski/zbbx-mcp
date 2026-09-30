@@ -134,6 +134,52 @@ def _suppress_until_from_hours(suppress_hours: float, now: int) -> int | None:
     return now + int(suppress_hours * 3600)
 
 
+_UNIT_S = {"s": 1, "m": 60, "h": 3600, "d": 86400, "w": 604800}
+
+
+def retention_seconds(spec) -> int | None:
+    """Seconds in a Zabbix housekeeping period such as ``365d`` or ``2w``.
+    ``None`` when the value cannot be read — an unreadable period must not
+    become "kept forever". Pure."""
+    if spec is None:
+        return None
+    text = str(spec).strip().lower()
+    if not text:
+        return None
+    unit = text[-1]
+    if unit.isdigit():
+        num, unit = text, "s"
+    else:
+        num = text[:-1]
+    if unit not in _UNIT_S or not num.isdigit():
+        return None
+    return int(num) * _UNIT_S[unit]
+
+
+async def event_retention_note(client, time_from: int | None, now: int | None = None) -> str:
+    """One line when ``time_from`` reaches back past the housekeeper's trigger
+    event retention, so a short list is read as "history was deleted", not as
+    "nothing happened" (ADR 148). Empty when the window is inside retention,
+    when housekeeping is off, or when the setting cannot be read."""
+    if time_from is None:
+        return ""
+    try:
+        hk = await client.call("housekeeping.get", {"output": ["hk_events_mode", "hk_events_trigger"]})
+    except (httpx.HTTPError, ValueError, TypeError):
+        return ""
+    if not isinstance(hk, dict) or str(hk.get("hk_events_mode", "1")) != "1":
+        return ""
+    keep = retention_seconds(hk.get("hk_events_trigger"))
+    if keep is None:
+        return ""
+    horizon = (now if now is not None else int(time.time())) - keep
+    if time_from >= horizon:
+        return ""
+    return (f"_Event history is kept for {hk.get('hk_events_trigger')}; the window starts "
+            f"before {_ts(str(horizon))}, so anything earlier has been deleted by the housekeeper "
+            f"and is absent here, not resolved._")
+
+
 def compound_parent(host: str) -> str | None:
     """The parent of a ``parent child`` compound host name, else ``None``.
 
@@ -306,7 +352,7 @@ async def _resolved_events(
             return f"Host group '{group}' not found."
         params["groupids"] = gids
 
-    data = await client.call("event.get", params)
+    data, note = await asyncio.gather(client.call("event.get", params), event_retention_note(client, tf))
     for e in data or []:
         names = ", ".join(h.get("host", "") for h in e.get("hosts", []) or [] if h.get("host"))
         if names:
@@ -314,10 +360,12 @@ async def _resolved_events(
     result = _format_event_list(data)
     count = len(data)
     if count == 0:
-        return result
+        return f"{result}\n\n{note}" if note else result
     header = f"**Found: {count} events**"
     if count >= max_results:
         header += f" (showing first {max_results}, more may exist)"
+    if note:
+        header += f"\n{note}"
     return f"{header}\n\n{result}"
 
 

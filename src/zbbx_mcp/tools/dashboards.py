@@ -1,5 +1,6 @@
 import httpx
 
+from zbbx_mcp.budget import render_budget
 from zbbx_mcp.resolver import InstanceResolver
 
 WIDGET_TYPES = {
@@ -113,6 +114,27 @@ async def hosts_behind_graphs(client, graph_ids) -> dict:
     }
 
 
+
+def fit_lines(lines: list[str], used: int, budget: int) -> list[str]:
+    """Keep as many ``lines`` as fit in ``budget`` after ``used`` characters,
+    and close with one line naming how many were left out. A cut the tool
+    makes is a fact it can state (ADR 142); ``budget`` 0 means unlimited. Pure."""
+    if budget <= 0 or not lines:
+        return list(lines)
+    closing = "- … and {n} more host(s) not listed here — `export_dashboard` writes the full list."
+    room = budget - used - len(closing) - 2
+    kept: list[str] = []
+    size = 0
+    for ln in lines:
+        if size + len(ln) + 1 > room:
+            break
+        kept.append(ln)
+        size += len(ln) + 1
+    if len(kept) == len(lines):
+        return kept
+    kept.append(closing.format(n=len(lines) - len(kept)))
+    return kept
+
 def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> None:
 
     if "get_dashboards" not in skip:
@@ -214,19 +236,12 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     f"**Pages:** {len(d.get('pages', []))}",
                 ]
 
-                if host_ids:
-                    hosts = await client.call("host.get", {
-                        "hostids": list(host_ids),
-                        "output": ["hostid", "host", "name", "status"],
-                        "selectGroups": ["name"],
-                        "sortfield": "host",
-                    })
-                    parts.append("")
-                    parts.append(f"## Referenced Hosts ({len(hosts)})")
-                    for h in hosts:
-                        status = "Enabled" if h.get("status") == "0" else "Disabled"
-                        groups = ", ".join(g["name"] for g in h.get("groups", []))
-                        parts.append(f"- **{h.get('host', '?')}** [{status}] ({groups})")
+                # Pages first: they are what a dashboard call is for. The
+                # host list can be long and is trimmed to the response budget
+                # with a count; the export tool writes it in full (ADR 148).
+                parts.append("")
+                parts.append("## Pages")
+                parts.extend(page_parts)
 
                 if group_ids:
                     groups = await client.call("hostgroup.get", {
@@ -238,9 +253,21 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     for g in groups:
                         parts.append(f"- **{g.get('name', '?')}** (id: {g.get('groupid', '?')})")
 
-                parts.append("")
-                parts.append("## Pages")
-                parts.extend(page_parts)
+                if host_ids:
+                    hosts = await client.call("host.get", {
+                        "hostids": list(host_ids),
+                        "output": ["hostid", "host", "name", "status"],
+                        "selectGroups": ["name"],
+                        "sortfield": "host",
+                    })
+                    parts.append("")
+                    parts.append(f"## Referenced Hosts ({len(hosts)})")
+                    lines = []
+                    for h in hosts:
+                        status = "Enabled" if h.get("status") == "0" else "Disabled"
+                        groups = ", ".join(g["name"] for g in h.get("groups", []))
+                        lines.append(f"- **{h.get('host', '?')}** [{status}] ({groups})")
+                    parts.extend(fit_lines(lines, len("\n".join(parts)), render_budget()))
 
                 if item_ids:
                     parts.append("")

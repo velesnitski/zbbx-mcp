@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import ipaddress
 import json
+import re
 
 import httpx
 
@@ -33,6 +34,27 @@ def _iface_from_key(key: str) -> str:
         return key.split("[")[1].rstrip("]")
     return ""
 
+
+
+_IP_SEP = re.compile(r"[\s,;]+")
+
+
+def split_ip_list(text: str) -> list[str]:
+    """Tokens of a pasted address list, whatever separated them. Pure."""
+    return [t for t in _IP_SEP.split(text or "") if t]
+
+
+def looks_like_csv_header(first_line: str) -> bool:
+    """A first line with commas and not a single parsable address in it. Pure."""
+    if "," not in first_line:
+        return False
+    for tok in split_ip_list(first_line):
+        try:
+            ipaddress.ip_address(tok)
+            return False
+        except ValueError:
+            continue
+    return True
 
 def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> None:
 
@@ -360,14 +382,14 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                         except (json.JSONDecodeError, TypeError):
                             pass
                 else:
-                    for part in input_data.replace("\n", ",").split(","):
-                        ip = part.strip()
-                        if ip:
-                            try:
-                                ipaddress.ip_address(ip)
-                                ips.add(ip)
-                            except ValueError:
-                                pass
+                    # Any separator a person would paste: newline, comma,
+                    # semicolon, space or tab (ADR 148).
+                    for part in split_ip_list(input_data):
+                        try:
+                            ipaddress.ip_address(part)
+                            ips.add(part)
+                        except ValueError:
+                            pass
 
                 if not ips:
                     return "No valid IPs found in input."
@@ -464,8 +486,10 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                                     "price": float(item.get("price_monthly") or item.get("price") or 0),
                                     "name": str(item.get("name") or item.get("billing_name") or ""),
                                 })
-                elif "," in stripped.split("\n")[0] and stripped.split("\n")[0].count(".") != 3:
-                    # CSV header detected
+                elif looks_like_csv_header(stripped.split("\n")[0]):
+                    # CSV header detected: a first line with commas and no
+                    # address in it. Counting dots misread "a.b.c.d, e.f.g.h"
+                    # as a header and returned nothing (ADR 148).
                     rdr = _csv.DictReader(stripped.splitlines())
                     for row in rdr:
                         ip_val = (row.get("ip") or row.get("IP") or "").strip()
@@ -477,11 +501,9 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                             name = (row.get("billing_name") or row.get("name") or "").strip()
                             ips_with_meta.append({"ip": ip_val, "price": price, "name": name})
                 else:
-                    # Plain comma/newline list
-                    for part in stripped.replace("\n", ",").split(","):
-                        ip = part.strip()
-                        if ip:
-                            ips_with_meta.append({"ip": ip, "price": 0, "name": ""})
+                    # Plain list, any separator (ADR 148)
+                    for ip in split_ip_list(stripped):
+                        ips_with_meta.append({"ip": ip, "price": 0, "name": ""})
             except (json.JSONDecodeError, OSError, ValueError) as e:
                 return f"Failed to parse input: {e}"
 

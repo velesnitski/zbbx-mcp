@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.16.70] - 2026-09-30
+
+### Fixed
+
+- **`classify_external_ips` and `audit_external_ips`** accept a list
+  separated by spaces, tabs, commas, semicolons or newlines; a first line
+  that holds addresses is no longer taken for a CSV header (ADR 148).
+- **`get_dashboard_detail`** prints the pages before the host list and trims
+  the host list to the response budget with a count, so a large dashboard
+  no longer loses its pages to the truncation marker (ADR 148).
+- **`get_problems(include_resolved=True)`** states the housekeeper's event
+  retention when the requested window reaches past it, so a short list over
+  a long window reads as deleted history rather than as a quiet host
+  (ADR 148).
+
 ## [1.16.69] - 2026-09-28
 
 ### Fixed
