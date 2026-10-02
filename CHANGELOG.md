@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.16.71] - 2026-10-02
+
+### Security
+
+- **Floors for two transitive dependencies** (ADR 149): the JSON web token
+  library at 2.15.1 and the HTTP library at 2.8.0 close fifteen published
+  advisories; one advisory on the token library has no fixed release yet and
+  stays open. Declared in `pyproject`, not only in the lock. No code change.
+
 ## [1.16.70] - 2026-09-30
 
 ### Fixed
