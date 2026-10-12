@@ -669,8 +669,9 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     gids = await resolve_group_ids(client, group)
                     if gids is None:
                         return f"Host group '{group}' not found."
-                    gid_set = set(gids)
-                    hosts = [h for h in hosts if any(g.get("groupid") in gid_set for g in h.get("groups", []))]
+                    # fetch_enabled_hosts selects groups by name only, so the
+                    # resolved ids cannot be matched here — match the name.
+                    hosts = [h for h in hosts if any(g.get("name") == group for g in h.get("groups", []))]
 
                 pre_country = hosts
                 if cc_filter:
