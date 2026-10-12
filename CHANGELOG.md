@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.16.73] - 2026-10-12
+
+### Fixed
+
+- **`get_hostgroups(query=…)`** matches part of a group name; a bare term
+  was sent as an exact match and `app_` found nothing (ADR 151). Found by the
+  first end-to-end run against a real server.
+- **`get_hostgroups(include_hosts=True)`** lists the host names, not only a
+  count.
+
 ## [1.16.72] - 2026-10-12
 
 ### Fixed

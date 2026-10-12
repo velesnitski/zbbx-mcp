@@ -13,6 +13,18 @@ _RELATIVE_RE = re.compile(r"^\s*(\d+)\s*([smhdw])\s*$", re.IGNORECASE)
 _RELATIVE_UNITS = {"s": 1, "m": 60, "h": 3600, "d": 86400, "w": 604800}
 
 
+def contains_pattern(term: str) -> str:
+    """A caller's search term as a substring pattern for Zabbix.
+
+    With ``searchWildcardsEnabled`` a bare term is an EXACT match, so
+    ``app_`` finds nothing and ``app_free`` finds only itself (ADR 094,
+    ADR 151). A term the caller already wrote with ``*`` is used as given.
+    Pure.
+    """
+    t = (term or "").strip()
+    return t if "*" in t else f"*{t}*"
+
+
 def parse_time(value: str | int | float, now: int | None = None) -> int:
     """Parse a time input into a Unix epoch timestamp (seconds).
 

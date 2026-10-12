@@ -2,6 +2,7 @@ import httpx
 
 from zbbx_mcp.formatters import format_hostgroup_list
 from zbbx_mcp.resolver import InstanceResolver
+from zbbx_mcp.utils import contains_pattern
 
 
 def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> None:
@@ -24,7 +25,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     "sortfield": "name",
                 }
                 if query:
-                    params["search"] = {"name": query}
+                    params["search"] = {"name": contains_pattern(query)}
                     params["searchWildcardsEnabled"] = True
                 if include_hosts:
                     params["selectHosts"] = ["hostid", "host", "name"]

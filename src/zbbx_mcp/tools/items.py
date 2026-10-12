@@ -5,7 +5,7 @@ import httpx
 
 from zbbx_mcp.formatters import _ts, cell, format_value
 from zbbx_mcp.resolver import InstanceResolver
-from zbbx_mcp.utils import parse_time, resolve_group_ids
+from zbbx_mcp.utils import contains_pattern, parse_time, resolve_group_ids
 
 _DELAY_UNITS = {"s": 1, "m": 60, "h": 3600, "d": 86400}
 _DELAY_RE = re.compile(r"^\s*(\d+)\s*([smhd]?)\s*$", re.IGNORECASE)
@@ -235,7 +235,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     "filter": {"status": "0"},  # enabled items only
                 }
                 if search:
-                    q = search if "*" in search else f"*{search}*"
+                    q = contains_pattern(search)
                     params["search"] = {"name": q, "key_": q}
                     params["searchWildcardsEnabled"] = True
                     params["searchByAny"] = True

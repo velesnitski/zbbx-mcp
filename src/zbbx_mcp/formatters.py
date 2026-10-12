@@ -287,4 +287,11 @@ def format_hostgroup_list(groups: list) -> str:
         if "hosts" in g:
             host_count = f" ({len(g['hosts'])} hosts)"
         lines.append(f"- **{g.get('name', '?')}** (groupid: {g.get('groupid', '?')}){host_count}")
+        # A caller who asked for the hosts wants their names, not a count
+        # (ADR 151). Capped so a large group stays inside the budget.
+        names = sorted(h.get("host", "?") for h in g.get("hosts", []) or [])
+        if names:
+            shown = ", ".join(names[:25])
+            more = f", … +{len(names) - 25} more" if len(names) > 25 else ""
+            lines.append(f"  {shown}{more}")
     return "\n".join(lines)
