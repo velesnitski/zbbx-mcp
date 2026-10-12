@@ -1,0 +1,70 @@
+name: Integration
+
+# End-to-end layer: a throwaway Zabbix 7.0 LTS stack in Docker, seeded with a
+# synthetic fleet, driven through the real MCP over stdio. Catches what the
+# recorded-fake wire tests cannot: parameters the live API rejects (-32602).
+# No secrets: the only credentials are the official images' public defaults,
+# used against containers that live and die inside this job.
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "17 3 * * *"
+  push:
+    branches: [dev]
+    paths:
+      - "src/**"
+      - "tests/integration/**"
+      - ".github/workflows/integration.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: integration-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      COMPOSE_FILE: tests/integration/docker-compose.yml
+      ZBBX_IT_URL: http://localhost:8080
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.10.9"
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: uv sync --extra test
+
+      - name: Start Zabbix stack
+        run: docker compose up -d
+
+      - name: Seed synthetic fleet
+        run: |
+          echo "ZBBX_IT_STATE=$RUNNER_TEMP/zbbx-it-seed.json" >> "$GITHUB_ENV"
+          uv run python tests/integration/seed.py \
+            --wait 420 \
+            --state "$RUNNER_TEMP/zbbx-it-seed.json" \
+            --trends-sql "$RUNNER_TEMP/trends.sql"
+
+      - name: Load trend baseline
+        run: >
+          docker compose exec -T postgres
+          psql -v ON_ERROR_STOP=1 -q -U zabbix -d zabbix -f - < "$RUNNER_TEMP/trends.sql"
+
+      - name: Run integration tests
+        run: uv run pytest -m integration -q tests/integration
+
+      - name: Container logs on failure
+        if: failure()
+        run: docker compose logs --no-color --tail 200
+
+      - name: Tear down
+        if: always()
+        run: docker compose down -v
