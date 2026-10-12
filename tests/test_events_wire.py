@@ -293,9 +293,9 @@ class TestErrorRate:
 class TestIncidentReport:
     def test_correlated_and_top_errors(self):
         ev = _rate_events() + [
-            _pe(f"z{i}", NOW - 1000 - i * 60, f"tz{i}", "Ping loss", f"srv-pn{9000 + i}", "5")
+            _pe(f"z{i}", NOW - 1000 - i * 60, f"trg{i}", "Ping loss", f"srv-pn{9000 + i}", "5")
             for i in range(5)
-        ] + [_pe("zz", NOW - 30000, "tz9", "Ping loss", "srv-pn9009", "5")]  # breaks cluster
+        ] + [_pe("zz", NOW - 30000, "trg9", "Ping loss", "srv-pn9009", "5")]  # breaks cluster
         c = _client({"event.get": ev, "trigger.get": TRIG_HOSTS})
         out = run_tool(events, "get_incident_report", c, hours=24)
         assert out.startswith("**Incidents (24h): 16 events, 12 servers**")
