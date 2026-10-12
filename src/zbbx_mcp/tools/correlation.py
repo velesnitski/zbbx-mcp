@@ -464,7 +464,10 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                                 "clock": int(p.get("clock", 0)),
                                 "hostid": canonical_hid,
                                 "host": host_label,
-                                "name": normalize_problem_name(raw_name, host_label) or raw_name,
+                                # Strip the *child's* own name: it covers the
+                                # parent form too, whereas the parent label
+                                # leaves a sub-host's suffix in the name.
+                                "name": normalize_problem_name(raw_name, hm.get("host", "")) or raw_name,
                                 "severity": int(p.get("severity", 0)),
                                 "key": key,
                             })

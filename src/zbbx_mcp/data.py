@@ -490,7 +490,10 @@ def build_max_map(items: list[dict], now: int | None = None) -> dict[str, float]
     for i in items:
         v = read_item(i, now).value
         hid = i.get("hostid")
-        if v is not None and hid and v > m.get(hid, 0):
+        # A live zero is a reading, not an absence: comparing against a
+        # default of 0 dropped idle hosts from the map, so they read as
+        # "never reported" (ADR 137/141).
+        if v is not None and hid and (hid not in m or v > m[hid]):
             m[hid] = v
     return m
 
