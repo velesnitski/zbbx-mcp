@@ -37,7 +37,11 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-test = ["pytest>=9.0.3,<10", "pytest-asyncio>=1,<2", "pytest-cov>=7,<8", "pygments>=2.20.0"]
+test = [
+    "pytest>=9.0.3,<10", "pytest-asyncio>=1,<2", "pytest-cov>=7,<8", "pygments>=2.20.0",
+    "hypothesis>=6.100,<7",  # property tests (tests/test_properties.py)
+    "mutmut>=3.8,<4",  # source_paths/only_mutate config; scripts/mutation.sh
+]
 # Pinned to match .github/workflows/test.yml exactly — a floating local
 # version lints against different rules than CI (ADR 099).
 lint = ["ruff==0.16.0"]
@@ -67,6 +71,49 @@ exclude_lines = [
     "raise NotImplementedError",
     "if __name__ == .__main__.:",
 ]
+
+[tool.mutmut]
+# Mutation testing of the pure core only (scripts/mutation.sh). The whole
+# package is copied into mutants/ so it imports; only these files mutate.
+source_paths = ["src/"]
+only_mutate = [
+    "src/zbbx_mcp/reading.py",
+    "src/zbbx_mcp/budget.py",
+    "src/zbbx_mcp/data.py",
+    "src/zbbx_mcp/formatters.py",
+    "src/zbbx_mcp/app_map.py",
+    "src/zbbx_mcp/classify.py",
+]
+# Fast behavioural tests that reach the core. Source-scanning guards
+# (test_guards, test_fixture_data_guard, the hostname guard) are left out on
+# purpose: they read the mutated files as text and would "kill" every mutant
+# for the wrong reason.
+pytest_add_cli_args_test_selection = [
+    "tests/test_properties.py",
+    "tests/test_mutation_core.py",
+    "tests/test_live_values.py",
+    "tests/test_host_detail.py",
+    "tests/test_shaping_directions.py",
+    "tests/test_utils.py",
+    "tests/test_output_budget.py",
+    "tests/test_formatters.py",
+    "tests/test_app_map.py",
+    "tests/test_app_view.py",
+    "tests/test_audit_constants.py",
+    "tests/test_canonical_folds.py",
+    "tests/test_classify_products.py",
+    "tests/test_geo_country.py",
+    "tests/test_correlation_floods.py",
+    "tests/test_test_hosts.py",
+    "tests/test_traffic_totals.py",
+    "tests/test_traffic_aggregation.py",
+    "tests/test_fetch_cov.py",
+    "tests/test_provider_override.py",
+    "tests/test_datacenter_override.py",
+    "tests/test_template_fallback.py",
+    "tests/test_coverage_notes.py",
+]
+pytest_add_cli_args = ["-q", "-p", "no:cacheprovider"]
 
 [tool.mypy]
 python_version = "3.10"
