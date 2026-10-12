@@ -12,6 +12,7 @@ import httpx
 
 from zbbx_mcp.classify import detect_provider
 from zbbx_mcp.resolver import InstanceResolver
+from zbbx_mcp.utils import safe_output_path
 
 
 def _probe_domain(domain: str) -> dict:
@@ -231,10 +232,14 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 ]
 
                 if format == "csv":
-                    import os
-                    output_dir = os.path.expanduser("~/Downloads")
+                    # Confined like every other writer (ADR 076): the old
+                    # fixed path skipped the root check and failed with a
+                    # traceback when the folder did not exist (ADR 150).
                     date_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-                    filepath = os.path.join(output_dir, f"domains-{date_str}.csv")
+                    try:
+                        filepath = safe_output_path("~/Downloads", f"domains-{date_str}.csv")
+                    except (ValueError, OSError) as e:
+                        return f"Cannot write the CSV: {e}"
                     with open(filepath, "w") as f:
                         f.write(",".join(_CSV_HEADERS) + "\n")
                         for r in shown:
