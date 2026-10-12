@@ -81,4 +81,4 @@ jobs:
         # well covered and async tool wrappers largely untested. Raise
         # as wrapper coverage improves; gate prevents silent regression
         # below the current floor.
-        run: pytest -v --cov=zbbx_mcp --cov-report=term --cov-fail-under=15
+        run: pytest -v --cov=zbbx_mcp --cov-report=term --cov-branch --cov-fail-under=85

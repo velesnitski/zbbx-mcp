@@ -5,6 +5,27 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.16.72] - 2026-10-12
+
+### Fixed
+
+- **`search_hosts_by_location(group=…)`** matched nothing: it compared group
+  ids against a fetch that carried only names.
+- **Region "ALL"** no longer drops countries that are not listed in a named
+  region.
+- **A live reading of exactly zero** is kept in the value maps, so idle hosts
+  appear in traffic views and the zero-traffic check can fire.
+- **`get_outage_clusters`** names a sub-host's problems after the sub-host.
+- **`get_domain_status(format="csv")`** writes through the shared output-path
+  confinement and reports a refusal instead of raising.
+
+### Added
+
+- Wire tests for every tool module, a survival sweep over all registered
+  tools, property tests and mutation testing on the core, and a nightly
+  end-to-end run against a throwaway server (ADR 150). Coverage 67 % → 93 %
+  with branches; the CI floor is now 85 %.
+
 ## [1.16.71] - 2026-10-02
 
 ### Security
