@@ -481,7 +481,9 @@ def countries_for_region(region: str) -> set[str]:
     """Return set of country codes for a region name. ALL returns everything."""
     r = region.upper()
     if r == "ALL":
-        return {cc for codes in REGION_MAP.values() for cc in codes}
+        # Every real code, not just the union of the named regions: a country
+        # missing from REGION_MAP was silently dropped by every default call.
+        return set(ISO2_CODES)
     return set(REGION_MAP.get(r, []))
 
 
