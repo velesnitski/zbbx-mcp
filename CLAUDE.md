@@ -9,7 +9,7 @@ Zabbix MCP server — 174 tools across 40+ modules. Python 3.10+, FastMCP framew
 ## Commands
 
 ```bash
-uv run pytest                              # run all tests (~1,600 tests, ~15s)
+uv run pytest                              # run all tests (~2,600 tests, ~15s)
 uv run pytest tests/test_registration.py   # tool registration only
 uv run pytest tests/test_server.py         # JSON-RPC subprocess test
 uv run pytest -k "test_name"               # single test by name
@@ -90,7 +90,7 @@ uv run pytest -k "test_name"               # single test by name
 | `check_flaps.py` | 1 | `detect_check_flaps` — minute-level flap matrix: prober-noise subtraction, TEST-check split, chronic-but-triggerless ranking |
 | `bootstrap.py` | 2 | `build_provider_overrides`, `build_datacenter_overrides` — draft the deployment-specific range files ADR 120/122 expect, named from reverse DNS; write a draft for review, never the live file |
 | `crosscheck.py` | 1 | `compare_report_facts` — diff a sibling reporting pipeline's published facts against live Zabbix; judges only provably-identical definitions (ADR 101) |
-| `triage.py` | 1 | `triage_slack_alert` — resolve an alert line's host, re-query live Zabbix, verdict (read-only); pure core in `alert_triage.py` |
+| `triage.py` | 1 | `triage_slack_alert` — resolve an alert line's host, re-query live Zabbix, verdict (read-only); pure core in `alert_triage.py`; traffic-drop alerts judged by `traffic_verdict.py` (ADR 152) |
 
 ### Environment variables
 
@@ -112,6 +112,7 @@ uv run pytest -k "test_name"               # single test by name
 | `ZABBIX_PROVIDER_CIDRS` | Provider → CIDR map (inline JSON or a file path) searched before the generated table, most-specific-first. **This is where accurate detection comes from** — the built-in table resolves little of any specific deployment. Draft one with the `build_provider_overrides` tool. Unset = generated table only, ADR 120 |
 | `ZABBIX_DATACENTER_CIDRS` | Datacenter ranges as `{"Provider": [["cidr", "City, CC"], …]}` (inline JSON or a file path), most-specific-first. **The built-in table is empty** — unset means no city is reported. Draft one with the `build_datacenter_overrides` tool, ADR 122 |
 | `ZABBIX_APP_MAP` | The product's catalogue (inline JSON or a file path) written by a private exporter — audiences → sections → entries → members by IP. Read per call, fail-closed; unset = `get_app_view` says so, ADR 143 |
+| `ZABBIX_TRAFFIC_DROP_PATTERN` | Regex naming the traffic-drop trigger class for `triage_slack_alert`; that class is judged from the carrier interface, not the problem table. Unset = a generic default, ADR 152 |
 | `ZBBX_SENSITIVE_STRINGS` | Optional deny-list (file path or inline `a,b,c`) of identifiers that must not appear in fixtures. Enforced by the fixture guard when set; skipped loudly when unset — ADR 119 |
 
 ## Adding a new tool

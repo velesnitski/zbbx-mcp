@@ -1,5 +1,7 @@
 """Authoritative triage of a free-text alert line against live Zabbix state."""
 
+import time as _time
+
 import httpx
 
 from zbbx_mcp.alert_triage import (
@@ -7,8 +9,18 @@ from zbbx_mcp.alert_triage import (
     classify_match,
     parse_alert_line,
 )
+from zbbx_mcp.anomaly import pick_traffic_interface
 from zbbx_mcp.data import collapse_dependent_problems, filter_suppressed
+from zbbx_mcp.fetch import physical_traffic_items, to_mbps
 from zbbx_mcp.resolver import InstanceResolver
+from zbbx_mcp.traffic_verdict import (
+    RECENT_SECONDS,
+    Evidence,
+    classify_shape,
+    is_traffic_drop_alert,
+    traffic_triage,
+    usual_for_hour,
+)
 
 _RESOLVE_LIMIT = 10
 
@@ -35,6 +47,42 @@ async def _search_host(client, candidate):
         "searchWildcardsEnabled": True,
         "limit": _RESOLVE_LIMIT,
     })
+
+
+async def _traffic_evidence(client, hostid: str, now: int) -> Evidence:
+    """Carrier-interface evidence for one host: last 2 h, the usual for this
+    hour from the previous 7 days, and the shape of the last day (ADR 152).
+    The carrier is the physical interface with the highest 7-day average,
+    so a dead or idle secondary NIC is never the one judged."""
+    items = await physical_traffic_items(
+        client, [hostid], output=("itemid", "hostid", "key_", "value_type"))
+    if not items:
+        return Evidence(None, None, classify_shape([], None, now))
+    week_from, day_from = now - 8 * 86400, now - 86400
+    trends = await client.call("trend.get", {
+        "itemids": [i["itemid"] for i in items],
+        "time_from": week_from, "time_till": day_from,
+        "output": ["itemid", "clock", "value_avg"],
+    })
+    by_item: dict[str, list[tuple[int, float]]] = {}
+    for t in trends or []:
+        by_item.setdefault(t["itemid"], []).append((int(t["clock"]), to_mbps(t["value_avg"])))
+    carrier = pick_traffic_interface([
+        (iid, (sum(v for _, v in pts) / len(pts)) if pts else None)
+        for iid, pts in by_item.items()
+    ])
+    if carrier is None:
+        return Evidence(None, None, classify_shape([], None, now))
+    usual = usual_for_hour(by_item[carrier], (now // 3600) % 24)
+    vtype = next((i.get("value_type", "3") for i in items if i["itemid"] == carrier), "3")
+    hist = await client.call("history.get", {
+        "itemids": [carrier], "history": int(vtype),
+        "time_from": day_from, "output": ["clock", "value"],
+    })  # history.get takes no sort parameters (ADR 096); classify_shape sorts
+    series = [(int(h["clock"]), to_mbps(h["value"])) for h in hist or []]
+    recent = [v for ts, v in series if ts >= now - RECENT_SECONDS]
+    recent_avg = sum(recent) / len(recent) if recent else None
+    return Evidence(recent_avg, usual, classify_shape(series, usual, now))
 
 
 def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> None:
@@ -138,6 +186,14 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     lines.append(f"_feed claimed: {claimed} (re-queried below)_")
                 lines.append("")
 
+                traffic_class = is_traffic_drop_alert(
+                    text, *(p.get("name", "") for ps in by_host.values() for p in ps))
+                if traffic_class:
+                    lines.append("_traffic-drop alert: verdict from the carrier interface, "
+                                 "not from the problem table (ADR 152)_")
+                    lines.append("")
+                now = int(_time.time())
+
                 for cand, match in resolved:
                     status = match["status"]
                     if status == "NOT_FOUND":
@@ -158,7 +214,11 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     its = by_host.get(hid, [])
                     kept, _collapsed = collapse_dependent_problems(its, dep_map)
                     is_symptom = bool(its) and not kept
-                    verdict, action = classify_host_triage(its, is_symptom)
+                    if traffic_class:
+                        ev = await _traffic_evidence(client, hid, now)
+                        verdict, action = traffic_triage(ev, bool(its), now)
+                    else:
+                        verdict, action = classify_host_triage(its, is_symptom)
                     tag = "" if status == "EXACT" else " _(fuzzy match)_"
                     lines.append(f"- `{cand}` → **{hname}**{tag} — **{verdict}**. {action}")
                     for p in its[:4]:

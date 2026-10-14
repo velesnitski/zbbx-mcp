@@ -193,6 +193,18 @@ class TestDiagnose:
         assert out == "Host not found or disabled: srv-hm9009", out
 
 
+class TestTrafficDropTriage:
+    """ADR 152 against a real server: the evidence path (trend.get with a
+    window, history.get) must be accepted, and the verdict must quote numbers."""
+
+    def test_traffic_drop_alert_is_judged_from_the_interface(self, mcp):
+        out = mcp.call("triage_slack_alert", text="RESOLVED: traffic drop on srv-bv9001 (enp3s0)")
+        assert "verdict from the carrier interface" in out, out
+        assert any(v in out for v in ("**recovered**", "**still_down**", "**periodic**",
+                                      "**maintenance**", "**unmeasured**")), out
+        assert "Mbps" in out or "**unmeasured**" in out, out
+
+
 class TestMaintenanceWritePath:
     def _window(self, mcp, seed_state, name: str) -> str:
         now = int(time.time())

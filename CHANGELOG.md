@@ -5,6 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.16.74] - 2026-10-14
+
+### Fixed
+
+- **`triage_slack_alert` no longer reports "recovered" over a node whose
+  traffic-drop trigger closed while it stayed down** (ADR 152). For that
+  trigger class the verdict comes from the carrier interface — the last two
+  hours against the usual for this hour of day — and "recovered" needs at
+  least half of it. Every such verdict quotes both numbers.
+
+### Added
+
+- **Drop shape** for traffic-drop alerts: `maintenance` (sample gap at the
+  drop), `periodic` (earlier troughs recovered on their own, current one not
+  longer), `cliff`, `decay` — each with its own advice.
+- `ZABBIX_TRAFFIC_DROP_PATTERN` to name the trigger class in a deployment
+  whose trigger wording differs from the default.
+
 ## [1.16.73] - 2026-10-12
 
 ### Fixed
