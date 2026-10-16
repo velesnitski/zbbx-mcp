@@ -980,8 +980,10 @@ async def fetch_trends_batch(
             # fire on hosts that did idle deeply (ADR 097).
             min_val = round(100 - max(peaks), 1) if peaks else 0
 
-        # For traffic: convert to Mbps (respects ZABBIX_TRAFFIC_UNIT)
-        if metric_name == "traffic":
+        # For traffic, both directions: convert to Mbps (respects
+        # ZABBIX_TRAFFIC_UNIT). Outbound was left in raw units when ADR 147
+        # added it, and printed bits/s under an "Mbps" header (ADR 153).
+        if metric_name in _TRAFFIC_DIRECTION:
             current = round(current / _TRAFFIC_DIVISOR, 1) if current is not None else None
             avg_val = round(avg_val / _TRAFFIC_DIVISOR, 1)
             peak_val = round(peak_val / _TRAFFIC_DIVISOR, 1)
@@ -1005,9 +1007,9 @@ async def fetch_trends_batch(
             older = sum(avgs[:q]) / q
             if metric_name == "cpu":
                 recent, older = 100 - recent, 100 - older
-            if metric_name in ("traffic", "memory"):
-                recent /= _TRAFFIC_DIVISOR if metric_name == "traffic" else GB_BYTES
-                older /= _TRAFFIC_DIVISOR if metric_name == "traffic" else GB_BYTES
+            if metric_name in _TRAFFIC_DIRECTION or metric_name == "memory":
+                recent /= _TRAFFIC_DIVISOR if metric_name in _TRAFFIC_DIRECTION else GB_BYTES
+                older /= _TRAFFIC_DIVISOR if metric_name in _TRAFFIC_DIRECTION else GB_BYTES
             pct_change = ((recent - older) / older * 100) if older > 0 else 0
             if pct_change > 15:
                 trend_dir = "rising"
@@ -1032,7 +1034,7 @@ async def fetch_trends_batch(
             day_val = float(t["value_avg"])
             if metric_name == "cpu":
                 day_val = round(100 - day_val, 1)
-            elif metric_name == "traffic":
+            elif metric_name in _TRAFFIC_DIRECTION:
                 day_val = round(day_val / _TRAFFIC_DIVISOR, 1)
             elif metric_name == "memory":
                 day_val = round(day_val / GB_BYTES, 1)

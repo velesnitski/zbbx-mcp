@@ -314,7 +314,8 @@ class TestPeakAnalysis:
         c = _client(traffic=traffic, trends=HOURLY)
         out = _run("get_peak_analysis", c)
         item = c.sent("item.get")
-        assert item["filter"] == {"key_": TRAFFIC_IN_KEYS, "status": "0"}
+        # Prefix discovery through the shared physical-NIC helper (ADR 153).
+        assert item["search"] == {"key_": "*net.if.in[*"}
         assert "lastvalue" in item["output"]
         trend = c.sent("trend.get")
         assert set(trend["itemids"]) == {"t1", "t2", "t3", "t4"}       # never t1b
@@ -322,7 +323,7 @@ class TestPeakAnalysis:
         assert out.startswith("**Peak Analysis — Fleet** (5 servers, 7d)")
         assert "| 02:00 | 100 | 150 | 1 |" in out
         assert "| 14:00 | 300 | 400 | 2 |" in out
-        assert "**Peak:** 14:00 (300 Mbps) | **Trough:** 02:00 (100 Mbps) | **Ratio:** 3.0x" in out
+        assert "**Busiest hour:** 14:00 (300 Mbps avg) | **Quietest:** 02:00 (100 Mbps avg) | **Ratio:** 3.0x" in out
 
     def test_country(self):
         c = _client(trends=HOURLY)
@@ -335,14 +336,35 @@ class TestPeakAnalysis:
         out = _run("get_peak_analysis", c, host_id="srv-aq9001")
         assert c.sent("host.get")["filter"] == {"host": ["srv-aq9001"]}
         assert out.startswith("**Peak Analysis — srv-aq9001** (7d)")
-        assert "**Avg:** 200 Mbps | **Peak:** 300 Mbps | **Min:** 100 Mbps" in out
-        assert out.index("02:00 | 100 | 150") < out.index("14:00 | 300 | 400")
+        # Same hour-of-day profile as the fleet view, not a raw 48-hour dump.
+        assert "| 02:00 | 100 | 150 | 1 |" in out and "| 14:00 | 300 | 400 | 1 |" in out
+        when = datetime.fromtimestamp(_DAY0 + 14 * 3600, tz=timezone.utc).strftime("%Y-%m-%d %H:00")
+        assert f"**Overall:** avg 200 Mbps | highest single reading 400 Mbps in the hour of {when} UTC" in out
+        assert "_Trend data covers 2 of the 168 hours requested" in out
 
-    def test_single_host_by_id_skips_lookup(self):
+    def test_single_host_by_id_is_named(self):
         c = _client(trends=HOURLY)
         out = _run("get_peak_analysis", c, host_id="1")
-        assert not any(m == "host.get" for m, _p in c.calls)
-        assert out.startswith("**Peak Analysis — 1** (7d)")
+        assert c.sent("host.get")["hostids"] == ["1"]
+        assert out.startswith("**Peak Analysis — srv-aq9001** (7d)")
+
+    def test_the_peak_is_the_highest_reading_not_the_highest_average(self):
+        # A month of quiet hours and one burst: the old view printed the
+        # largest hourly AVERAGE as the peak and missed the burst (ADR 153).
+        quiet = [{"itemid": "t1", "clock": str(NOW - h * 3600 - NOW % 3600), "value_avg": str(20 * MBPS),
+                  "value_max": str(40 * MBPS)} for h in range(1, 30 * 24)]
+        burst = {"itemid": "t1", "clock": str(NOW - 500 * 3600 - NOW % 3600), "value_avg": str(70 * MBPS),
+                 "value_max": str(980 * MBPS)}
+        out = _run("get_peak_analysis", _client(trends=[*quiet, burst]), host_id="1", period="30d")
+        assert "highest single reading 980 Mbps" in out
+        assert "covers" not in out                     # a full window says nothing
+
+    def test_weeks_and_bad_periods(self):
+        c = _client(trends=HOURLY)
+        _run("get_peak_analysis", c, host_id="1", period="2w")
+        assert c.sent("trend.get")["limit"] == 1 * 24 * 14
+        assert _run("get_peak_analysis", _client(trends=HOURLY), period="soon") == (
+            "period must look like '7d' or '2w', got 'soon'.")
 
     def test_degraded_paths(self):
         assert _run("get_peak_analysis", _client(), host_id="srv-aq9099") == "Host 'srv-aq9099' not found."

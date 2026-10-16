@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.16.75] - 2026-10-16
+
+### Fixed
+
+- **Outbound traffic in the trend tools is in Mbps.** Rows, trend direction
+  and the daily breakdown printed bits per second under an "Mbps" header
+  since 1.16.69 (ADR 153).
+- **`get_peak_analysis`** reports the highest single reading and when it
+  happened instead of the largest hourly average; a single host gets the
+  same hour-of-day profile as a fleet slice instead of the last 48 raw hours;
+  a short trend history is stated; periods are `Nd` or `Nw` and anything else
+  is refused; interfaces are found by prefix, so quoted keys count (ADR 153).
+
 ## [1.16.74] - 2026-10-14
 
 ### Fixed
