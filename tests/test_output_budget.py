@@ -291,9 +291,9 @@ def _load(fleet, **kw) -> str:
 
 def _traffic_client(hosts: list[dict]) -> RecordingClient:
     def item_get(p):
-        key = (p.get("filter") or {}).get("key_")
-        if isinstance(key, (list, tuple)):
-            return [{"hostid": h["hostid"], "lastvalue": "8000000", "lastclock": LIVE} for h in hosts]
+        if "search" in p:                           # physical NIC discovery (ADR 154)
+            return [{"hostid": h["hostid"], "key_": "net.if.in[eth0]", "lastvalue": "8000000",
+                     "lastclock": LIVE} for h in hosts]
         return []
 
     return RecordingClient({"host.get": hosts, "item.get": item_get})

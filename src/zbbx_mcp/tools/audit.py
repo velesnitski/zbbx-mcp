@@ -8,6 +8,7 @@ import httpx
 
 from zbbx_mcp.data import AUDIT_RESOURCE_HOST
 from zbbx_mcp.resolver import InstanceResolver
+from zbbx_mcp.utils import parse_time
 
 # auditlog.get resourcetype values — the Zabbix 6.0+ audit constants.
 #
@@ -64,8 +65,8 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 action: Action filter: add, update, delete, login (optional)
                 user: Filter by username (optional)
                 host_id: Filter audit records related to a specific host ID (optional)
-                time_from: Start time as YYYY-MM-DD or unix timestamp (optional)
-                time_till: End time as YYYY-MM-DD or unix timestamp (optional)
+                time_from: Start — epoch, ISO date/datetime, or relative ('24h', '7d') (optional)
+                time_till: End — same formats as time_from (optional)
                 max_results: Maximum results (default: 50)
                 instance: Zabbix instance (optional)
             """
@@ -122,25 +123,16 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     params["filter"]["resourceid"] = host_id
 
                 # Time filters
-                def _parse_time(val: str) -> int:
-                    if val.isdigit():
-                        return int(val)
-                    for fmt in ("%Y-%m-%d", "%Y-%m-%d %H:%M"):
+                # The local parser returned 0 for anything it did not know —
+                # "YYYY-MM-DD HH:MM:SS" included — and 0 meant "no window", so
+                # a five-hour question came back as the newest 60 rows of the
+                # log (ADR 134 class, ADR 154). The shared parser refuses.
+                for name, raw in (("time_from", time_from), ("time_till", time_till)):
+                    if raw:
                         try:
-                            dt = datetime.strptime(val, fmt).replace(tzinfo=timezone.utc)
-                            return int(dt.timestamp())
-                        except ValueError:
-                            continue
-                    return 0
-
-                if time_from:
-                    ts = _parse_time(time_from)
-                    if ts:
-                        params["time_from"] = ts
-                if time_till:
-                    ts = _parse_time(time_till)
-                    if ts:
-                        params["time_till"] = ts
+                            params[name] = parse_time(raw)
+                        except ValueError as e:
+                            return f"Invalid {name}: {e}. Use an epoch, 'YYYY-MM-DD[ HH:MM[:SS]]' or '24h'/'7d'."
 
                 records = await client.call("auditlog.get", params)
 

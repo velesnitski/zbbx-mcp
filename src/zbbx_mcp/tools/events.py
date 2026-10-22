@@ -62,8 +62,8 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
             Args:
                 host_id: Filter by host ID (optional)
                 group: Filter by host group name (optional)
-                time_from: Start time as Unix timestamp (optional)
-                time_till: End time as Unix timestamp (optional)
+                time_from: Start — epoch, ISO date/datetime ("2026-08-07 00:00:00"), or relative ("24h", "7d") (optional)
+                time_till: End — same formats as time_from (optional)
                 source: Event source: 0=trigger, 1=discovery, 2=autoregistration, 3=internal (default: 0)
                 max_results: Maximum number of results (default: 50)
                 instance: Zabbix instance name (optional, for multi-instance setups)
@@ -80,10 +80,14 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 }
                 if host_id:
                     params["hostids"] = [host_id]
-                if time_from:
-                    params["time_from"] = int(time_from)
-                if time_till:
-                    params["time_till"] = int(time_till)
+                # One parser for every time-window tool: an int() here turned
+                # an ISO string into a traceback (ADR 154).
+                for name, raw in (("time_from", time_from), ("time_till", time_till)):
+                    if raw:
+                        try:
+                            params[name] = parse_time(raw)
+                        except ValueError as e:
+                            return f"Invalid {name}: {e}. Use an epoch, 'YYYY-MM-DD[ HH:MM[:SS]]' or '24h'/'7d'."
                 if group:
                     gids = await resolve_group_ids(client, group)
                     if gids is None:

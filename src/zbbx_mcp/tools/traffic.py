@@ -28,7 +28,6 @@ from zbbx_mcp.classify import classify_host as _classify_host
 from zbbx_mcp.classify import detect_provider
 from zbbx_mcp.data import (
     KEY_CONNECTIONS,
-    TRAFFIC_IN_KEYS,
     build_max_map,
     build_value_map,
     canonical_host_name,
@@ -122,11 +121,10 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 all_ids = list(host_map.keys())
 
                 # Phase 2: traffic + connections + CPU in parallel (3 calls)
-                traffic_task = client.call("item.get", {
-                    "hostids": all_ids,
-                    "output": ["hostid", "lastvalue", "lastclock"],
-                    "filter": {"key_": TRAFFIC_IN_KEYS, "status": "0"},
-                })
+                # Physical NICs by key prefix (ADR 147, ADR 154): the exact
+                # key list never matched quoted stock-template keys.
+                traffic_task = physical_traffic_items(
+                    client, all_ids, output=("itemid", "hostid", "lastvalue", "lastclock"))
                 async def _empty():
                     return []
 
@@ -380,11 +378,9 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     return []
 
                 traffic_items, conn_items = await asyncio.gather(
-                    client.call("item.get", {
-                        "hostids": all_ids,
-                        "output": ["hostid", "lastvalue", "lastclock"],
-                        "filter": {"key_": TRAFFIC_IN_KEYS, "status": "0"},
-                    }),
+                    # Physical NICs by key prefix (ADR 147, ADR 154).
+                    physical_traffic_items(
+                        client, all_ids, output=("itemid", "hostid", "lastvalue", "lastclock")),
                     client.call("item.get", {
                         "hostids": all_ids,
                         "output": ["hostid", "lastvalue", "lastclock"],

@@ -39,9 +39,9 @@ def _run(monkeypatch, conn_rows):
         key = (params.get("filter") or {}).get("key_")
         if key == CONN_KEY:
             return conn_rows
-        if isinstance(key, (list, tuple)):          # traffic keys
-            return [{"hostid": "1", "lastvalue": "8000000", "lastclock": LIVE},
-                    {"hostid": "2", "lastvalue": "4000000", "lastclock": LIVE}]
+        if "search" in params:                      # physical NIC discovery (ADR 154)
+            return [{"hostid": "1", "key_": "net.if.in[eth0]", "lastvalue": "8000000", "lastclock": LIVE},
+                    {"hostid": "2", "key_": "net.if.in[eth0]", "lastvalue": "4000000", "lastclock": LIVE}]
         return []
 
     return run_tool(traffic_mod, "get_traffic_report",
@@ -86,9 +86,9 @@ class TestAbsentIsNotZero:
             key = (params.get("filter") or {}).get("key_")
             if key == CONN_KEY:
                 return [{"hostid": "2", "lastvalue": "5", "lastclock": LIVE}]
-            if isinstance(key, (list, tuple)):
-                return [{"hostid": "1", "lastvalue": "8000000", "lastclock": LIVE},
-                        {"hostid": "2", "lastvalue": "4000000", "lastclock": LIVE}]
+            if "search" in params:
+                return [{"hostid": "1", "key_": "net.if.in[eth0]", "lastvalue": "8000000", "lastclock": LIVE},
+                        {"hostid": "2", "key_": "net.if.in[eth0]", "lastvalue": "4000000", "lastclock": LIVE}]
             return []
 
         out = run_tool(traffic_mod, "get_traffic_report",

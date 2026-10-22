@@ -70,9 +70,18 @@ class TestGetEvents:
         assert run_tool(events, "get_events", c, group="nope") == "Host group 'nope' not found."
         assert not any(m == "event.get" for m, _ in c.calls)
 
-    def test_bad_time_is_an_error(self):
-        out = run_tool(events, "get_events", _client({}), time_from="yesterday")
-        assert out.startswith("Error querying Zabbix: invalid literal")
+    def test_bad_time_is_refused_with_the_accepted_forms(self):
+        c = _client({})
+        out = run_tool(events, "get_events", c, time_from="yesterday")
+        assert out.startswith("Invalid time_from:") and "'24h'/'7d'" in out
+        assert not any(m == "event.get" for m, _ in c.calls)        # refused before the API
+
+    def test_iso_datetime_is_accepted(self):
+        # ADR 154: an ISO string used to become an int() traceback.
+        c = _client({"event.get": []})
+        run_tool(events, "get_events", c, time_from="2026-08-07 00:00:00", time_till="2026-08-08")
+        p = c.sent("event.get")
+        assert p["time_from"] == 1786060800 and p["time_till"] == 1786147200
 
 
 # --- get_trends ------------------------------------------------------------------

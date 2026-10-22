@@ -669,7 +669,11 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
             max_results: int = 10,
             instance: str = "",
         ) -> str:
-            """Estimate nearest server by geographic distance from client country.
+            """Rank servers by GEOGRAPHIC DISTANCE from a client country — not measured latency.
+
+            No round-trip time is involved: this is a great-circle distance
+            ranking from country centroids. For measured reachability use
+            get_servers_by_ping (ADR 154).
 
             Args:
                 client_country: 2-letter country code (required)

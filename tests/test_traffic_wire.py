@@ -51,9 +51,14 @@ AN_IDLE = {"1": 50, "5": 20, "6": 90}
 AN_CONNS = {"4": 120, "1": 300}
 
 
+
+def _key(p):
+    """The exact key filter, or "traffic" for the physical-NIC prefix search (ADR 154)."""
+    return "traffic" if "search" in p else (p.get("filter") or {}).get("key_")
+
 def _an_client(hosts=AN_HOSTS):
     def items(p):
-        key = p["filter"]["key_"]
+        key = _key(p)
         ids = set(p["hostids"])
         if key == "system.cpu.util[,idle]":
             src = AN_IDLE
@@ -61,9 +66,10 @@ def _an_client(hosts=AN_HOSTS):
             src = AN_CONNS
         else:
             src = AN_TRAFFIC
-        rows = [{"hostid": h, "lastvalue": str(v), "lastclock": LIVE} for h, v in src.items() if h in ids]
+        rows = [{"hostid": h, "key_": "net.if.in[eth0]", "lastvalue": str(v), "lastclock": LIVE}
+                for h, v in src.items() if h in ids]
         if src is AN_TRAFFIC and "7" in ids:
-            rows.append({"hostid": "7", "lastvalue": "0", "lastclock": "0"})
+            rows.append({"hostid": "7", "key_": "net.if.in[eth0]", "lastvalue": "0", "lastclock": "0"})
         return rows
     return RecordingClient({"host.get": hosts, "item.get": items})
 
@@ -72,8 +78,8 @@ def test_traffic_anomalies_grades_by_signal(monkeypatch):
     monkeypatch.setattr(traffic, "KEY_CONNECTIONS", CONN)
     c = _an_client()
     out = run_tool(traffic, "detect_traffic_anomalies", c)
-    keys = [p["filter"]["key_"] for m, p in c.calls if m == "item.get"]
-    assert CONN in keys and "system.cpu.util[,idle]" in keys
+    keys = [_key(p) for m, p in c.calls if m == "item.get"]
+    assert CONN in keys and "system.cpu.util[,idle]" in keys and "traffic" in keys
     assert "9" not in c.sent("item.get")["hostids"]
     assert out.startswith("**3 traffic anomalies detected**")
     assert "### 🔴 CRITICAL (1)" in out
@@ -244,8 +250,9 @@ REP_CONNS = {"1": 100, "2": 50, "3": 100}
 
 def _rep_client():
     def items(p):
-        src = REP_CONNS if p["filter"]["key_"] == CONN else REP_TRAFFIC
-        return [{"hostid": h, "lastvalue": str(v), "lastclock": LIVE} for h, v in src.items()]
+        src = REP_CONNS if _key(p) == CONN else REP_TRAFFIC
+        return [{"hostid": h, "key_": "net.if.in[eth0]", "lastvalue": str(v), "lastclock": LIVE}
+                for h, v in src.items()]
     return RecordingClient({"host.get": REP_HOSTS, "item.get": items})
 
 
@@ -276,9 +283,10 @@ def test_traffic_anomalies_statistical_outlier_and_scope_filters():
     vals = {str(i): 100e6 for i in range(1, 10)} | {"10": 30e6}
 
     def items(p):
-        if p["filter"]["key_"] == "system.cpu.util[,idle]":
+        if _key(p) == "system.cpu.util[,idle]":
             return []
-        return [{"hostid": h, "lastvalue": str(v), "lastclock": LIVE} for h, v in vals.items()]
+        return [{"hostid": h, "key_": "net.if.in[eth0]", "lastvalue": str(v), "lastclock": LIVE}
+                for h, v in vals.items()]
     c = RecordingClient({"host.get": hosts, "item.get": items})
     out = run_tool(traffic, "detect_traffic_anomalies", c)
     # above the 20%-of-median line, but more than 2σ under the mean
