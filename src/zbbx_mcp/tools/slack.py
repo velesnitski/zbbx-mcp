@@ -9,6 +9,7 @@ import httpx
 
 from zbbx_mcp.data import filter_suppressed, host_ip, label_matches
 from zbbx_mcp.fetch import live_value
+from zbbx_mcp.frozen import drop_frozen, frozen_note
 from zbbx_mcp.resolver import InstanceResolver
 
 SLACK_WEBHOOK_ENV = "SLACK_WEBHOOK_URL"
@@ -97,7 +98,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 ]
                 if include_problems:
                     tasks.append(client.call("problem.get", {
-                        "output": ["eventid", "name", "severity", "suppressed"],
+                        "output": ["eventid", "objectid", "name", "severity", "suppressed"],
                         "sortfield": ["eventid"],
                         "sortorder": ["DESC"],
                         "recent": True,
@@ -108,6 +109,8 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 hosts = results[0]
                 problems = results[1] if include_problems and len(results) > 1 else []
                 problems = filter_suppressed(problems, include_suppressed)
+                problems, frozen = await drop_frozen(client, problems)
+                note = frozen_note(len(frozen))
 
                 # Product summary
                 prod_counts: dict[str, dict] = {}
@@ -174,6 +177,8 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                         sorted(sev_counts.items(), key=lambda x: -x[1]))
                     blocks.append({"type": "divider"})
                     blocks.append({"type": "section", "text": {"type": "mrkdwn", "text": f":warning: *Active Problems ({len(problems)}):*\n{prob_text}"}})
+                if note:
+                    blocks.append({"type": "context", "elements": [{"type": "mrkdwn", "text": note}]})
 
                 # High CPU
                 if high_cpu_lines:

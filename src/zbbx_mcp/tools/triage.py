@@ -12,6 +12,7 @@ from zbbx_mcp.alert_triage import (
 from zbbx_mcp.anomaly import pick_traffic_interface
 from zbbx_mcp.data import collapse_dependent_problems, filter_suppressed
 from zbbx_mcp.fetch import physical_traffic_items, to_mbps
+from zbbx_mcp.frozen import frozen_note, frozen_trigger_ids, split_frozen
 from zbbx_mcp.resolver import InstanceResolver
 from zbbx_mcp.traffic_verdict import (
     RECENT_SECONDS,
@@ -137,6 +138,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 # 2) Ground truth: re-query current problems for resolved hosts.
                 by_host: dict[str, list] = {}
                 dep_map: dict[str, set] = {}
+                frozen_ids: set[str] | None = None
                 if hostids:
                     # problem.get does NOT support selectHosts (Zabbix rejects it
                     # with -32602); problems carry only objectid (the trigger).
@@ -149,6 +151,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                         "limit": 200,
                     })
                     problems = filter_suppressed(problems, include_suppressed)
+                    frozen_ids = await frozen_trigger_ids(client, problems) if problems else None
                     trig_ids = sorted({
                         p["objectid"] for p in problems if p.get("objectid")
                     })
@@ -212,15 +215,20 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     hid = host["hostid"]
                     hname = host.get("host") or host.get("name") or hid
                     its = by_host.get(hid, [])
-                    kept, _collapsed = collapse_dependent_problems(its, dep_map)
-                    is_symptom = bool(its) and not kept
+                    frozen: list = []
                     if traffic_class:
                         ev = await _traffic_evidence(client, hid, now)
                         verdict, action = traffic_triage(ev, bool(its), now)
                     else:
-                        verdict, action = classify_host_triage(its, is_symptom)
+                        # The problem table is the evidence here, so a problem
+                        # that can never recover is not evidence of an outage.
+                        its, frozen = split_frozen(its, frozen_ids)
+                        kept, _collapsed = collapse_dependent_problems(its, dep_map)
+                        verdict, action = classify_host_triage(its, bool(its) and not kept)
                     tag = "" if status == "EXACT" else " _(fuzzy match)_"
                     lines.append(f"- `{cand}` → **{hname}**{tag} — **{verdict}**. {action}")
+                    if frozen:
+                        lines.append(f"    - _{frozen_note(len(frozen))}_")
                     for p in its[:4]:
                         lines.append(f"    - {p.get('name', '?')[:90]}")
                     if len(its) > 4:

@@ -24,6 +24,7 @@ from zbbx_mcp.data import (
     filter_suppressed,
 )
 from zbbx_mcp.formatters import format_age, normalize_problem_name
+from zbbx_mcp.frozen import drop_frozen, frozen_note
 from zbbx_mcp.resolver import InstanceResolver
 
 _SEVERITY_LABELS = {
@@ -131,6 +132,11 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     "recent": True,
                 })
                 problems = filter_suppressed(problems, include_suppressed)
+                problems, frozen = await drop_frozen(client, problems)
+                note = frozen_note(len(frozen))
+
+                def _out(text: str) -> str:
+                    return f"{text}\n\n_{note}_" if note else text
 
                 # Collapse dependent (symptom) problems before counting, so a
                 # cascade on one host (root + its declared symptoms) doesn't
@@ -150,7 +156,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     problems, _ = collapse_dependent_problems(problems, dep_map, collapse_dependent)
 
                 if not problems:
-                    return f"No active problems (severity >= {min_severity})."
+                    return _out(f"No active problems (severity >= {min_severity}).")
 
                 event_ids = [p["eventid"] for p in problems]
                 events = await client.call("event.get", {
@@ -183,7 +189,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                             "clock": int(p.get("clock", 0)),
                         })
                 if not records:
-                    return "No host-bound active problems."
+                    return _out("No host-bound active problems.")
 
                 floods = _group_host_floods(records, parent_map, min_problems)
                 # Optional recency filter — drop stale floods (e.g. a host with
@@ -195,7 +201,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     floods = [f for f in floods
                               if f.get("earliest_clock") and f["earliest_clock"] >= cutoff]
                 if not floods:
-                    return (
+                    return _out(
                         f"No host floods (need ≥{min_problems} simultaneous "
                         f"problems on one host). Inspected {len(records)} "
                         f"problem records across {len({r['hostid'] for r in records})} hosts."
@@ -226,6 +232,6 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     )
                 if len(floods) > max_results:
                     lines.append(f"\n*{len(floods) - max_results} more omitted*")
-                return "\n".join(lines)
+                return _out("\n".join(lines))
             except (httpx.HTTPError, ValueError) as e:
                 return f"Error: {e}"

@@ -165,7 +165,7 @@ class TestTriageWireContract:
         # The fix maps problem→host through trigger.get (which DOES support it).
         client = self._client()
         _run_triage(client, "🔴 Disaster: Service Down on node-eu-a1")
-        tget = next(p for m, p in client.calls if m == "trigger.get")
+        tget = next(p for m, p in client.calls if m == "trigger.get" and "selectItems" not in p)
         assert tget.get("selectHosts") == ["hostid"]
 
     def test_problem_attributed_to_host_via_trigger(self):

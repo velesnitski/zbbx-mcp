@@ -5,6 +5,7 @@ import httpx
 
 from zbbx_mcp.data import filter_suppressed
 from zbbx_mcp.formatters import _ts, format_problem_list, format_severity
+from zbbx_mcp.frozen import drop_frozen, frozen_note
 from zbbx_mcp.resolver import InstanceResolver
 from zbbx_mcp.tag_filter import parse_tag_filter
 from zbbx_mcp.utils import parse_time, resolve_group_ids
@@ -387,6 +388,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
             include_resolved: bool = False,
             include_suppressed: bool = False,
             event_eventid: str = "",
+            include_frozen: bool = False,
             instance: str = "",
         ) -> str:
             """Get current Zabbix problems (active triggers).
@@ -405,6 +407,8 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 include_resolved: Include OK transitions in the window (default: False)
                 include_suppressed: Include maintenance-suppressed problems (default: False)
                 event_eventid: Return full PROBLEM↔OK timeline for a specific event ID
+                include_frozen: Also list problems on disabled triggers/items, which
+                    can never recover, marked [frozen] (default: False — excluded)
                 instance: Zabbix instance name (optional, for multi-instance setups)
             """
             try:
@@ -483,15 +487,25 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
 
                 data = await client.call("problem.get", params)
                 data = filter_suppressed(data, include_suppressed)
+                data, frozen = await drop_frozen(client, data)
+                note = frozen_note(len(frozen))
+                if include_frozen and frozen:
+                    for p in frozen:
+                        p["name"] = f"{p.get('name', 'Unknown')} [frozen]"
+                    data = data + frozen
+                    note = (f"{len(frozen)} problem(s) marked [frozen] sit on disabled "
+                            "triggers or items and cannot recover — monitoring debt, not outages.")
                 data = await attach_hosts(client, data)
 
                 result = format_problem_list(data)
                 count = len(data)
                 if count == 0:
                     if parent_added:
-                        return f"No problems found on `{host}` or its parent `{parent_added}`."
-                    return result
+                        result = f"No problems found on `{host}` or its parent `{parent_added}`."
+                    return f"{result}\n\n_{note}_" if note else result
                 header = f"**Found: {count} problems**"
+                if note:
+                    header += f"\n_{note}_"
                 if count >= max_results:
                     header += f" (showing first {max_results}, more may exist)"
                 if parent_added:

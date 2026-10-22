@@ -5,6 +5,31 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.16.76] - 2026-10-22
+
+### Fixed
+
+- **Problems on disabled triggers or items no longer count as outages**
+  (ADR 156) in the problem listings, the active-problems summary,
+  `diagnose_host`, `triage_slack_alert`, the correlation and flood views and
+  the Slack digest. The number excluded is always stated;
+  `get_problems(include_frozen=True)` lists them.
+- **The rollback journal records only writes that happened** (ADR 155): a
+  failed update or delete leaves no entry, and `rollback_last` keeps an entry
+  whose undo failed.
+- **`link_template` adds a template** instead of replacing the host's whole
+  template list; **`unlink_template(clear=False)` keeps inherited items**;
+  both are journalled and undoable (ADR 155).
+- **`set_bulk_macro`** is journalled per host and never prints the value of a
+  secret macro (ADR 155).
+- **Never-collected items read "never"**, not 1970, in the item listings.
+- **`get_events` and `get_audit_log` honour or refuse their time window**:
+  ISO datetimes are accepted, and an unreadable window is refused instead of
+  silently returning the newest rows of the whole log (ADR 154).
+- **`get_traffic_report` and `detect_traffic_anomalies`** find interfaces by
+  prefix, so quoted interface keys carry traffic (ADR 154).
+- **`get_latency_estimate`** says it ranks by distance, not measured latency.
+
 ## [1.16.75] - 2026-10-16
 
 ### Fixed

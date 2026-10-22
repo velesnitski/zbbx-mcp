@@ -4,7 +4,7 @@ import time
 
 import httpx
 
-from tests.wiretest import RecordingClient, run_tool
+from tests.wiretest import RecordingClient, live_triggers, run_tool
 from zbbx_mcp.tools import floods
 
 NOW = int(time.time())
@@ -50,7 +50,7 @@ def _client(problems=PROBLEMS):
                 for e in p["eventids"] if e in EVENT_HOSTS]
     trigs = [{"triggerid": "t3", "dependencies": [{"triggerid": "t1"}]},
              {"triggerid": "t1", "dependencies": []}]
-    return RecordingClient({"problem.get": problems, "trigger.get": trigs,
+    return RecordingClient({"problem.get": problems, "trigger.get": live_triggers(trigs),
                             "event.get": events, "host.get": HOSTS})
 
 
@@ -59,7 +59,7 @@ def test_get_host_floods_folds_sub_hosts_and_collapses_symptoms():
     out = run_tool(floods, "get_host_floods", c, min_problems=3)
     pp = c.sent("problem.get")
     assert pp["severities"] == [2, 3, 4, 5] and pp["recent"] is True and pp["limit"] == 5000
-    tp = c.sent("trigger.get")
+    tp = next(p for m, p in c.calls if m == "trigger.get" and "selectDependencies" in p)
     assert tp["triggerids"] == sorted(f"t{i}" for i in range(1, 10))
     assert "302" not in c.sent("event.get")["eventids"]           # suppressed dropped
     assert "103" not in c.sent("event.get")["eventids"]           # symptom collapsed
@@ -88,7 +88,7 @@ def test_get_host_floods_age_filter_cap_and_include_suppressed():
 def test_get_host_floods_no_collapse_skips_trigger_lookup():
     c = _client()
     run_tool(floods, "get_host_floods", c, collapse_dependent=False)
-    assert "trigger.get" not in [m for m, _ in c.calls]
+    assert not any(m == "trigger.get" and "selectDependencies" in p for m, p in c.calls)
 
 
 def test_get_host_floods_below_threshold_reports_what_was_inspected():
