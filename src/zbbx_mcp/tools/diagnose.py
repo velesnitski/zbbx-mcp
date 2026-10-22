@@ -38,6 +38,7 @@ from zbbx_mcp.data import (
 )
 from zbbx_mcp.fetch import is_physical_traffic_in_key, read_item, to_mbps
 from zbbx_mcp.formatters import format_age, format_severity
+from zbbx_mcp.frozen import drop_frozen, frozen_note
 from zbbx_mcp.resolver import InstanceResolver
 from zbbx_mcp.tools.correlation import subnet24
 from zbbx_mcp.tools.ip_history import parse_ip_changes
@@ -371,17 +372,15 @@ async def _collect_diagnosis_inner(
     problem_hostids = group_hostids or [hid]
     problems = await client.call("problem.get", {
         "hostids": problem_hostids,
-        "output": ["eventid", "name", "severity", "clock", "suppressed",
-                   "r_eventid"],
+        "output": ["eventid", "objectid", "name", "severity", "clock", "suppressed", "r_eventid"],
         "sortfield": "eventid",
         "sortorder": "DESC",
         "limit": 30,
         "recent": True,
     })
     problems = filter_suppressed(problems, include_suppressed)
-    # Never age out an UNRESOLVED problem by its start time — only resolved
-    # entries are windowed (ADR 069).
-    problems = _keep_active_or_recent(problems, now, problem_hours)
+    # Unresolved never aged out (ADR 069); disabled-trigger problems set aside.
+    problems, frozen = await drop_frozen(client, _keep_active_or_recent(problems, now, problem_hours))
 
     # Server-mode-only data
     traffic_baseline = traffic_recent = None
@@ -563,6 +562,7 @@ async def _collect_diagnosis_inner(
         "traffic_recent_mbps": traffic_recent,
         "traffic_seasonal_floor": traffic_seasonal_floor,
         "problems": problems,
+        "frozen": len(frozen),
         "rotations": rotations,
         "https_down": https_down,
         "https_age_h": https_age_h,
@@ -681,6 +681,8 @@ def _render_full_report(
 
     probs = facts["problems"]
     lines.append(f"### Active problems ({len(probs)})")
+    if facts.get("frozen"):
+        lines.append(f"- _{frozen_note(facts['frozen'])}_")
     if not probs:
         lines.append("- None")
     else:

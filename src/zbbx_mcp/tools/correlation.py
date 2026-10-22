@@ -28,6 +28,7 @@ from zbbx_mcp.data import (
 )
 from zbbx_mcp.fetch import live_value
 from zbbx_mcp.formatters import format_age, normalize_problem_name
+from zbbx_mcp.frozen import drop_frozen, frozen_note
 from zbbx_mcp.resolver import InstanceResolver
 
 # Cluster grouping levels, ordered narrowest to broadest.
@@ -382,7 +383,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 # the fetch — eventid is monotone with creation time so this only
                 # matters for the LIMIT cutoff, where eventid sort is fine.
                 problems = await client.call("problem.get", {
-                    "output": ["eventid", "name", "severity", "clock", "suppressed"],
+                    "output": ["eventid", "objectid", "name", "severity", "clock", "suppressed"],
                     "severities": list(range(min_severity, 6)),
                     "sortfield": "eventid",
                     "sortorder": "DESC",
@@ -390,13 +391,18 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     "recent": True,
                 })
                 problems = filter_suppressed(problems, include_suppressed)
+                problems, frozen = await drop_frozen(client, problems)
+                note = frozen_note(len(frozen))
+
+                def _out(text: str) -> str:
+                    return f"{text}\n\n_{note}_" if note else text
                 problems.sort(key=lambda p: -int(p.get("clock", 0)))
                 if max_age_hours > 0:
                     import time as _time
                     cutoff = int(_time.time()) - max_age_hours * 3600
                     problems = [p for p in problems if int(p.get("clock", 0)) >= cutoff]
                 if not problems:
-                    return f"No active problems (severity >= {min_severity})."
+                    return _out(f"No active problems (severity >= {min_severity}).")
 
                 event_ids = [p["eventid"] for p in problems]
                 events = await client.call("event.get", {
@@ -411,7 +417,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
 
                 all_host_ids = sorted({hid for ids in event_hosts.values() for hid in ids})
                 if not all_host_ids:
-                    return "No host-bound problems found."
+                    return _out("No host-bound problems found.")
 
                 hosts_meta = await client.call("host.get", {
                     "hostids": all_host_ids,
@@ -487,7 +493,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                         break
 
                 if not clusters:
-                    return (
+                    return _out(
                         f"No outage clusters (window={window_min}m, "
                         f"min_hosts={min_hosts}, group_by={group_by})."
                     )
@@ -521,6 +527,6 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     )
                 if len(clusters) > max_clusters:
                     lines.append(f"\n*{len(clusters) - max_clusters} more clusters omitted*")
-                return "\n".join(lines)
+                return _out("\n".join(lines))
             except (httpx.HTTPError, ValueError) as e:
                 return f"Error: {e}"

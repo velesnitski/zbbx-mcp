@@ -11,6 +11,7 @@ from zbbx_mcp.data import (
 )
 from zbbx_mcp.fetch import read_item
 from zbbx_mcp.formatters import normalize_problem_name
+from zbbx_mcp.frozen import drop_frozen, frozen_note
 from zbbx_mcp.resolver import InstanceResolver
 from zbbx_mcp.tag_filter import parse_tag_filter
 
@@ -351,6 +352,8 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     _params["evaltype"] = 0
                 problems = await client.call("problem.get", _params)
                 problems = filter_suppressed(problems, include_suppressed)
+                problems, frozen = await drop_frozen(client, problems)
+                note = frozen_note(len(frozen))
 
                 # Collapse dependent (symptom) problems whose trigger depends on
                 # another firing trigger — show root cause only (ADR 048). No-op
@@ -389,7 +392,8 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 problems.sort(key=lambda p: (-int(p.get("severity", "0")), -int(p.get("clock", "0"))))
 
                 if not problems:
-                    return f"No active problems (severity >= {min_severity})."
+                    empty = f"No active problems (severity >= {min_severity})."
+                    return f"{empty}\n{note}" if note else empty
 
                 _SEV = {0: "Info", 1: "Info", 2: "Warning", 3: "Average", 4: "High", 5: "Disaster"}
                 sev_counts: dict[str, int] = {}
@@ -402,6 +406,8 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     if collapsed_count else ""
                 )
                 lines = [f"**{len(problems)} active problems**{_collapsed_note}\n"]
+                if note:
+                    lines.insert(1, f"_{note}_\n")
                 # Summary by severity
                 for sev in ["Disaster", "High", "Average", "Warning", "Info"]:
                     if sev in sev_counts:
@@ -560,15 +566,18 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
             try:
                 client = resolver.resolve(instance)
                 problems = await client.call("problem.get", {
-                    "output": ["eventid", "severity", "clock"],
+                    "output": ["eventid", "severity", "clock", "objectid"],
                     "severities": list(range(min_severity, 6)),
                     "sortfield": "eventid",
                     "sortorder": "DESC",
                     "limit": 5000,
                     "recent": True,
                 })
+                problems, frozen = await drop_frozen(client, problems)
+                note = frozen_note(len(frozen))
                 if not problems:
-                    return f"No active problems (severity >= {min_severity})."
+                    empty = f"No active problems (severity >= {min_severity})."
+                    return f"{empty}\n{note}" if note else empty
 
                 now = int(_time.time())
                 by_sev = _bucket_problems_by_age(problems, now)
@@ -603,6 +612,8 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                         f"\n*{aged} problems aged 1-7d "
                         f"({100 * aged // grand_total}% of total).*"
                     )
+                if note:
+                    lines.append(f"\n_{note}_")
                 return "\n".join(lines)
             except (httpx.HTTPError, ValueError) as e:
                 return f"Error: {e}"
