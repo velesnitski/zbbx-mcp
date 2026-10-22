@@ -18,10 +18,7 @@ NOW = str(int(time.time()) - 60)
 
 
 class JournalClient(RecordingClient):
-    """RecordingClient plus the snapshot-taking journal hook update/delete use."""
-
-    async def snapshot_and_record(self, action, kind, obj_id, note=""):
-        self.rollback.append((action, kind, obj_id, note))
+    """RecordingClient; write tools journal into ``rollback`` via ``journal``."""
 
 
 HOST_MACROS = [

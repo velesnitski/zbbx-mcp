@@ -3,7 +3,7 @@ import time
 
 import httpx
 
-from zbbx_mcp.formatters import _ts, cell, format_value
+from zbbx_mcp.formatters import _lastclock, _ts, cell, format_value
 from zbbx_mcp.resolver import InstanceResolver
 from zbbx_mcp.utils import contains_pattern, parse_time, resolve_group_ids
 
@@ -250,7 +250,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 lines = []
                 for item in data:
                     value = format_value(item.get("lastvalue", ""), item.get("units", ""))
-                    clock = _ts(item.get("lastclock", "0"))
+                    clock = _lastclock(item.get("lastclock", "0"))
                     state = " [UNSUPPORTED]" if item.get("state") == "1" else ""
                     lines.append(
                         f"- **{item.get('name', '?')}** = {value}{state}\n"
@@ -353,7 +353,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     # value type cannot judge liveness, so it shows the age (ADR 141).
                     lines.append(
                         f"| {hostname} | {item.get('name', '?')} | `{item.get('key_', '?')}` | {value} | "
-                        f"{_ts(item.get('lastclock', '0'))} |"
+                        f"{_lastclock(item.get('lastclock', '0'))} |"
                     )
 
                 total = len(items)

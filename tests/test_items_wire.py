@@ -15,10 +15,7 @@ LIVE = str(NOW - 60)        # recent lastclock: a live reading (ADR 141)
 
 
 class JournalClient(RecordingClient):
-    """RecordingClient plus the async snapshot hook the update/delete tools use."""
-
-    async def snapshot_and_record(self, action, kind, obj_id, note=""):
-        self.rollback.append((action, kind, obj_id, note))
+    """RecordingClient; write tools journal into ``rollback`` via ``journal``."""
 
 
 class FailingClient(JournalClient):

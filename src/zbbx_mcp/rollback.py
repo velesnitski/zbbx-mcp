@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 from enum import Enum
 from typing import Any
 
-__all__ = ["Action", "RollbackEntry", "RollbackLog", "SNAPSHOT_CONFIG"]
+__all__ = ["Action", "RollbackEntry", "RollbackLog", "SNAPSHOT_CONFIG", "TEMPLATE_LINK"]
 
 
 class Action(str, Enum):
@@ -72,6 +72,14 @@ class RollbackLog:
     def last(self) -> RollbackEntry | None:
         return self._entries[-1] if self._entries else None
 
+    def discard(self, entry: RollbackEntry) -> bool:
+        """Remove this exact entry (by identity). Returns True if removed."""
+        for i, e in enumerate(self._entries):
+            if e is entry:
+                del self._entries[i]
+                return True
+        return False
+
     def remove_by_index(self, index: int) -> bool:
         """Remove entry at index. Returns True if removed."""
         if 0 <= index < len(self._entries):
@@ -82,6 +90,12 @@ class RollbackLog:
     def __len__(self) -> int:
         return len(self._entries)
 
+
+# A host<->template link. Not a Zabbix object with its own id, so it has no
+# SNAPSHOT_CONFIG entry: the snapshot holds {"hostid", "templateid"} (plus
+# "cleared" for an unlink) and the rollback tools undo it with
+# host.massremove / host.massadd. CREATE = linked, DELETE = unlinked.
+TEMPLATE_LINK = "template_link"
 
 # API methods for fetching and restoring snapshots, keyed by object_type
 SNAPSHOT_CONFIG: dict[str, dict[str, str]] = {

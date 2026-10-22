@@ -8,10 +8,7 @@ from zbbx_mcp.tools import hostgroups
 
 
 class JournalClient(RecordingClient):
-    """RecordingClient plus the snapshot-taking journal hook delete tools use."""
-
-    async def snapshot_and_record(self, action, kind, obj_id, note=""):
-        self.rollback.append((action, kind, obj_id, note))
+    """RecordingClient; write tools journal into ``rollback`` via ``journal``."""
 
 
 GROUPS = [

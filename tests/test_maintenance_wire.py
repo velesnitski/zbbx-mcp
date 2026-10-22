@@ -1,24 +1,14 @@
 """Wire tests for maintenance windows: read, create, delete (synthetic fixtures)."""
 
-from tests.wiretest import CaptureMCP, RecordingClient, StubResolver, run_tool
-from zbbx_mcp.client import ZabbixClient
-from zbbx_mcp.rollback import Action, RollbackLog
+from tests.wiretest import CaptureMCP, JournalingClient, RecordingClient, StubResolver, run_tool
+from zbbx_mcp.rollback import Action
 from zbbx_mcp.tools import WRITE_TOOLS, maintenance
 
 SINCE = 1_800_000_000
 TILL = SINCE + 7200
 
 
-class JournalClient(RecordingClient):
-    """RecordingClient wired to the real rollback journal logic."""
-
-    snapshot = ZabbixClient.snapshot
-    snapshot_and_record = ZabbixClient.snapshot_and_record
-    record_create = ZabbixClient.record_create
-
-    def __init__(self, responses=None):
-        super().__init__(responses)
-        self.rollback_log = RollbackLog()
+JournalClient = JournalingClient  # real snapshot + rollback journal logic
 
 
 WINDOWS = [
