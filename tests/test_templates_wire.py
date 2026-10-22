@@ -1,17 +1,14 @@
-"""Template tools wire test: ``template.get`` shape and rendering, and the
-exact ``host.update`` payloads link / unlink send. Fixtures are synthetic.
-
-Two behaviours pinned here are worth knowing (see the module tests below):
-``link_template`` sends ``templates`` on ``host.update``, which in the Zabbix
-API *replaces* the host's whole template list; and ``unlink_template`` sends
-``templates_clear`` whether or not ``clear`` is set. Neither write records a
-rollback journal entry.
+"""Template tools wire test: ``template.get`` shape and rendering, the exact
+``host.massadd`` / ``host.massremove`` payloads link / unlink send, and the
+rollback journal entries that let ``rollback_last`` undo them.
+Fixtures are synthetic.
 """
 
 import httpx
 
-from tests.wiretest import RecordingClient, run_tool
-from zbbx_mcp.tools import templates
+from tests.wiretest import JournalingClient, RecordingClient, run_tool
+from zbbx_mcp.rollback import Action
+from zbbx_mcp.tools import rollback_tools, templates
 
 TEMPLATES = [
     {"templateid": "501", "host": "Template OS Linux", "description": "",
@@ -62,45 +59,79 @@ def test_get_templates_empty_and_error():
     assert out == "Error querying Zabbix: down"
 
 
-def test_link_template_payload():
-    c = RecordingClient()
+def test_link_template_adds_with_massadd_and_journals():
+    c = JournalingClient()
     out = run_tool(templates, "link_template", c, host_id="1", template_id="501")
-    # `templates` on host.update replaces the host's template list in the
-    # Zabbix API — host.massadd would be the additive call.
-    assert c.calls == [("host.update", {"hostid": "1", "templates": [{"templateid": "501"}]})]
+    # host.massadd adds; `templates` on host.update would replace the whole list.
+    assert c.calls == [("host.massadd", {"hosts": [{"hostid": "1"}],
+                                         "templates": [{"templateid": "501"}]})]
     assert out == "Template 501 linked to host 1."
-    assert c.rollback == []  # no journal entry: not undoable via rollback_last
+    [e] = c.rollback_log.entries
+    assert (e.action, e.object_type, e.object_id, e.snapshot) == \
+        (Action.CREATE, "template_link", "501", {"hostid": "1", "templateid": "501"})
 
 
-def test_link_template_error():
+def test_link_template_rollback_unlinks_without_clear():
+    c = JournalingClient()
+    run_tool(templates, "link_template", c, host_id="1", template_id="501")
+    out = run_tool(rollback_tools, "rollback_last", c)
+    assert c.calls[-1] == ("host.massremove", {"hostids": ["1"], "templateids": ["501"]})
+    assert out.startswith("Rolled back link: unlinked template 501 from host 1")
+    assert c.rollback_log.entries == []
+
+
+def test_link_template_error_journals_nothing():
     def boom(_p):
         raise ValueError("No permissions to referred object")
 
-    out = run_tool(templates, "link_template", RecordingClient({"host.update": boom}),
-                   host_id="1", template_id="501")
+    c = JournalingClient({"host.massadd": boom})
+    out = run_tool(templates, "link_template", c, host_id="1", template_id="501")
     assert out == "Error linking template: No permissions to referred object"
+    assert c.rollback_log.entries == []
 
 
-def test_unlink_template_sends_templates_clear_in_both_modes():
-    plain = RecordingClient()
+def test_unlink_template_keeps_items_unless_clear():
+    plain = JournalingClient()
     out = run_tool(templates, "unlink_template", plain, host_id="1", template_id="501")
-    assert out == "Template 501 unlinked from host 1."
+    assert plain.calls == [("host.massremove", {"hostids": ["1"], "templateids": ["501"]})]
+    assert out == "Template 501 unlinked from host 1 (inherited items and triggers kept)."
+    [e] = plain.rollback_log.entries
+    assert (e.action, e.object_type, e.object_id, e.snapshot) == \
+        (Action.DELETE, "template_link", "501",
+         {"hostid": "1", "templateid": "501", "cleared": False})
 
-    clear = RecordingClient()
-    out_c = run_tool(templates, "unlink_template", clear, host_id="1", template_id="501", clear=True)
-    assert out_c == "Template 501 unlinked and cleared from host 1."
+    clear = JournalingClient()
+    out_c = run_tool(templates, "unlink_template", clear, host_id="1", template_id="501",
+                     clear=True)
+    assert clear.calls == [("host.massremove", {"hostids": ["1"], "templateids_clear": ["501"]})]
+    assert out_c.startswith("Template 501 unlinked and cleared from host 1.")
+    assert "cannot be undone" in out_c
+    [e] = clear.rollback_log.entries
+    assert e.snapshot["cleared"] is True
 
-    expected = ("host.update", {"hostid": "1", "templates_clear": [{"templateid": "501"}]})
-    # Today both modes send the identical clearing payload.
-    assert plain.calls == [expected]
-    assert clear.calls == [expected]
-    assert plain.rollback == [] and clear.rollback == []
+
+def test_unlink_template_rollback_relinks():
+    c = JournalingClient()
+    run_tool(templates, "unlink_template", c, host_id="1", template_id="501")
+    out = run_tool(rollback_tools, "rollback_last", c)
+    assert c.calls[-1] == ("host.massadd", {"hosts": [{"hostid": "1"}],
+                                            "templates": [{"templateid": "501"}]})
+    assert out.startswith("Rolled back unlink: relinked template 501 to host 1")
+    assert "history" not in out
+    assert c.rollback_log.entries == []
+
+    c = JournalingClient()
+    run_tool(templates, "unlink_template", c, host_id="1", template_id="501", clear=True)
+    out = run_tool(rollback_tools, "rollback_by_index", c, index=0)
+    assert c.calls[-1][0] == "host.massadd"
+    assert "history" in out and "not restored" in out
 
 
 def test_unlink_template_error():
     def boom(_p):
         raise httpx.ReadTimeout("slow")
 
-    out = run_tool(templates, "unlink_template", RecordingClient({"host.update": boom}),
-                   host_id="1", template_id="501")
+    c = JournalingClient({"host.massremove": boom})
+    out = run_tool(templates, "unlink_template", c, host_id="1", template_id="501")
     assert out == "Error unlinking template: slow"
+    assert c.rollback_log.entries == []

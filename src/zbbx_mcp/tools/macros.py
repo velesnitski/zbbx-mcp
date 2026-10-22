@@ -3,6 +3,12 @@ import httpx
 from zbbx_mcp.resolver import InstanceResolver
 
 MACRO_TYPES = {"0": "Text", "1": "Secret", "2": "Vault"}
+SECRET_TYPE = "1"
+
+
+def _shown_value(value: str, secret: bool) -> str:
+    """How a written macro value is echoed back: never when it is a secret."""
+    return "<secret>" if secret else f"`{value}`"
 
 
 def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> None:
@@ -114,7 +120,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
 
                 if existing:
                     mid = existing[0]["hostmacroid"]
-                    await client.snapshot_and_record("update", "usermacro", mid, f"Updated macro {macro} on host {host_id}")
+                    snap = await client.take_snapshot("update", "usermacro", mid)
                     params = {
                         "hostmacroid": mid,
                         "value": value,
@@ -123,6 +129,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     if description:
                         params["description"] = description
                     await client.call("usermacro.update", params)
+                    client.journal("update", "usermacro", mid, snap, f"Updated macro {macro} on host {host_id}")
                     return f"Host macro `{macro}` updated on host {host_id}."
                 else:
                     params = {
@@ -193,7 +200,15 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     return "No hosts match the filters."
 
                 if dry_run:
-                    lines = [f"**Dry run:** would set `{macro}` = `{value}` on {len(hosts)} hosts\n"]
+                    # One read to learn whether any host already holds this macro
+                    # as a secret: a preview must not echo a secret either.
+                    found = await client.call("usermacro.get", {
+                        "hostids": [h["hostid"] for h in hosts],
+                        "filter": {"macro": macro},
+                        "output": ["hostid", "type"],
+                    })
+                    shown = _shown_value(value, any(m.get("type") == SECRET_TYPE for m in found))
+                    lines = [f"**Dry run:** would set `{macro}` = {shown} on {len(hosts)} hosts\n"]
                     lines.append("| Host | Host ID |")
                     lines.append("|------|---------|")
                     for h in hosts[:20]:
@@ -208,26 +223,38 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 updated = 0
                 created = 0
                 errors = 0
+                secret = False
 
                 async def _set_one(h):
-                    nonlocal updated, created, errors
+                    nonlocal updated, created, errors, secret
                     hid = h["hostid"]
                     try:
                         existing = await client.call("usermacro.get", {
                             "hostids": [hid],
                             "filter": {"macro": macro},
-                            "output": ["hostmacroid"],
+                            "output": ["hostmacroid", "type"],
                         })
                         if existing:
+                            mid = existing[0]["hostmacroid"]
+                            # An update keeps the macro's type: a secret stays secret.
+                            if existing[0].get("type") == SECRET_TYPE:
+                                secret = True
+                            snap = await client.take_snapshot("update", "usermacro", mid)
                             await client.call("usermacro.update", {
-                                "hostmacroid": existing[0]["hostmacroid"],
+                                "hostmacroid": mid,
                                 "value": value,
                             })
+                            client.journal("update", "usermacro", mid, snap,
+                                           f"Updated macro {macro} on host {hid}")
                             updated += 1
                         else:
-                            await client.call("usermacro.create", {
+                            result = await client.call("usermacro.create", {
                                 "hostid": hid, "macro": macro, "value": value,
                             })
+                            ids = result.get("hostmacroids") if isinstance(result, dict) else None
+                            mid = (ids or ["?"])[0]
+                            client.record_create("usermacro", mid,
+                                                 f"Created macro {macro} on host {hid}")
                             created += 1
                     except Exception:
                         errors += 1
@@ -239,7 +266,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     await asyncio.gather(*[_set_one(h) for h in chunk])
 
                 return (
-                    f"**Bulk macro set:** `{macro}` = `{value}`\n"
+                    f"**Bulk macro set:** `{macro}` = {_shown_value(value, secret)}\n"
                     f"Updated: {updated} | Created: {created} | Errors: {errors} | Total: {len(hosts)}"
                 )
             except (httpx.HTTPError, ValueError) as e:
@@ -272,8 +299,9 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     return f"Macro `{macro}` not found on host {host_id}."
 
                 mid = existing[0]["hostmacroid"]
-                await client.snapshot_and_record("delete", "usermacro", mid, f"Deleted macro {macro} from host {host_id}")
+                snap = await client.take_snapshot("delete", "usermacro", mid)
                 await client.call("usermacro.delete", [mid])
+                client.journal("delete", "usermacro", mid, snap, f"Deleted macro {macro} from host {host_id}")
                 return f"Macro `{macro}` deleted from host {host_id}."
             except (httpx.HTTPError, ValueError) as e:
                 return f"Error deleting macro: {e}"

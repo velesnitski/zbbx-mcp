@@ -172,7 +172,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
             """
             try:
                 client = resolver.resolve(instance)
-                await client.snapshot_and_record("update", "item", item_id, f"Updated item {item_id}")
+                snap = await client.take_snapshot("update", "item", item_id)
 
                 params = {"itemid": item_id}
                 if name:
@@ -185,6 +185,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     params["description"] = description
 
                 await client.call("item.update", params)
+                client.journal("update", "item", item_id, snap, f"Updated item {item_id}")
                 return f"Item {item_id} updated."
             except (httpx.HTTPError, ValueError) as e:
                 return f"Error updating item: {e}"
@@ -201,8 +202,9 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
             """
             try:
                 client = resolver.resolve(instance)
-                await client.snapshot_and_record("delete", "item", item_id, f"Deleted item {item_id}")
+                snap = await client.take_snapshot("delete", "item", item_id)
                 await client.call("item.delete", [item_id])
+                client.journal("delete", "item", item_id, snap, f"Deleted item {item_id}")
                 return f"Item {item_id} deleted."
             except (httpx.HTTPError, ValueError) as e:
                 return f"Error deleting item: {e}"

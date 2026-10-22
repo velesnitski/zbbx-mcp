@@ -264,7 +264,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
             """
             try:
                 client = resolver.resolve(instance)
-                await client.snapshot_and_record("update", "trigger", trigger_id, f"Updated trigger {trigger_id}")
+                snap = await client.take_snapshot("update", "trigger", trigger_id)
 
                 params = {"triggerid": trigger_id}
                 if description:
@@ -277,6 +277,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     params["comments"] = comments
 
                 await client.call("trigger.update", params)
+                client.journal("update", "trigger", trigger_id, snap, f"Updated trigger {trigger_id}")
                 return f"Trigger {trigger_id} updated."
             except (httpx.HTTPError, ValueError) as e:
                 return f"Error updating trigger: {e}"
@@ -293,8 +294,9 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
             """
             try:
                 client = resolver.resolve(instance)
-                await client.snapshot_and_record("delete", "trigger", trigger_id, f"Deleted trigger {trigger_id}")
+                snap = await client.take_snapshot("delete", "trigger", trigger_id)
                 await client.call("trigger.delete", [trigger_id])
+                client.journal("delete", "trigger", trigger_id, snap, f"Deleted trigger {trigger_id}")
                 return f"Trigger {trigger_id} deleted."
             except (httpx.HTTPError, ValueError) as e:
                 return f"Error deleting trigger: {e}"

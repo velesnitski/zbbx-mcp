@@ -353,7 +353,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
             """
             try:
                 client = resolver.resolve(instance)
-                await client.snapshot_and_record("update", "host", host_id, f"Updated host {host_id}")
+                snap = await client.take_snapshot("update", "host", host_id)
 
                 params = {"hostid": host_id}
                 if name:
@@ -364,6 +364,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     params["description"] = description
 
                 await client.call("host.update", params)
+                client.journal("update", "host", host_id, snap, f"Updated host {host_id}")
                 return f"Host {host_id} updated."
             except (httpx.HTTPError, ValueError) as e:
                 return f"Error updating host: {e}"
@@ -380,8 +381,9 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
             """
             try:
                 client = resolver.resolve(instance)
-                await client.snapshot_and_record("delete", "host", host_id, f"Deleted host {host_id}")
+                snap = await client.take_snapshot("delete", "host", host_id)
                 await client.call("host.delete", [host_id])
+                client.journal("delete", "host", host_id, snap, f"Deleted host {host_id}")
                 return f"Host {host_id} deleted."
             except (httpx.HTTPError, ValueError) as e:
                 return f"Error deleting host: {e}"
