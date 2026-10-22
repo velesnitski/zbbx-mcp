@@ -166,16 +166,41 @@ class ZabbixClient:
         object_id: str,
         description: str = "",
     ) -> None:
-        """Take a snapshot of an object and record it in the rollback log."""
-        if isinstance(action, str):
-            action = Action(action)
-        snap = {}
-        if action in (Action.UPDATE, Action.DELETE):
-            try:
-                snap = await self.snapshot(object_type, object_id)
-            except (ValueError, httpx.HTTPError, KeyError):
-                snap = {}  # Record without snapshot rather than fail the operation
-        self.rollback_log.record(action, object_type, object_id, snap, description)
+        """Snapshot and journal in one step.
+
+        Write tools should not use this: it journals before the mutation, so a
+        failed write would leave an entry behind. Use `take_snapshot` before
+        the write and `journal` after it succeeds.
+        """
+        snap = await self.take_snapshot(action, object_type, object_id)
+        self.journal(action, object_type, object_id, snap, description)
+
+    async def take_snapshot(
+        self, action: Action | str, object_type: str, object_id: str,
+    ) -> dict:
+        """Capture the pre-mutation state for the journal; call BEFORE writing.
+
+        Only updates and deletes need one. A failed fetch yields ``{}`` (the
+        entry is then recorded without a snapshot) rather than failing the write.
+        Secret macro values are redacted by `snapshot`.
+        """
+        if Action(action) not in (Action.UPDATE, Action.DELETE):
+            return {}
+        try:
+            return await self.snapshot(object_type, object_id)
+        except (ValueError, httpx.HTTPError, KeyError):
+            return {}
+
+    def journal(
+        self,
+        action: Action | str,
+        object_type: str,
+        object_id: str,
+        snapshot: dict,
+        description: str = "",
+    ) -> None:
+        """Commit a rollback entry; call only AFTER the write succeeded."""
+        self.rollback_log.record(Action(action), object_type, object_id, snapshot, description)
 
     def record_create(self, object_type: str, object_id: str, description: str = "") -> None:
         """Record a create operation (no snapshot needed, just the ID for undo)."""

@@ -3,7 +3,7 @@ import time
 
 import httpx
 
-from zbbx_mcp.formatters import _ts, cell, format_value
+from zbbx_mcp.formatters import _lastclock, _ts, cell, format_value
 from zbbx_mcp.resolver import InstanceResolver
 from zbbx_mcp.utils import contains_pattern, parse_time, resolve_group_ids
 
@@ -172,7 +172,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
             """
             try:
                 client = resolver.resolve(instance)
-                await client.snapshot_and_record("update", "item", item_id, f"Updated item {item_id}")
+                snap = await client.take_snapshot("update", "item", item_id)
 
                 params = {"itemid": item_id}
                 if name:
@@ -185,6 +185,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     params["description"] = description
 
                 await client.call("item.update", params)
+                client.journal("update", "item", item_id, snap, f"Updated item {item_id}")
                 return f"Item {item_id} updated."
             except (httpx.HTTPError, ValueError) as e:
                 return f"Error updating item: {e}"
@@ -201,8 +202,9 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
             """
             try:
                 client = resolver.resolve(instance)
-                await client.snapshot_and_record("delete", "item", item_id, f"Deleted item {item_id}")
+                snap = await client.take_snapshot("delete", "item", item_id)
                 await client.call("item.delete", [item_id])
+                client.journal("delete", "item", item_id, snap, f"Deleted item {item_id}")
                 return f"Item {item_id} deleted."
             except (httpx.HTTPError, ValueError) as e:
                 return f"Error deleting item: {e}"
@@ -248,7 +250,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 lines = []
                 for item in data:
                     value = format_value(item.get("lastvalue", ""), item.get("units", ""))
-                    clock = _ts(item.get("lastclock", "0"))
+                    clock = _lastclock(item.get("lastclock", "0"))
                     state = " [UNSUPPORTED]" if item.get("state") == "1" else ""
                     lines.append(
                         f"- **{item.get('name', '?')}** = {value}{state}\n"
@@ -351,7 +353,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     # value type cannot judge liveness, so it shows the age (ADR 141).
                     lines.append(
                         f"| {hostname} | {item.get('name', '?')} | `{item.get('key_', '?')}` | {value} | "
-                        f"{_ts(item.get('lastclock', '0'))} |"
+                        f"{_lastclock(item.get('lastclock', '0'))} |"
                     )
 
                 total = len(items)

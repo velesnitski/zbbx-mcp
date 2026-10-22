@@ -151,8 +151,9 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
             """
             try:
                 client = resolver.resolve(instance)
-                await client.snapshot_and_record("delete", "maintenance", maintenance_id, f"Deleted maintenance {maintenance_id}")
+                snap = await client.take_snapshot("delete", "maintenance", maintenance_id)
                 await client.call("maintenance.delete", [maintenance_id])
+                client.journal("delete", "maintenance", maintenance_id, snap, f"Deleted maintenance {maintenance_id}")
                 return f"Maintenance window {maintenance_id} deleted."
             except (httpx.HTTPError, ValueError) as e:
                 return f"Error deleting maintenance: {e}"

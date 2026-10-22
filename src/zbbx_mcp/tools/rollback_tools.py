@@ -1,8 +1,24 @@
 import httpx
 
 from zbbx_mcp.resolver import InstanceResolver
-from zbbx_mcp.rollback import SNAPSHOT_CONFIG, Action
+from zbbx_mcp.rollback import SNAPSHOT_CONFIG, TEMPLATE_LINK, Action, RollbackEntry
 from zbbx_mcp.utils import ROLLBACK_STRIP_FIELDS
+
+
+async def _undo_template_link(client, entry: RollbackEntry) -> str:
+    """Undo a link (unlink, never clear) or an unlink (relink); return the summary."""
+    host_id = entry.snapshot.get("hostid", "")
+    tid = entry.snapshot.get("templateid", entry.object_id)
+    if entry.action == Action.CREATE:
+        await client.call("host.massremove", {"hostids": [host_id], "templateids": [tid]})
+        return f"Rolled back link: unlinked template {tid} from host {host_id}"
+    await client.call("host.massadd", {"hosts": [{"hostid": host_id}],
+                                       "templates": [{"templateid": tid}]})
+    msg = f"Rolled back unlink: relinked template {tid} to host {host_id}"
+    if entry.snapshot.get("cleared"):
+        msg += (" (the unlink cleared its items; they are re-created from the "
+                "template, but their history is not restored)")
+    return msg
 
 
 def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> None:
@@ -49,10 +65,17 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
             """
             try:
                 client = resolver.resolve(instance)
-                entry = client.rollback_log.pop_last()
+                # Peek, don't pop: the entry is dropped only once the undo has
+                # succeeded, so a failed undo can be retried (as rollback_by_index).
+                entry = client.rollback_log.last
 
                 if not entry:
                     return "Nothing to roll back."
+
+                if entry.object_type == TEMPLATE_LINK:
+                    msg = await _undo_template_link(client, entry)
+                    client.rollback_log.discard(entry)
+                    return f"{msg}. ({entry.description})"
 
                 cfg = SNAPSHOT_CONFIG.get(entry.object_type)
                 if not cfg:
@@ -63,6 +86,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 if entry.action == Action.CREATE:
                     # Undo create → delete the object
                     await client.call(cfg["delete_method"], [entry.object_id])
+                    client.rollback_log.discard(entry)
                     return (
                         f"Rolled back CREATE: deleted {entry.object_type} "
                         f"{entry.object_id}. ({entry.description})"
@@ -80,6 +104,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                         restore.pop(key, None)
 
                     await client.call(cfg["update_method"], restore)
+                    client.rollback_log.discard(entry)
                     return (
                         f"Rolled back UPDATE: restored {entry.object_type} "
                         f"{entry.object_id} to previous state. ({entry.description})"
@@ -102,6 +127,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     new_id_key = f"{id_field}s"
                     new_ids = result.get(new_id_key, ["?"])
                     new_id = new_ids[0] if new_ids else "?"
+                    client.rollback_log.discard(entry)
                     return (
                         f"Rolled back DELETE: re-created {entry.object_type} "
                         f"as {new_id} (was {entry.object_id}). ({entry.description})"
@@ -134,6 +160,11 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     return f"Invalid index {index}. Valid range: 0–{len(entries) - 1}."
 
                 entry = entries[index]
+                if entry.object_type == TEMPLATE_LINK:
+                    msg = await _undo_template_link(client, entry)
+                    client.rollback_log.discard(entry)
+                    return f"{msg} (#{index})."
+
                 cfg = SNAPSHOT_CONFIG.get(entry.object_type)
                 if not cfg:
                     return f"Rollback not supported for '{entry.object_type}'."
@@ -169,7 +200,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     return f"Unknown action for #{index}."
 
                 # Remove the entry from the log
-                client.rollback_log.remove_by_index(index)
+                client.rollback_log.discard(entry)
                 return msg
             except (httpx.HTTPError, ValueError) as e:
                 return f"Rollback failed: {e}"

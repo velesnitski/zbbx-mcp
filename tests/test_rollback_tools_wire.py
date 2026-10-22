@@ -94,6 +94,8 @@ def test_rollback_last_empty_and_unsupported_and_missing_snapshot():
     assert run_tool(rollback_tools, "rollback_last", c) == \
         "Cannot roll back: no snapshot was captured before deletion."
     assert c.calls == []
+    # Nothing was undone, so nothing is dropped from the journal.
+    assert _ids(c) == [(Action.UPDATE, "3"), (Action.DELETE, "4")]
 
 
 def test_rollback_last_delete_with_empty_create_result():
@@ -111,6 +113,17 @@ def test_rollback_last_api_error():
     c.rollback_log.record(Action.CREATE, "maintenance", "42", {})
     out = run_tool(rollback_tools, "rollback_last", c)
     assert out == "Rollback failed: Zabbix API error: object exists"
+    # A failed undo keeps the entry (as rollback_by_index does), so it can be retried.
+    assert _ids(c) == [(Action.CREATE, "42")]
+
+
+def test_rollback_last_failed_restore_keeps_entry_on_top():
+    def boom(_):
+        raise ValueError("Zabbix API error: denied")
+    c = _seeded({"trigger.create": boom})
+    out = run_tool(rollback_tools, "rollback_last", c)
+    assert out == "Rollback failed: Zabbix API error: denied"
+    assert _ids(c) == [(Action.CREATE, "42"), (Action.UPDATE, "1"), (Action.DELETE, "77")]
 
 
 # --- rollback_by_index ----------------------------------------------------

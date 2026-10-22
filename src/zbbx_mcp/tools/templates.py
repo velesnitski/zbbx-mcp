@@ -1,6 +1,7 @@
 import httpx
 
 from zbbx_mcp.resolver import InstanceResolver
+from zbbx_mcp.rollback import TEMPLATE_LINK, Action
 
 
 def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> None:
@@ -74,7 +75,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
             template_id: str,
             instance: str = "",
         ) -> str:
-            """Link a template to a host.
+            """Link a template to a host, keeping the templates it already has.
 
             Args:
                 host_id: Host ID to link the template to
@@ -83,10 +84,15 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
             """
             try:
                 client = resolver.resolve(instance)
-                await client.call("host.update", {
-                    "hostid": host_id,
+                # host.massadd adds; `templates` on host.update would REPLACE
+                # the host's whole template list.
+                await client.call("host.massadd", {
+                    "hosts": [{"hostid": host_id}],
                     "templates": [{"templateid": template_id}],
                 })
+                client.journal(Action.CREATE, TEMPLATE_LINK, template_id,
+                               {"hostid": host_id, "templateid": template_id},
+                               f"Linked template {template_id} to host {host_id}")
                 return f"Template {template_id} linked to host {host_id}."
             except (httpx.HTTPError, ValueError) as e:
                 return f"Error linking template: {e}"
@@ -105,19 +111,27 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
             Args:
                 host_id: Host ID to unlink the template from
                 template_id: Template ID to unlink
-                clear: Also remove items/triggers inherited from template (default: False)
+                clear: Also delete the items/triggers inherited from the template,
+                    with their history (default: False keeps them on the host).
+                    A clear cannot be undone.
                 instance: Zabbix instance name (optional, for multi-instance setups)
             """
             try:
                 client = resolver.resolve(instance)
-                params = {"hostid": host_id}
+                key = "templateids_clear" if clear else "templateids"
+                await client.call("host.massremove", {"hostids": [host_id], key: [template_id]})
+                client.journal(Action.DELETE, TEMPLATE_LINK, template_id,
+                               {"hostid": host_id, "templateid": template_id, "cleared": clear},
+                               f"Unlinked template {template_id} from host {host_id}"
+                               + (" (cleared)" if clear else ""))
                 if clear:
-                    params["templates_clear"] = [{"templateid": template_id}]
-                else:
-                    params["templates_clear"] = [{"templateid": template_id}]
-
-                await client.call("host.update", params)
-                action = "unlinked and cleared" if clear else "unlinked"
-                return f"Template {template_id} {action} from host {host_id}."
+                    return (
+                        f"Template {template_id} unlinked and cleared from host {host_id}. "
+                        "Its inherited items, triggers and their history were deleted; "
+                        "this cannot be undone (a rollback relinks the template, but the "
+                        "history is gone)."
+                    )
+                return (f"Template {template_id} unlinked from host {host_id} "
+                        "(inherited items and triggers kept).")
             except (httpx.HTTPError, ValueError) as e:
                 return f"Error unlinking template: {e}"

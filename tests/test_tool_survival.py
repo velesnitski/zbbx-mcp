@@ -96,7 +96,7 @@ class EmptyClient(RecordingClient):
     """An instance with nothing in it: reads return ``[]``, writes ``{}``.
 
     Borrows the real client's rollback surface (``rollback_log``,
-    ``snapshot_and_record``, ``record_create``) so write tools journal exactly
+    ``take_snapshot``, ``journal``, ``record_create``) so write tools journal exactly
     as they would in production — into memory, never to a server.
     """
 
@@ -112,6 +112,8 @@ class EmptyClient(RecordingClient):
 
     snapshot = ZabbixClient.snapshot
     snapshot_and_record = ZabbixClient.snapshot_and_record
+    take_snapshot = ZabbixClient.take_snapshot
+    journal = ZabbixClient.journal
     record_create = ZabbixClient.record_create
     call_many = ZabbixClient.call_many
 

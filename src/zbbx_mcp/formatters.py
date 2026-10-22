@@ -41,6 +41,13 @@ def _ts(epoch: str) -> str:
         return epoch
 
 
+def _lastclock(epoch: str) -> str:
+    """Render an item's ``lastclock``: ``"0"`` / empty means never collected (ADR 141)."""
+    if str(epoch).strip() in ("", "0"):
+        return "never"
+    return _ts(epoch)
+
+
 def format_severity(severity: str) -> str:
     return SEVERITY_NAMES.get(str(severity), f"Unknown ({severity})")
 

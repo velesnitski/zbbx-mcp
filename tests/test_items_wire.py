@@ -15,10 +15,7 @@ LIVE = str(NOW - 60)        # recent lastclock: a live reading (ADR 141)
 
 
 class JournalClient(RecordingClient):
-    """RecordingClient plus the async snapshot hook the update/delete tools use."""
-
-    async def snapshot_and_record(self, action, kind, obj_id, note=""):
-        self.rollback.append((action, kind, obj_id, note))
+    """RecordingClient; write tools journal into ``rollback`` via ``journal``."""
 
 
 class FailingClient(JournalClient):
@@ -137,6 +134,7 @@ class TestGetHostItems:
         assert p["limit"] == 50 and "search" not in p
         assert out.startswith("**Found: 3 items**")
         assert "**Inbound** = N/A" in out
+        assert "id: 2 | updated: never" in out and "1970" not in out
         assert "**Broken** = 1 [UNSUPPORTED]" in out
         assert "key: `system.cpu.util[,idle]` | id: 1" in out
 
@@ -185,9 +183,9 @@ class TestSearchItems:
         assert ip["limit"] == 30
         assert "**2 items** matching 'net.if.in' across 3 hosts" in out
         assert "| srv-aq9001 | Inbound | `net.if.in[eth0]` |" in out
-        # lastclock "0" means never collected (ADR 141); today it renders as the
-        # epoch date rather than "never" -- pinned here, reported as a finding.
-        assert "| srv-aq9002 | Inbound | `net.if.in[eth0]` | N/A | 1970-01-01 00:00 UTC |" in out
+        # lastclock "0" means never collected (ADR 141): "never", not the epoch.
+        assert "| srv-aq9002 | Inbound | `net.if.in[eth0]` | N/A | never |" in out
+        assert "1970" not in out
         assert "srv-aq9003-test" in out          # excluded host is named, not hidden
 
     def test_country_group_and_include_test(self):

@@ -9,9 +9,8 @@ literal sits in the repository.
 import time
 
 import httpx
-import pytest
 
-from tests.wiretest import RecordingClient, run_tool
+from tests.wiretest import JournalingClient, RecordingClient, run_tool
 from zbbx_mcp.tools import macros
 
 SECRET = "-".join(["not", "a", "real", "value"])
@@ -19,10 +18,7 @@ NOW = str(int(time.time()) - 60)
 
 
 class JournalClient(RecordingClient):
-    """RecordingClient plus the snapshot-taking journal hook update/delete use."""
-
-    async def snapshot_and_record(self, action, kind, obj_id, note=""):
-        self.rollback.append((action, kind, obj_id, note))
+    """RecordingClient; write tools journal into ``rollback`` via ``journal``."""
 
 
 HOST_MACROS = [
@@ -185,7 +181,7 @@ def test_bulk_dry_run_filters_by_group_country_traffic():
     assert "| srv-aq9001 | 1 |" in out
     assert "srv-bv9003" not in out and "srv-hm9004" not in out
     assert "Run with `dry_run=False` to apply." in out
-    assert not any(m.startswith("usermacro.") for m, _ in c.calls)
+    assert not any(m in ("usermacro.update", "usermacro.create") for m, _ in c.calls)
     assert c.sent("item.get")["hostids"] == ["1"]
 
 
@@ -204,14 +200,15 @@ def test_bulk_no_match():
     assert out == "No hosts match the filters."
 
 
-def test_bulk_apply_updates_creates_and_counts_errors():
+def test_bulk_apply_updates_creates_counts_errors_and_journals():
     def get_macro(p):
         hid = p["hostids"][0]
         if hid == "4":
             raise ValueError("denied")
-        return [{"hostmacroid": "m1"}] if hid == "1" else []
+        return [{"hostmacroid": "m1", "type": "0"}] if hid == "1" else []
 
-    c = RecordingClient({"host.get": HOSTS, "usermacro.get": get_macro})
+    c = RecordingClient({"host.get": HOSTS, "usermacro.get": get_macro,
+                         "usermacro.create": lambda p: {"hostmacroids": ["n" + p["hostid"]]}})
     out = run_tool(macros, "set_bulk_macro", c, macro="{$BW_LIMIT}", value="100",
                    dry_run=False)
     assert out == ("**Bulk macro set:** `{$BW_LIMIT}` = `100`\n"
@@ -220,8 +217,22 @@ def test_bulk_apply_updates_creates_and_counts_errors():
     creates = sorted(p["hostid"] for m, p in c.calls if m == "usermacro.create")
     assert creates == ["2", "3"]
     assert c.sent("usermacro.create")["macro"] == "{$BW_LIMIT}"
-    # The bulk path writes no rollback journal entries today.
-    assert c.rollback == []
+    assert c.sent("usermacro.get")["output"] == ["hostmacroid", "type"]
+    # One journal entry per host changed; the failed host leaves none.
+    assert sorted(c.rollback) == [
+        ("create", "usermacro", "n2", "Created macro {$BW_LIMIT} on host 2"),
+        ("create", "usermacro", "n3", "Created macro {$BW_LIMIT} on host 3"),
+        ("update", "usermacro", "m1", "Updated macro {$BW_LIMIT} on host 1"),
+    ]
+
+
+def test_bulk_apply_failed_write_journals_nothing():
+    c = JournalingClient({"host.get": HOSTS[:1],
+                          "usermacro.get": [{"hostmacroid": "m1", "type": "0"}],
+                          "usermacro.update": _boom(ValueError("denied"))})
+    out = run_tool(macros, "set_bulk_macro", c, macro="{$X}", value="1", dry_run=False)
+    assert "Errors: 1" in out
+    assert c.rollback_log.entries == []
 
 
 def test_bulk_host_fetch_error():
@@ -231,12 +242,29 @@ def test_bulk_host_fetch_error():
     assert out == "Error: down"
 
 
-@pytest.mark.xfail(strict=True, reason=(
-    "finding: set_bulk_macro has no type awareness and echoes the value in its "
-    "output, even when it overwrites an existing Secret-typed macro"))
 def test_bulk_apply_does_not_echo_value_over_secret_macro():
-    c = RecordingClient({"host.get": HOSTS[:1],
-                         "usermacro.get": [{"hostmacroid": "72", "type": "1"}]})
+    def get_macro(p):
+        if "hostmacroids" in p:  # the journal snapshot
+            return [{"hostmacroid": "72", "macro": "{$DB_PASS}", "value": SECRET, "type": "1"}]
+        return [{"hostmacroid": "72", "type": "1"}]
+
+    c = JournalingClient({"host.get": HOSTS[:1], "usermacro.get": get_macro})
     out = run_tool(macros, "set_bulk_macro", c, macro="{$DB_PASS}", value=SECRET,
                    dry_run=False)
     assert SECRET not in out
+    assert out.startswith("**Bulk macro set:** `{$DB_PASS}` = <secret>\n")
+    assert c.sent("usermacro.update") == {"hostmacroid": "72", "value": SECRET}
+    [e] = c.rollback_log.entries
+    assert (e.object_type, e.object_id) == ("usermacro", "72")
+    assert e.snapshot["value"] == "[REDACTED]"  # the snapshot path redacts secrets
+
+
+def test_bulk_dry_run_does_not_echo_value_over_secret_macro():
+    c = RecordingClient({"host.get": HOSTS[:2],
+                         "usermacro.get": [{"hostid": "2", "hostmacroid": "72", "type": "1"}]})
+    out = run_tool(macros, "set_bulk_macro", c, macro="{$DB_PASS}", value=SECRET)
+    assert SECRET not in out
+    assert out.startswith("**Dry run:** would set `{$DB_PASS}` = <secret> on 2 hosts")
+    assert c.sent("usermacro.get") == {"hostids": ["1", "2"], "filter": {"macro": "{$DB_PASS}"},
+                                       "output": ["hostid", "type"]}
+    assert not any(m in ("usermacro.update", "usermacro.create") for m, _ in c.calls)

@@ -9,7 +9,10 @@ scaffolding; this module is the single shared implementation.
 
 import asyncio
 
-__all__ = ["RecordingClient", "CaptureMCP", "StubResolver", "run_tool"]
+from zbbx_mcp.client import ZabbixClient
+from zbbx_mcp.rollback import RollbackLog
+
+__all__ = ["RecordingClient", "JournalingClient", "CaptureMCP", "StubResolver", "run_tool"]
 
 
 class RecordingClient:
@@ -45,11 +48,35 @@ class RecordingClient:
     def record_create(self, kind, obj_id, note=""):
         self.rollback.append(("create", kind, obj_id, note))
 
+    async def take_snapshot(self, action, kind, obj_id):
+        return {}
+
+    def journal(self, action, kind, obj_id, snapshot, note=""):
+        self.rollback.append((getattr(action, "value", action), kind, obj_id, note))
+
     def record_update(self, kind, obj_id, before=None, note=""):
         self.rollback.append(("update", kind, obj_id, note))
 
     def record_delete(self, kind, obj_id, before=None, note=""):
         self.rollback.append(("delete", kind, obj_id, note))
+
+
+class JournalingClient(RecordingClient):
+    """RecordingClient wired to the real client's snapshot and rollback journal.
+
+    Snapshots go through ``call`` (so they show up in ``calls`` and their order
+    against the write can be asserted) and entries land in a real RollbackLog.
+    """
+
+    def __init__(self, responses=None):
+        super().__init__(responses)
+        self.rollback_log = RollbackLog()
+
+    snapshot = ZabbixClient.snapshot
+    take_snapshot = ZabbixClient.take_snapshot
+    journal = ZabbixClient.journal
+    snapshot_and_record = ZabbixClient.snapshot_and_record
+    record_create = ZabbixClient.record_create
 
 
 class CaptureMCP:

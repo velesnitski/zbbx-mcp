@@ -71,8 +71,9 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
             """
             try:
                 client = resolver.resolve(instance)
-                await client.snapshot_and_record("delete", "hostgroup", group_id, f"Deleted host group {group_id}")
+                snap = await client.take_snapshot("delete", "hostgroup", group_id)
                 await client.call("hostgroup.delete", [group_id])
+                client.journal("delete", "hostgroup", group_id, snap, f"Deleted host group {group_id}")
                 return f"Host group {group_id} deleted."
             except (httpx.HTTPError, ValueError) as e:
                 return f"Error deleting host group: {e}"
