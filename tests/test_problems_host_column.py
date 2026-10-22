@@ -91,7 +91,7 @@ class TestHostColumn:
     def test_one_trigger_lookup_over_distinct_ids(self):
         c = _client()
         run_tool(problems, "get_problems", c)
-        tg = c.sent("trigger.get")
+        tg = next(p for m, p in c.calls if m == "trigger.get" and "selectHosts" in p)
         assert sorted(tg["triggerids"]) == ["t1", "t2", "t3"]
         assert tg["selectHosts"] == ["hostid", "host"]
         assert "objectid" in c.sent("problem.get")["output"]

@@ -9,7 +9,7 @@ import httpx
 import pytest
 
 import zbbx_mcp
-from tests.wiretest import RecordingClient, run_tool
+from tests.wiretest import RecordingClient, live_triggers, run_tool
 from zbbx_mcp import classify
 from zbbx_mcp.tools import health
 from zbbx_mcp.tools.health import source_tree_version, stale_build_warning
@@ -192,8 +192,8 @@ def _problem_client(problems=PROBLEMS):
                 for e in p["eventids"]]
     return RecordingClient({
         "problem.get": problems,
-        "trigger.get": [{"triggerid": "t2", "dependencies": [{"triggerid": "t1"}]},
-                        {"triggerid": "t1", "dependencies": []}],
+        "trigger.get": live_triggers([{"triggerid": "t2", "dependencies": [{"triggerid": "t1"}]},
+                                      {"triggerid": "t1", "dependencies": []}]),
         "event.get": event_get,
     })
 
@@ -205,7 +205,7 @@ class TestActiveProblems:
         pg = c.sent("problem.get")
         assert pg["severities"] == [2, 3, 4, 5] and pg["limit"] == 500 and pg["recent"] is True
         assert "tags" not in pg
-        tg = c.sent("trigger.get")
+        tg = next(p for m, p in c.calls if m == "trigger.get" and "selectDependencies" in p)
         assert "t4" not in tg["triggerids"] and {"t1", "t2", "t3", "t5"} <= set(tg["triggerids"])
         assert tg["selectDependencies"] == ["triggerid"]
         assert c.sent("event.get")["selectHosts"] == ["host"]
@@ -229,7 +229,7 @@ class TestActiveProblems:
         pg = c.sent("problem.get")
         assert pg["tags"] == [{"tag": "role", "value": "edge", "operator": 0}]
         assert pg["evaltype"] == 0 and pg["severities"] == [4, 5]
-        assert not any(m == "trigger.get" for m, _p in c.calls)
+        assert not any(m == "trigger.get" and "selectDependencies" in _p for m, _p in c.calls)
         assert out.startswith("**14 active problems**\n")            # e2 and e4 kept
         assert "- **High:** 2\n- **Average:** 11\n- **Warning:** 1" in out
         assert "| High | srv-aq9001 | Agent down |" in out

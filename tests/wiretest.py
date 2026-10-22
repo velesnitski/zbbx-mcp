@@ -9,7 +9,7 @@ scaffolding; this module is the single shared implementation.
 
 import asyncio
 
-__all__ = ["RecordingClient", "CaptureMCP", "StubResolver", "run_tool"]
+__all__ = ["RecordingClient", "CaptureMCP", "StubResolver", "run_tool", "live_triggers"]
 
 
 class RecordingClient:
@@ -78,3 +78,16 @@ def run_tool(module, tool_name, client, **kwargs):
     mcp = CaptureMCP()
     module.register(mcp, StubResolver(client))
     return asyncio.run(mcp.fns[tool_name](**kwargs))
+
+
+def live_triggers(reply=None):
+    """A ``trigger.get`` responder for tools that also ask which open problems
+    sit on disabled triggers (``selectItems``): that query sees every
+    requested trigger enabled with one enabled item, so no problem reads as
+    frozen; any other ``trigger.get`` gets ``reply`` (static or callable)."""
+    def respond(params):
+        if "selectItems" in params:
+            return [{"triggerid": t, "status": "0", "items": [{"itemid": f"i{t}", "status": "0"}]}
+                    for t in params.get("triggerids", [])]
+        return reply(params) if callable(reply) else (reply or [])
+    return respond
