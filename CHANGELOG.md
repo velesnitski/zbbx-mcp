@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.16.77] - 2026-10-23
+
+### Security
+
+- **`certifi>=2026.10.19`** (ADR 157): earlier bundles trust a root whose
+  intermediate keys were generated weak (GHSA-6q48-6c7w-9gw2, critical). The
+  API client trusts this bundle. Declared floor, lock re-resolved, no code
+  change.
+
 ## [1.16.76] - 2026-10-22
 
 ### Fixed
