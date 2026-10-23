@@ -140,13 +140,17 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
     if "rollback_by_index" not in skip:
 
         @mcp.tool()
-        async def rollback_by_index(index: int, instance: str = "") -> str:
+        async def rollback_by_index(index: int, discard: bool = False, instance: str = "") -> str:
             """Undo a specific write operation by its index from rollback history.
 
             Use get_rollback_history to see available indices.
 
             Args:
                 index: Entry index from rollback history (0 = oldest)
+                discard: Remove the entry from the journal WITHOUT undoing it — for
+                    an entry whose undo cannot run (unsupported type, no snapshot,
+                    object already gone), which would otherwise block rollback_last
+                    forever (default: False)
                 instance: Zabbix instance name (optional, for multi-instance setups)
             """
             try:
@@ -160,6 +164,13 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     return f"Invalid index {index}. Valid range: 0–{len(entries) - 1}."
 
                 entry = entries[index]
+                if discard:
+                    # Only the local journal changes; Zabbix is not touched
+                    # (ADR 158). Said plainly so nobody reads it as an undo.
+                    client.rollback_log.discard(entry)
+                    return (f"Discarded #{index} ({entry.action.value} {entry.object_type} "
+                            f"{entry.object_id}) from the journal without undoing it — "
+                            "Zabbix was not changed.")
                 if entry.object_type == TEMPLATE_LINK:
                     msg = await _undo_template_link(client, entry)
                     client.rollback_log.discard(entry)

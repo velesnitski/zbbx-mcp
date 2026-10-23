@@ -75,7 +75,15 @@ SPLIT_RECENT = {"s1": [10 * MBPS], "m1": [195 * MBPS], "s2": [5 * MBPS], "m2": [
 class TestServicePortSplitWire:
     def _client(self, hosts=SPLIT_HOSTS, items=SPLIT_ITEMS, base=SPLIT_BASE, recent=SPLIT_RECENT):
         def item_get(p):
-            return [it for it in items if it["hostid"] in p["hostids"]]
+            # Honour an exact key filter (service item) and the NIC prefix
+            # search, as Zabbix does.
+            keys = p.get("filter", {}).get("key_")
+            out = [it for it in items if it["hostid"] in p["hostids"]]
+            if keys:
+                return [it for it in out if it["key_"] in keys]
+            if "search" in p:
+                return [it for it in out if it["key_"].startswith("net.if.in[")]
+            return out
         return RecordingClient({"host.get": hosts, "item.get": item_get,
                                 "trend.get": _trends(base, recent)})
 
@@ -93,10 +101,10 @@ class TestServicePortSplitWire:
         assert "**1 hosts with service/mgmt traffic split**" in out
         assert "| srv-aq9001 | 192.0.2.1 | 90% | 2% | 100.0 → 10.0 Mbps |" in out
         assert "srv-aq9002" not in out and "srv-bv9003" not in out
-        items = c.sent("item.get")
-        assert items["hostids"] == ["1", "2", "3", "4"]
-        assert items["filter"]["key_"][0] == SERVICE_KEY
-        assert "net.if.in[eth0]" in items["filter"]["key_"]
+        svc, nic = [p for m, p in c.calls if m == "item.get"]
+        assert svc["hostids"] == nic["hostids"] == ["1", "2", "3", "4"]
+        assert svc["filter"]["key_"] == [SERVICE_KEY]
+        assert nic["search"] == {"key_": "*net.if.in[*"} and nic["searchWildcardsEnabled"]
         trend_calls = [p for m, p in c.calls if m == "trend.get"]
         assert len(trend_calls) == 2
         base, rec = trend_calls
@@ -303,3 +311,36 @@ class TestDisruptionWaveWire:
     def test_api_error(self):
         c = RecordingClient({"host.get": _raise(httpx.ReadTimeout("timed out"))})
         assert run_tool(disruption, "detect_disruption_wave", c) == "Error: timed out"
+
+
+class TestServicePortSplitNics:
+    """ADR 158: management NICs are found by prefix and summed bond-aware."""
+
+    def _run(self, monkeypatch, items, base, recent):
+        monkeypatch.setattr(disruption, "KEY_SERVICE_BPS", SERVICE_KEY)
+        return run_tool(disruption, "detect_service_port_split",
+                        TestServicePortSplitWire()._client(items=items, base=base, recent=recent),
+                        window_days=7, recent_days=1)
+
+    def test_a_bond_and_its_members_are_not_counted_twice(self, monkeypatch):
+        items = [
+            {"itemid": "s1", "hostid": "1", "key_": SERVICE_KEY},
+            {"itemid": "b1", "hostid": "1", "key_": "net.if.in[bond0]"},
+            {"itemid": "e1", "hostid": "1", "key_": "net.if.in[eth0]"},
+            {"itemid": "e2", "hostid": "1", "key_": "net.if.in[eth1]"},
+        ]
+        base = {"s1": [100 * MBPS], "b1": [200 * MBPS], "e1": [100 * MBPS], "e2": [100 * MBPS]}
+        recent = {"s1": [10 * MBPS], "b1": [190 * MBPS], "e1": [60 * MBPS], "e2": [60 * MBPS]}
+        out = self._run(monkeypatch, items, base, recent)
+        assert "**1 hosts with service/mgmt traffic split**" in out
+        assert "| 90% | 5% |" in out          # the bond alone: 200 → 190, not 400 → 310
+
+    def test_quoted_stock_template_keys_are_seen(self, monkeypatch):
+        items = [
+            {"itemid": "s1", "hostid": "1", "key_": SERVICE_KEY},
+            {"itemid": "q1", "hostid": "1", "key_": 'net.if.in["enp3s0"]'},
+        ]
+        base = {"s1": [100 * MBPS], "q1": [200 * MBPS]}
+        recent = {"s1": [10 * MBPS], "q1": [196 * MBPS]}
+        out = self._run(monkeypatch, items, base, recent)
+        assert "**1 hosts with service/mgmt traffic split**" in out

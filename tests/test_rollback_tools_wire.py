@@ -177,3 +177,27 @@ def test_rollback_tools_gated_by_read_only():
     mcp = CaptureMCP()
     rollback_tools.register(mcp, StubResolver(JournalClient()), skip=set(WRITE_TOOLS))
     assert set(mcp.fns) == {"get_rollback_history"}
+
+
+# --- discard (ADR 158) ------------------------------------------------------
+
+def test_an_entry_that_cannot_be_undone_can_be_discarded_and_unblocks_rollback_last():
+    c = _seeded({"trigger.create": {"triggerids": ["9078"]}})
+    c.rollback_log.record(Action.UPDATE, "dashboard", "3", {"x": 1})   # unsupported: blocks the top
+    assert run_tool(rollback_tools, "rollback_last", c) == \
+        "Rollback not supported for object type 'dashboard'."
+
+    out = run_tool(rollback_tools, "rollback_by_index", c, index=3, discard=True)
+    assert out == ("Discarded #3 (update dashboard 3) from the journal without undoing it — "
+                   "Zabbix was not changed.")
+    assert c.calls == []                                   # nothing sent to Zabbix
+    assert (Action.UPDATE, "3") not in _ids(c)
+    # The journal's top is a real entry again.
+    assert run_tool(rollback_tools, "rollback_last", c).startswith("Rolled back DELETE")
+
+
+def test_discard_respects_the_index_guards():
+    c = _seeded()
+    assert run_tool(rollback_tools, "rollback_by_index", c, index=9, discard=True) == \
+        "Invalid index 9. Valid range: 0–2."
+    assert len(c.rollback_log.entries) == 3

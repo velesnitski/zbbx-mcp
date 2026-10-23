@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.16.78] - 2026-10-23
+
+### Fixed
+
+- **`get_item_history` reads `value_type` from the item** (ADR 158); the
+  parameter is an override, out-of-range values fall back.
+- **`detect_service_port_split` / `detect_disruption_wave` find management
+  NICs by prefix**, so quoted stock-template keys are seen; the split sums a
+  bond and its members once, not twice.
+- **Guard test allows `sortfield` itemid/clock on `history.get`**, as the API
+  does.
+
+### Added
+
+- **`rollback_by_index(discard=True)`** removes a journal entry without
+  undoing it.
+
 ## [1.16.77] - 2026-10-23
 
 ### Security

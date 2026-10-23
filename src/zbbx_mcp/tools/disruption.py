@@ -15,6 +15,7 @@ different questions:
 
 from __future__ import annotations
 
+import asyncio
 import time as _time
 
 import httpx
@@ -24,13 +25,12 @@ from zbbx_mcp.classify import classify_host as _classify_host
 from zbbx_mcp.data import (
     KEY_SERVICE_BPS,
     STATUS_ENABLED,
-    TRAFFIC_IN_KEYS,
     _get_regional_traffic_keys,
     build_parent_map,
     extract_country,
     host_ip,
 )
-from zbbx_mcp.fetch import from_mbps, to_mbps
+from zbbx_mcp.fetch import from_mbps, physical_traffic_items, to_mbps
 from zbbx_mcp.resolver import InstanceResolver
 from zbbx_mcp.tools.correlation import subnet24
 
@@ -323,21 +323,27 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 hostids = [h["hostid"] for h in hosts]
                 host_map = {h["hostid"]: h for h in hosts}
 
-                key_filter = [KEY_SERVICE_BPS, *TRAFFIC_IN_KEYS]
-                items = await client.call("item.get", {
-                    "hostids": hostids,
-                    "output": ["itemid", "hostid", "key_"],
-                    "filter": {"key_": key_filter, "status": "0"},
-                })
-                service_iid: dict[str, str] = {}
+                # Service item by its exact key; management NICs by prefix
+                # through the shared physical-interface helper, so quoted
+                # stock-template keys are seen (ADR 147, ADR 158).
+                svc_items, nic_items = await asyncio.gather(
+                    client.call("item.get", {
+                        "hostids": hostids,
+                        "output": ["itemid", "hostid", "key_"],
+                        "filter": {"key_": [KEY_SERVICE_BPS], "status": "0"},
+                    }),
+                    physical_traffic_items(client, hostids, output=("itemid", "hostid", "key_")),
+                )
+                service_iid: dict[str, str] = {
+                    it["hostid"]: it["itemid"] for it in svc_items or []
+                }
                 mgmt_iids: dict[str, list[str]] = {}
-                for it in items:
-                    hid = it["hostid"]
-                    key = it.get("key_", "")
-                    if key == KEY_SERVICE_BPS:
-                        service_iid[hid] = it["itemid"]
-                    else:
-                        mgmt_iids.setdefault(hid, []).append(it["itemid"])
+                iid_key: dict[str, str] = {}
+                for it in nic_items:
+                    if it.get("key_", "") == KEY_SERVICE_BPS:
+                        continue
+                    mgmt_iids.setdefault(it["hostid"], []).append(it["itemid"])
+                    iid_key[it["itemid"]] = it.get("key_", "")
 
                 if not service_iid:
                     return "No service-port items found on the selected hosts."
@@ -352,19 +358,18 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 baseline_avg = await _trends_window_avg(client, all_iids, baseline_from, cutoff)
                 recent_avg = await _trends_window_avg(client, all_iids, cutoff, now)
 
-                def _agg(iids: list[str], src: dict[str, float]) -> float | None:
-                    vals = [src[iid] for iid in iids if iid in src]
-                    if not vals:
-                        return None
-                    return sum(vals)
-
                 rows: list[dict] = []
                 for hid, s_iid in service_iid.items():
                     s_b = baseline_avg.get(s_iid)
                     s_r = recent_avg.get(s_iid)
-                    m_iids = mgmt_iids.get(hid, [])
-                    m_b = _agg(m_iids, baseline_avg)
-                    m_r = _agg(m_iids, recent_avg)
+                    # Bond-aware and both-windows, the rule the wave detector
+                    # already uses (ADR 100): summing a bond with its member
+                    # ports counted the same traffic twice (ADR 158).
+                    agg = aggregate_host_windows([
+                        (iid_key.get(iid, ""), baseline_avg.get(iid), recent_avg.get(iid))
+                        for iid in mgmt_iids.get(hid, [])
+                    ])
+                    m_b, m_r = agg if agg is not None else (None, None)
                     label, details = _classify_service_split(
                         s_b, s_r, m_b, m_r,
                         service_drop_pct=service_drop_pct,
@@ -554,12 +559,10 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     hcc = extract_country(h.get("host", ""))
                     cohort_keys[h["hostid"]] = f"{prod}:{tier}:{hcc}"
 
-                items = await client.call("item.get", {
-                    # key_ is needed to tell a bond from its slaves (ADR 100).
-                    "output": ["itemid", "hostid", "key_"],
-                    "hostids": hostids,
-                    "filter": {"key_": TRAFFIC_IN_KEYS, "status": "0"},
-                })
+                # key_ is needed to tell a bond from its slaves (ADR 100);
+                # prefix discovery sees quoted keys (ADR 147, ADR 158).
+                items = await physical_traffic_items(
+                    client, hostids, output=("itemid", "hostid", "key_"))
                 iid_to_hid: dict[str, str] = {it["itemid"]: it["hostid"] for it in items}
                 iid_key: dict[str, str] = {
                     it["itemid"]: it.get("key_", "") for it in items

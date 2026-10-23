@@ -373,7 +373,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
         @mcp.tool()
         async def get_item_history(
             item_id: str,
-            value_type: int = 0,
+            value_type: int = -1,
             limit: int = 20,
             time_from: str = "",
             time_till: str = "",
@@ -383,7 +383,8 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
 
             Args:
                 item_id: Zabbix item ID
-                value_type: 0=float, 1=character, 2=log, 3=unsigned int, 4=text (default: 0)
+                value_type: Override only — read from the item by default (-1). 0=float,
+                    1=character, 2=log, 3=unsigned int, 4=text
                 limit: Number of history records to return (default: 20)
                 time_from: Start time — epoch, ISO ("2026-04-19"), ISO datetime, or relative ("24h", "7d")
                 time_till: End time — same formats as time_from (optional)
@@ -401,7 +402,10 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     return f"Item '{item_id}' not found."
 
                 item = items[0]
-                vtype = int(item.get("value_type", value_type))
+                # The item knows its own type; the parameter is an override,
+                # not a guess the caller must get right (ADR 158). It was
+                # declared with a default of 0 and then silently ignored.
+                vtype = value_type if value_type in (0, 1, 2, 3, 4) else int(item.get("value_type", 0))
                 units = item.get("units", "")
 
                 params = {

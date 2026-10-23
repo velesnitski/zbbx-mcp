@@ -231,7 +231,7 @@ class TestItemHistory:
     def test_happy_path_uses_item_value_type(self):
         hist = [{"clock": LIVE, "value": "2000"}, {"clock": str(NOW - 120), "value": "1000"}]
         c = RecordingClient({"item.get": self.META, "history.get": hist})
-        out = run_tool(items, "get_item_history", c, item_id="11", value_type=0, limit=2,
+        out = run_tool(items, "get_item_history", c, item_id="11", limit=2,
                        time_from="1700000000", time_till="1700086400")
         assert c.sent("item.get")["itemids"] == ["11"]
         assert c.sent("history.get") == {
@@ -241,6 +241,17 @@ class TestItemHistory:
         }
         assert "# History: Inbound" in out and "**Records:** 2" in out
         assert out.count("\n| ") == 3       # header + 2 rows
+
+    def test_an_explicit_value_type_overrides_the_item(self):
+        # ADR 158: the parameter used to be silently ignored.
+        c = RecordingClient({"item.get": self.META, "history.get": []})
+        run_tool(items, "get_item_history", c, item_id="11", value_type=4)
+        assert c.sent("history.get")["history"] == 4
+
+    def test_an_out_of_range_value_type_falls_back_to_the_item(self):
+        c = RecordingClient({"item.get": self.META, "history.get": []})
+        run_tool(items, "get_item_history", c, item_id="11", value_type=9)
+        assert c.sent("history.get")["history"] == 3
 
     def test_not_found_empty_and_bad_times(self):
         assert run_tool(items, "get_item_history", RecordingClient(), item_id="404") == \

@@ -188,11 +188,14 @@ def iter_call_output_fields():
 # columns are NARROWER than the usual "any output field" are listed; an
 # illegal value is a hard -32500 that kills the call (ADR 096: mediatype.get
 # sorted by "name", which is not a sort column, so the tool errored on every
-# invocation). trend.get/history.get take no sort parameters at all.
+# invocation). trend.get takes no sort parameters at all; history.get sorts
+# by itemid or clock only (verified live, ADR 158 — the earlier "none" entry
+# was wrong and only went unnoticed because the one real call site builds
+# its params in a variable the guard cannot see).
 ALLOWED_SORTFIELDS = {
     "mediatype.get": {"mediatypeid"},
     "trend.get": set(),
-    "history.get": set(),
+    "history.get": {"itemid", "clock"},
     "alert.get": {"alertid", "clock", "eventid", "status"},
     "auditlog.get": {"auditid", "clock"},
 }
