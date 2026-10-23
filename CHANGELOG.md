@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.16.79] - 2026-10-23
+
+### Security
+
+- **`mcp>=1.30.0`** (ADR 159): earlier SDKs never evict StreamableHTTP
+  sessions, so the HTTP transport could be driven out of memory. Floor
+  declared, lock re-resolved, no code change.
+
 ## [1.16.78] - 2026-10-23
 
 ### Fixed

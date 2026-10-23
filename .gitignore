@@ -43,6 +43,7 @@ docs/adr/121-hostname-examples-allow-list.md
 # Deployment-specific range files (ADR 120 / 122). They describe real
 # infrastructure and must never be committed.
 *.local.json
+*.local.json.*
 
 # Mutation testing (scripts/mutation.sh): mutmut's working copy and cache
 mutants/

@@ -207,6 +207,7 @@ fixed headings (`## Problem`, `## Decision`, `## Test approach`,
 | [156](156-a-problem-that-cannot-recover-is-not-an-outage.md) | A problem that cannot recover is not an outage | Problems on disabled triggers or items never close and were counted as live outages everywhere. One `trigger.get` marks them frozen; a failed lookup keeps everything live, a trigger without items is live; frozen problems are excluded from counts and verdicts and always named as monitoring debt; `include_frozen=True` lists them. |
 | [157](157-a-ca-bundle-floor.md) | A CA bundle floor | `certifi` before 2026.10.19 trusts a root whose intermediates had weak keys (GHSA-6q48-6c7w-9gw2). The API client trusts that bundle, so the floor is declared and the lock re-resolved, per ADR 149. |
 | [158](158-four-small-read-corrections.md) | Four small read corrections | `history.get` may sort by itemid/clock; item history reads `value_type` from the item; `rollback_by_index` can discard; the service split finds NICs by prefix and sums bond-aware. |
+| [159](159-mcp-sdk-session-floor.md) | MCP SDK session floor | The SDK before 1.30.0 never evicts StreamableHTTP sessions; the HTTP transport is offered, so the floor is declared per ADR 149. |
 
 ## Writing a new ADR
 
