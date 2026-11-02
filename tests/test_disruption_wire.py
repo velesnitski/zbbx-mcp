@@ -8,7 +8,7 @@ from __future__ import annotations
 import httpx
 import pytest
 
-from tests.wiretest import RecordingClient, run_tool
+from tests.wiretest import RecordingClient, covers_window, run_tool
 from zbbx_mcp import classify
 from zbbx_mcp.tools import disruption
 
@@ -112,7 +112,7 @@ class TestServicePortSplitWire:
         assert rec["time_till"] - rec["time_from"] == 86400
         assert base["time_till"] - base["time_from"] == 6 * 86400
         assert set(base["itemids"]) == {"s1", "s2", "s3", "m1", "m2", "m3", "m4"}
-        assert base["limit"] == 7 * 24 * 14
+        assert covers_window(base)
 
     def test_country_filter_and_no_match(self, monkeypatch):
         monkeypatch.setattr(disruption, "KEY_SERVICE_BPS", SERVICE_KEY)

@@ -152,14 +152,10 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
 
                 trend_rows = []
                 if hostids:
-                    # Batch in chunks to avoid Zabbix 500 on large requests
-                    chunk_size = 200
-                    for i in range(0, len(hostids), chunk_size):
-                        chunk = hostids[i:i + chunk_size]
-                        chunk_rows, _ = await fetch_trends_batch(
-                            client, chunk, ["cpu", "traffic"], period,
-                        )
-                        trend_rows.extend(chunk_rows)
+                    # Request size is bounded inside the trend read (ADR 160).
+                    trend_rows, _ = await fetch_trends_batch(
+                        client, hostids, ["cpu", "traffic"], period,
+                    )
 
                 # Build trend lookup
                 host_trends: dict[str, dict] = {}

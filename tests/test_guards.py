@@ -765,3 +765,25 @@ class TestReadingBoundaryGuard:
             assert (r.state, r.value, live_value(item, now)) == (state, None, None), item
             assert r.text("%") == "n/a (not reporting)"
         assert read_item({"lastvalue": "7", "lastclock": str(now - 86400)}, now).age_s == 86400
+
+
+# --- ADR 160: trend reads go through the sized helper -------------------------
+
+# Single-host reads, bounded by construction: one host's handful of items.
+_DIRECT_TREND_OK = {"trends.py", "diagnose.py", "triage.py", "events.py"}
+
+
+def test_trend_reads_go_through_the_sized_helper():
+    """A fleet-wide ``trend.get`` in one request fails with HTTP 500 at a
+    month, and a hand-computed limit cuts long windows silently. New code
+    reads trends through ``zbbx_mcp.trends.fetch_trends``."""
+    offenders = []
+    for path in sorted(SRC.rglob("*.py")):
+        if path.name in _DIRECT_TREND_OK:
+            continue
+        for node in ast.walk(ast.parse(path.read_text())):
+            if (isinstance(node, ast.Call) and node.args
+                    and isinstance(node.args[0], ast.Constant)
+                    and node.args[0].value == "trend.get"):
+                offenders.append(f"{path.relative_to(SRC)}:{node.lineno}")
+    assert not offenders, f"direct trend.get outside the helper: {offenders}"

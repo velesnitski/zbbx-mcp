@@ -54,6 +54,7 @@ from zbbx_mcp.data import (
 )
 from zbbx_mcp.fetch import TRAFFIC_DIVISOR, physical_traffic_items, rank_by_last_value
 from zbbx_mcp.resolver import InstanceResolver
+from zbbx_mcp.trends import fetch_trends
 
 _IFACE_CANDIDATES = 3      # top-N interfaces per host — bound the trend fetch
 _MAX_HOURS = 24 * 21       # window cap: hourly trends fleet-wide are heavy
@@ -565,12 +566,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 # value_MAX, never value_avg: averaging erases the clipping this
                 # tool exists to find (a steady load has a stable average and
                 # still-moving peaks; only a cap flattens the peaks).
-                trends = await client.call("trend.get", {
-                    "itemids": shortlist,
-                    "time_from": now - total_h * 3600,
-                    "output": ["itemid", "clock", "value_max"],
-                    "limit": len(shortlist) * total_h + 1000,
-                })
+                trends = await fetch_trends(client, shortlist, now - total_h * 3600, ("itemid", "clock", "value_max"))
                 cut = now - rec_h * 3600
                 recent: dict[str, list[float]] = {}
                 base: dict[str, list[float]] = {}
@@ -635,12 +631,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     out_short: list[str] = []
                     for items in out_by_host.values():
                         out_short.extend(i["itemid"] for i in rank_by_last_value(items)[:_IFACE_CANDIDATES])
-                    out_trends = await client.call("trend.get", {
-                        "itemids": out_short,
-                        "time_from": now - total_h * 3600,
-                        "output": ["itemid", "clock", "value_max"],
-                        "limit": len(out_short) * total_h + 1000,
-                    })
+                    out_trends = await fetch_trends(client, out_short, now - total_h * 3600, ("itemid", "clock", "value_max"))
                     o_recent: dict[str, list[float]] = {}
                     o_base: dict[str, list[float]] = {}
                     for tr in out_trends:

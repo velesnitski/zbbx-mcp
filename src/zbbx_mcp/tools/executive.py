@@ -27,6 +27,7 @@ from zbbx_mcp.data import (
 )
 from zbbx_mcp.fetch import TRAFFIC_DIVISOR, physical_traffic_items, rank_by_last_value
 from zbbx_mcp.resolver import InstanceResolver
+from zbbx_mcp.trends import fetch_trends
 from zbbx_mcp.uptime import retention_too_short
 from zbbx_mcp.utils import safe_output_path
 
@@ -583,12 +584,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 time_from = int(_time.time()) - days * 86400
 
                 # Fetch hourly trends
-                trends = await client.call("trend.get", {
-                    "itemids": item_ids,
-                    "time_from": time_from,
-                    "output": ["itemid", "clock", "value_avg", "value_max"],
-                    "limit": len(item_ids) * 24 * days,
-                })
+                trends = await fetch_trends(client, item_ids, time_from, ("itemid", "clock", "value_avg", "value_max"))
 
                 if not trends:
                     return f"No trend data for {period}."

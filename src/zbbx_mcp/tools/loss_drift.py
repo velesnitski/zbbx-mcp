@@ -17,6 +17,7 @@ import httpx
 
 from zbbx_mcp.data import KEY_PING_LOSS, KEY_PING_RTT, STATUS_ENABLED, extract_country, host_ip
 from zbbx_mcp.resolver import InstanceResolver
+from zbbx_mcp.trends import fetch_trends
 
 # Last `_RECENT_DAYS` of the window are compared against the rest as baseline.
 _RECENT_DAYS = 2
@@ -192,12 +193,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 time_from = now - window_days * 86400
                 cutoff = now - _RECENT_DAYS * 86400
 
-                trends = await client.call("trend.get", {
-                    "itemids": all_item_ids,
-                    "time_from": time_from,
-                    "output": ["itemid", "clock", "value_avg"],
-                    "limit": len(all_item_ids) * window_days * 24,
-                })
+                trends = await fetch_trends(client, all_item_ids, time_from, ("itemid", "clock", "value_avg"))
                 by_item: dict[str, list[dict]] = {}
                 for t in trends:
                     by_item.setdefault(t["itemid"], []).append(t)

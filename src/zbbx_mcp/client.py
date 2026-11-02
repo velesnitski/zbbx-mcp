@@ -6,6 +6,7 @@ from itertools import count
 import httpx
 
 from zbbx_mcp.config import ZabbixConfig
+from zbbx_mcp.logging import note_api_call
 from zbbx_mcp.rollback import SNAPSHOT_CONFIG, Action, RollbackLog
 
 __all__ = ["ZabbixClient"]
@@ -105,9 +106,13 @@ class ZabbixClient:
         if not no_auth:
             headers = {"Authorization": f"Bearer {self._config.token}"}
 
-        resp = await self._client.post(
-            "/api_jsonrpc.php", json=payload, headers=headers
-        )
+        started = time.monotonic()
+        try:
+            resp = await self._client.post(
+                "/api_jsonrpc.php", json=payload, headers=headers
+            )
+        finally:
+            note_api_call(time.monotonic() - started)
         resp.raise_for_status()
         body = resp.json()
 

@@ -11,6 +11,7 @@ Analytics (every tool call):
 Each installation gets a persistent instance_id (UUID).
 """
 
+import contextvars
 import functools
 import json
 import logging
@@ -95,6 +96,10 @@ class AnalyticsFormatter(logging.Formatter):
         error_detail = getattr(record, "error_detail", None)
         if error_detail:
             entry["error"] = error_detail
+        for key in ("api_calls", "api_ms"):
+            value = getattr(record, key, None)
+            if value is not None:
+                entry[key] = value
         return json.dumps(entry, ensure_ascii=False)
 
 
@@ -299,6 +304,27 @@ def _add_sentry_breadcrumb(
     )
 
 
+# Zabbix API calls made on behalf of the tool call in progress: [count, seconds].
+# A tool's wall time alone cannot say whether it was slow because it asked the
+# server for too much, asked too often, or computed too long; these two numbers
+# can (ADR 160). Context-local, so concurrent tool calls never mix.
+_api_stats: contextvars.ContextVar[list | None] = contextvars.ContextVar("zbbx_api_stats", default=None)
+
+
+def note_api_call(seconds: float) -> None:
+    """Count one API round trip against the tool call in progress, if any."""
+    stats = _api_stats.get()
+    if stats is not None:
+        stats[0] += 1
+        stats[1] += seconds
+
+
+def is_error_text(result: object) -> bool:
+    """Tools report a failure as text starting ``Error`` rather than raising;
+    analytics must count that as a failure, not a success (ADR 160)."""
+    return isinstance(result, str) and result.lstrip().startswith("Error")
+
+
 def logged(func):
     """Decorator that logs every tool call to analytics + Sentry breadcrumbs.
 
@@ -317,11 +343,16 @@ def logged(func):
         status = "ok"
         response_size = 0
         error_detail = ""
+        api = [0, 0.0]
+        token = _api_stats.set(api)
 
         try:
             result = await func(*args, **kwargs)
             if isinstance(result, str):
                 response_size = len(result)
+            if is_error_text(result):
+                status = "error"
+                error_detail = result.strip()[:200]
             return result
         except Exception as exc:
             status = "error"
@@ -334,6 +365,7 @@ def logged(func):
                     sentry_sdk.capture_exception(exc)
             raise
         finally:
+            _api_stats.reset(token)
             duration_ms = int((time.monotonic() - start) * 1000)
 
             if _analytics_logger:
@@ -346,6 +378,8 @@ def logged(func):
                         "status": status,
                         "response_size": response_size,
                         "error_detail": error_detail,
+                        "api_calls": api[0],
+                        "api_ms": int(api[1] * 1000),
                     },
                 )
 

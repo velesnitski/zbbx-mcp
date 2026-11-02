@@ -11,7 +11,7 @@ import httpx
 import pytest
 
 import zbbx_mcp.classify as classify
-from tests.wiretest import RecordingClient, run_tool
+from tests.wiretest import RecordingClient, covers_window, run_tool
 from zbbx_mcp.tools import risk
 
 NOW = int(time.time())
@@ -93,7 +93,7 @@ class TestAtRiskHosts:
         assert c.sent("item.get")["filter"] == {"key_": [LOSS_KEY, RTT_KEY], "status": "0"}
         t = c.sent("trend.get")
         assert t["itemids"] == ["L3", "L4", "R3"]
-        assert t["limit"] == 3 * 14 * 24
+        assert covers_window(t)
 
     def test_country_filter(self):
         out = run_tool(risk, "get_at_risk_hosts", _risk_client(), country="hm")

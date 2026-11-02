@@ -45,6 +45,7 @@ from zbbx_mcp.excel import BW_MAX, classify_bandwidth
 from zbbx_mcp.reading import LIVE_VALUE_MAX_AGE_S as LIVE_VALUE_MAX_AGE_S
 from zbbx_mcp.reading import Reading as Reading
 from zbbx_mcp.reading import read_item
+from zbbx_mcp.trends import fetch_trends
 
 # Traffic unit: bits/sec (default) or bytes/sec — configurable per deployment
 _TRAFFIC_BYTES = os.environ.get("ZABBIX_TRAFFIC_UNIT", "").lower() == "bytes"
@@ -935,12 +936,7 @@ async def fetch_trends_batch(
     now = int(_time.time())
     time_from = now - _parse_period(period)
 
-    trends = await client.call("trend.get", {
-        "itemids": item_ids,
-        "time_from": time_from,
-        "output": ["itemid", "clock", "value_avg", "value_max", "value_min"],
-        "limit": len(item_ids) * 24 * 30,  # max hourly records
-    })
+    trends = await fetch_trends(client, item_ids, time_from, ("itemid", "clock", "value_avg", "value_max", "value_min"))
 
     # Group trends by item
     item_trends: dict[str, list] = {}

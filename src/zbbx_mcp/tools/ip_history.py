@@ -23,6 +23,7 @@ from zbbx_mcp.data import (
 )
 from zbbx_mcp.fetch import to_mbps
 from zbbx_mcp.resolver import InstanceResolver
+from zbbx_mcp.trends import fetch_trends
 
 # Recovery-score thresholds expressed as post/baseline traffic ratio.
 _RECOVERED = 0.7
@@ -142,13 +143,7 @@ async def _fetch_traffic_avg(
     if not items:
         return None
     item_ids = [i["itemid"] for i in items]
-    trends = await client.call("trend.get", {
-        "itemids": item_ids,
-        "time_from": time_from,
-        "time_till": time_till,
-        "output": ["clock", "value_avg"],
-        "limit": 24 * len(item_ids),
-    })
+    trends = await fetch_trends(client, item_ids, time_from, ("clock", "value_avg"), time_till=time_till)
     if not trends:
         return None
     vals = []

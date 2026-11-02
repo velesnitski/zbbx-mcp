@@ -8,7 +8,7 @@ import time
 
 import pytest
 
-from tests.wiretest import RecordingClient, run_tool
+from tests.wiretest import RecordingClient, covers_window, run_tool
 from zbbx_mcp import classify
 from zbbx_mcp.tools import html_report
 
@@ -143,7 +143,7 @@ class TestWire:
         trend = c.sent("trend.get")
         assert set(trend["itemids"]) == {"i1c", "i2c", "i3c", "i4c", "i1t", "i2t", "i4t"}
         assert abs(trend["time_from"] - (NOW - 7 * 86400)) < 120
-        assert trend["limit"] == 7 * 24 * 30
+        assert covers_window(trend)
         discovery = next(p for m, p in c.calls if m == "item.get" and "itemid" in p.get("output", []))
         assert KEY_CPU in discovery["filter"]["key_"]
         # Traffic items are found by NIC-key prefix, not by an exact key list (ADR 147).

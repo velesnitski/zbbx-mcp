@@ -41,6 +41,7 @@ from zbbx_mcp.data import (
     partition_test_hosts,
 )
 from zbbx_mcp.resolver import InstanceResolver
+from zbbx_mcp.trends import fetch_trends
 
 _MAX_HOSTS = 400          # bound the trend fetch; truncation is disclosed
 _DEAD_WINDOW_H = 24       # silent this long on a live host = dead
@@ -240,12 +241,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 # value_MAX, never value_avg: a uint hour collapses to its min
                 # under Zabbix integer division, so avg cannot tell "answered
                 # once" from "never answered" (ADR 0048).
-                trends = await client.call("trend.get", {
-                    "itemids": [c["itemid"] for c in checks],
-                    "time_from": now - (win + 2) * 3600,
-                    "output": ["itemid", "clock", "value_max"],
-                    "limit": len(checks) * (win + 4) + 1000,
-                })
+                trends = await fetch_trends(client, [c["itemid"] for c in checks], now - (win + 2) * 3600, ("itemid", "clock", "value_max"))
                 up_h: dict[str, set] = {}
                 seen_h: dict[str, set] = {}
                 for t in trends or []:

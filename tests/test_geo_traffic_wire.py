@@ -15,7 +15,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from tests.wiretest import RecordingClient, run_tool
+from tests.wiretest import RecordingClient, covers_window, run_tool
 from zbbx_mcp import classify, country
 from zbbx_mcp.tools import geo_traffic
 
@@ -178,7 +178,7 @@ class TestDetectRegionalAnomaliesAcute:
                             "anomalous for 6 consecutive buckets — sustained |"), out
         sent = c.sent("trend.get")
         assert sent["time_from"] == FROZEN - 7 * 86400
-        assert sent["limit"] == 4 * 7 * 24
+        assert covers_window(sent)
         assert sent["output"] == ["itemid", "clock", "value_avg"]
 
     def test_a_one_hour_window_is_acute_not_sustained(self):

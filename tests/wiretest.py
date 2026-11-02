@@ -118,3 +118,15 @@ def live_triggers(reply=None):
                     for t in params.get("triggerids", [])]
         return reply(params) if callable(reply) else (reply or [])
     return respond
+
+
+def covers_window(params, now=None):
+    """A ``trend.get`` limit covers every hourly bucket its window can touch,
+    for every item (ADR 160). Checked after the call, so the window has grown
+    by the test's runtime: the bounds allow one bucket either way."""
+    import math
+    import time
+    till = params.get("time_till") or (now or time.time())
+    hours = max(1, math.ceil((till - params["time_from"]) / 3600))
+    n = len(set(params["itemids"]))
+    return n * hours <= params["limit"] <= n * (hours + 1)

@@ -46,6 +46,7 @@ from zbbx_mcp.fetch import (
     to_mbps,
 )
 from zbbx_mcp.resolver import InstanceResolver
+from zbbx_mcp.trends import fetch_trends
 
 # Per-host interface shortlist size for detect_traffic_drops. Bounds the
 # trend.get volume: a host has 1 real uplink + many idle svc/tun/ppp
@@ -625,12 +626,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 # One trend fetch for the shortlisted items only (bounded to
                 # ~_IFACE_CANDIDATES per host).
                 all_item_ids = [i["itemid"] for i in shortlist]
-                trends = await client.call("trend.get", {
-                    "itemids": all_item_ids,
-                    "time_from": baseline_start,
-                    "output": ["itemid", "clock", "value_avg", "value_max"],
-                    "limit": len(all_item_ids) * baseline_days * 24,
-                })
+                trends = await fetch_trends(client, all_item_ids, baseline_start, ("itemid", "clock", "value_avg", "value_max"))
                 item_trends: dict[str, list] = {}
                 for t in trends:
                     item_trends.setdefault(t["itemid"], []).append(t)
@@ -760,12 +756,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                         iid_to_hid = {it["itemid"]: it["hostid"] for it in citems}
                         if not iid_to_hid:
                             continue
-                        ctr = await client.call("trend.get", {
-                            "itemids": list(iid_to_hid),
-                            "time_from": baseline_start,
-                            "output": ["itemid", "clock", "value_avg"],
-                            "limit": len(iid_to_hid) * baseline_days * 24,
-                        })
+                        ctr = await fetch_trends(client, list(iid_to_hid), baseline_start, ("itemid", "clock", "value_avg"))
                         by_hid: dict[str, list] = {}
                         for t in ctr:
                             by_hid.setdefault(iid_to_hid[t["itemid"]], []).append(t)

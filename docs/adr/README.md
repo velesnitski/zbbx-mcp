@@ -208,6 +208,7 @@ fixed headings (`## Problem`, `## Decision`, `## Test approach`,
 | [157](157-a-ca-bundle-floor.md) | A CA bundle floor | `certifi` before 2026.10.19 trusts a root whose intermediates had weak keys (GHSA-6q48-6c7w-9gw2). The API client trusts that bundle, so the floor is declared and the lock re-resolved, per ADR 149. |
 | [158](158-four-small-read-corrections.md) | Four small read corrections | `history.get` may sort by itemid/clock; item history reads `value_type` from the item; `rollback_by_index` can discard; the service split finds NICs by prefix and sums bond-aware. |
 | [159](159-mcp-sdk-session-floor.md) | MCP SDK session floor | The SDK before 1.30.0 never evicts StreamableHTTP sessions; the HTTP transport is offered, so the floor is declared per ADR 149. |
+| [160](160-trend-reads-sized-to-the-server.md) | Trend reads sized to the server | One helper splits fleet trend reads into bounded, parallel requests with window-sized limits (fixes HTTP 500 at 30 days and silent truncation); analytics record error text as failures plus API calls/time per tool; tests log to a temp dir. |
 
 ## Writing a new ADR
 

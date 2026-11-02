@@ -5,6 +5,28 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.16.80] - 2026-11-02
+
+### Fixed
+
+- **Month-scale trend tools no longer fail with HTTP 500** (ADR 160): fleet
+  trend reads are split into requests of at most 75,000 rows, four at a time.
+  Affects the executive dashboard, month-over-month, geo trends, capacity
+  planning, shutdown candidates, health assessment, the reports and the
+  detectors that read trends.
+- **Long windows are no longer cut silently**: row limits come from the
+  requested window instead of per-site constants (month-over-month read half
+  its sixty days; long uptime reports lost the tail).
+
+### Added
+
+- **Analytics record failures and API cost**: an `Error…` answer is logged as
+  `error`; every call logs `api_calls` and `api_ms`.
+
+### Changed
+
+- The test suite logs to a temporary directory, not `~/.zbbx-mcp`.
+
 ## [1.16.79] - 2026-10-23
 
 ### Security

@@ -14,6 +14,7 @@ import httpx
 from zbbx_mcp.data import GB_DECIMAL, MB_DECIMAL, fetch_enabled_hosts
 from zbbx_mcp.fetch import live_value
 from zbbx_mcp.resolver import InstanceResolver
+from zbbx_mcp.trends import fetch_trends
 
 
 def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> None:
@@ -150,17 +151,9 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
 
                     # Fetch 7-day trends for these items
                     item_ids = [it["itemid"] for it in best_item.values()]
-                    # Batch to avoid oversized requests
-                    all_trends = []
-                    for i in range(0, len(item_ids), 200):
-                        chunk = item_ids[i:i + 200]
-                        trends = await client.call("trend.get", {
-                            "itemids": chunk,
-                            "time_from": time_from,
-                            "output": ["itemid", "clock", "value_avg"],
-                            "limit": len(chunk) * 24 * 14,
-                        })
-                        all_trends.extend(trends)
+                    # Request size is bounded inside the trend read (ADR 160).
+                    all_trends = await fetch_trends(
+                        client, item_ids, time_from, ("itemid", "clock", "value_avg"))
 
                     # Group trends by item
                     item_trends: dict[str, list[tuple[int, float]]] = {}

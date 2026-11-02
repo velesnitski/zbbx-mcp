@@ -14,7 +14,7 @@ from datetime import datetime, timezone
 
 import pytest
 
-from tests.wiretest import RecordingClient
+from tests.wiretest import RecordingClient, covers_window
 from zbbx_mcp import classify as classify_mod
 from zbbx_mcp import fetch
 from zbbx_mcp.country import INVENTORY_COUNTRY_FIELDS
@@ -466,7 +466,7 @@ class TestFetchTrendsBatch:
         after = int(time.time())
         p = c.sent("trend.get")
         assert p["itemids"] == ["i-eth1"]
-        assert p["limit"] == 24 * 30
+        assert covers_window(p)
         # Bracketed by clocks read around the call: a slow runner must not fail this.
         assert before - 86400 <= p["time_from"] <= after - 86400
         assert len(rows) == 1

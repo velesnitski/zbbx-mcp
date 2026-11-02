@@ -33,6 +33,7 @@ from zbbx_mcp.data import (
 from zbbx_mcp.fetch import from_mbps, physical_traffic_items, to_mbps
 from zbbx_mcp.resolver import InstanceResolver
 from zbbx_mcp.tools.correlation import subnet24
+from zbbx_mcp.trends import fetch_trends
 
 # --- shared pure helpers ------------------------------------------------
 
@@ -262,13 +263,7 @@ async def _trends_window_avg(
     """itemid → mean(value_avg) over [time_from, time_till)."""
     if not item_ids:
         return {}
-    trends = await client.call("trend.get", {
-        "itemids": item_ids,
-        "time_from": time_from,
-        "time_till": time_till,
-        "output": ["itemid", "value_avg"],
-        "limit": len(item_ids) * 24 * 14,
-    })
+    trends = await fetch_trends(client, item_ids, time_from, ("itemid", "value_avg"), time_till=time_till)
     bucket: dict[str, list[float]] = {}
     for t in trends:
         try:

@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 import httpx
 import pytest
 
-from tests.wiretest import RecordingClient, run_tool
+from tests.wiretest import RecordingClient, covers_window, run_tool
 from zbbx_mcp import classify, fetch
 from zbbx_mcp.data import TRAFFIC_IN_KEYS
 from zbbx_mcp.tools import executive
@@ -319,7 +319,7 @@ class TestPeakAnalysis:
         assert "lastvalue" in item["output"]
         trend = c.sent("trend.get")
         assert set(trend["itemids"]) == {"t1", "t2", "t3", "t4"}       # never t1b
-        assert trend["limit"] == 4 * 24 * 7
+        assert covers_window(trend)
         assert out.startswith("**Peak Analysis — Fleet** (5 servers, 7d)")
         assert "| 02:00 | 100 | 150 | 1 |" in out
         assert "| 14:00 | 300 | 400 | 2 |" in out
@@ -362,7 +362,7 @@ class TestPeakAnalysis:
     def test_weeks_and_bad_periods(self):
         c = _client(trends=HOURLY)
         _run("get_peak_analysis", c, host_id="1", period="2w")
-        assert c.sent("trend.get")["limit"] == 1 * 24 * 14
+        assert covers_window(c.sent("trend.get"))
         assert _run("get_peak_analysis", _client(trends=HOURLY), period="soon") == (
             "period must look like '7d' or '2w', got 'soon'.")
 

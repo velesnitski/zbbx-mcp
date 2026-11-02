@@ -12,7 +12,7 @@ import time
 
 import pytest
 
-from tests.wiretest import RecordingClient, run_tool
+from tests.wiretest import RecordingClient, covers_window, run_tool
 from zbbx_mcp import classify
 from zbbx_mcp.tools import predictive
 
@@ -117,7 +117,7 @@ class TestPredictiveAlerts:
         # Fourteen days back from the moment of the call, not from import time.
         assert 0 <= (int(time.time()) - 14 * 86400) - trend["time_from"] < 300
         assert trend["output"] == ["itemid", "clock", "value_avg"]
-        assert trend["limit"] == len(trend["itemids"]) * 24 * 14
+        assert covers_window(trend)
 
     def test_single_metric_horizon_and_cap(self):
         f = _fleet()

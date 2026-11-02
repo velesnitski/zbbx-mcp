@@ -28,6 +28,7 @@ uv run pytest -k "test_name"               # single test by name
 | `fetch.py` | Shared fetch helpers (`fetch_traffic_map`, `fetch_cpu_map`, `fetch_enabled_hosts`) |
 | `classify.py` | Host classification + provider detection. Table loaded from `data/provider_cidrs.json` (generated — see `scripts/gen_provider_cidrs.py`); override with `ZABBIX_PROVIDER_CIDRS`. No tools/ imports |
 | `app_map.py` | The product's catalogue as a map the tool is given (`ZABBIX_APP_MAP`): dataclasses, fail-closed loader, age vs predicate window, IP join over every interface. No tools/ imports (ADR 143) |
+| `trends.py` | `fetch_trends` — the one fleet-scale `trend.get`: row-budgeted chunks, bounded concurrency, window-sized limits; guard-enforced (ADR 160) |
 | `rollback.py` | Pre-mutation snapshots, `SNAPSHOT_CONFIG` |
 | `excel.py` | Shared Excel formatting (bandwidth thresholds, color fills) |
 | `formatters.py` | Output formatters (severity labels, host/trigger formatting) |

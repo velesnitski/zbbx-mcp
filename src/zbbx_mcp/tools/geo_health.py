@@ -31,6 +31,7 @@ from zbbx_mcp.data import (
 )
 from zbbx_mcp.fetch import TRAFFIC_DIVISOR, is_physical_traffic_in_key, live_value, physical_traffic_items
 from zbbx_mcp.resolver import InstanceResolver
+from zbbx_mcp.trends import fetch_trends
 from zbbx_mcp.uptime import (
     compute_host_uptime,
     coverage_note,
@@ -145,9 +146,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     if is_physical_traffic_in_key(i.get("key_", ""))
                 }
                 trends, traffic_trends, traffic_map = await asyncio.gather(
-                    client.call("trend.get", {
-                        "itemids": item_ids,
-                        "time_from": time_from,
+                    fetch_trends(
                         # value_MAX, not value_avg, for the 0/1 service checks
                         # (task 175 / ADR 092). Zabbix stores trends_uint
                         # value_avg as an integer (bigint column, sum/count
@@ -157,15 +156,9 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                         # the protocol responded at least once that hour (up);
                         # a full-dark hour is value_max=0 (down). Traffic below
                         # keeps value_avg (accurate for the large-uint NIC).
-                        "output": ["itemid", "clock", "value_max"],
-                        "limit": len(item_ids) * 24 * 31,
-                    }),
-                    client.call("trend.get", {
-                        "itemids": list(traffic_item_host),
-                        "time_from": time_from,
-                        "output": ["itemid", "clock", "value_avg"],
-                        "limit": len(traffic_item_host) * 24 * 31,
-                    }) if traffic_item_host else _noop_list(),
+                        client, item_ids, time_from, ("itemid", "clock", "value_max"),
+                    ),
+                    fetch_trends(client, list(traffic_item_host), time_from, ("itemid", "clock", "value_avg")) if traffic_item_host else _noop_list(),
                     fetch_traffic_map(client, hostids),
                 )
                 traffic_rows_by: dict[str, list] = {}

@@ -5,7 +5,7 @@ import time
 import httpx
 import pytest
 
-from tests.wiretest import RecordingClient, run_tool
+from tests.wiretest import RecordingClient, covers_window, run_tool
 from zbbx_mcp.tools import loss_drift
 
 NOW = int(time.time())
@@ -65,7 +65,7 @@ def test_detect_loss_drift_labels_and_orders_hosts():
     assert ip["filter"] == {"key_": [LOSS, RTT], "status": "0"}
     assert ip["hostids"] == ["1", "2", "3", "4", "5", "6"]
     tp = c.sent("trend.get")
-    assert sorted(tp["itemids"]) == sorted(SERIES) and tp["limit"] == 9 * 14 * 24
+    assert sorted(tp["itemids"]) == sorted(SERIES) and covers_window(tp)
     assert abs(tp["time_from"] - (int(time.time()) - 14 * DAY)) <= 5
     assert out.startswith("**4 hosts with network-quality drift** (window 14d, recent 2d)")
     rows = [line for line in out.splitlines() if line.startswith("| srv-")]

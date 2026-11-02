@@ -30,6 +30,7 @@ from zbbx_mcp.data import (
 )
 from zbbx_mcp.fetch import physical_traffic_items, rank_by_last_value, to_mbps
 from zbbx_mcp.resolver import InstanceResolver
+from zbbx_mcp.trends import fetch_trends
 
 
 async def _detect_regional_acute(
@@ -65,12 +66,7 @@ async def _detect_regional_acute(
 
     now = int(_time.time())
     item_ids = [it["itemid"] for it in main_item.values()]
-    trends = await client.call("trend.get", {
-        "itemids": item_ids,
-        "time_from": now - baseline_days * 86400,
-        "output": ["itemid", "clock", "value_avg"],
-        "limit": len(item_ids) * baseline_days * 24,
-    })
+    trends = await fetch_trends(client, item_ids, now - baseline_days * 86400, ("itemid", "clock", "value_avg"))
     iid_to_hid = {it["itemid"]: hid for hid, it in main_item.items()}
     host_series: dict[str, list[tuple[int, float]]] = {}
     for t in trends:

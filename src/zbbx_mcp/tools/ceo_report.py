@@ -162,13 +162,8 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 hosts = await fetch_enabled_hosts(client, exclude_test=True)
                 all_ids = [h["hostid"] for h in hosts]
 
-                # Batch trends in chunks to avoid Zabbix 500
-                chunk_size = 200
-                trend_rows = []
-                for i in range(0, len(all_ids), chunk_size):
-                    chunk = all_ids[i:i + chunk_size]
-                    rows, _ = await fetch_trends_batch(client, chunk, ["traffic"], period)
-                    trend_rows.extend(rows)
+                # Request size is bounded inside the trend read (ADR 160).
+                trend_rows, _ = await fetch_trends_batch(client, all_ids, ["traffic"], period)
 
                 traffic_map, cpu_map, cost_macros = await asyncio.gather(
                     fetch_traffic_map(client, all_ids),

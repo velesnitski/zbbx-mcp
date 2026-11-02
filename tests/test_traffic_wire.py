@@ -7,7 +7,7 @@ import time
 import httpx
 import pytest
 
-from tests.wiretest import RecordingClient, run_tool
+from tests.wiretest import RecordingClient, covers_window, run_tool
 from zbbx_mcp import classify
 from zbbx_mcp.tools import traffic
 
@@ -193,7 +193,7 @@ def test_traffic_drops_classifies_each_host():
     assert sorted(search["hostids"]) == ["1", "2", "3", "4", "5", "6"]
     tr = [p for m, p in c.calls if m == "trend.get"]
     assert sorted(tr[0]["itemids"]) == sorted([f"t{h}" for h in DROP] + [f"t{h}b" for h in DROP])
-    assert tr[0]["limit"] == 12 * 7 * 24
+    assert covers_window(tr[0])
     assert sorted(tr[1]["itemids"]) == ["c1", "c2"]           # corroboration: candidates only
     assert out.startswith("**1 likely blocks** (0 sustained, 1 acute/immediate; analyzed 5, 1 were low-demand not blocked)")
     assert "| srv-aq9001 | Provider A | ACUTE | 70% | 5.0 → 100.0 Mbps | **95%** |" in out

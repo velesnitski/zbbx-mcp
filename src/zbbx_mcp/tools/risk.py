@@ -35,6 +35,7 @@ from zbbx_mcp.resolver import InstanceResolver
 from zbbx_mcp.tools.correlation import subnet24
 from zbbx_mcp.tools.ip_history import parse_ip_changes
 from zbbx_mcp.tools.loss_drift import compute_loss_drift, split_baseline_recent
+from zbbx_mcp.trends import fetch_trends
 
 # --- pure helpers -------------------------------------------------------
 
@@ -253,12 +254,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     all_iids = list(loss_items.values()) + list(rtt_items.values())
                     cutoff = now - 2 * 86400
                     ping_from = now - ping_window_days * 86400
-                    trends = await client.call("trend.get", {
-                        "itemids": all_iids,
-                        "time_from": ping_from,
-                        "output": ["itemid", "clock", "value_avg"],
-                        "limit": len(all_iids) * ping_window_days * 24,
-                    }) if all_iids else []
+                    trends = await fetch_trends(client, all_iids, ping_from, ("itemid", "clock", "value_avg")) if all_iids else []
                     by_item: dict[str, list[dict]] = {}
                     for t in trends:
                         by_item.setdefault(t["itemid"], []).append(t)

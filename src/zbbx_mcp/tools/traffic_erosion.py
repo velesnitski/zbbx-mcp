@@ -40,6 +40,7 @@ from zbbx_mcp.data import (
 )
 from zbbx_mcp.fetch import TRAFFIC_DIVISOR, physical_traffic_items, rank_by_last_value
 from zbbx_mcp.resolver import InstanceResolver
+from zbbx_mcp.trends import fetch_trends
 
 _IFACE_CANDIDATES = 3     # top-N interfaces per host by current value (bound trend volume)
 _WEEK = 7 * 86400
@@ -409,12 +410,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 now = int(_time.time())
                 time_from = now - wk * _WEEK
                 all_item_ids = [i["itemid"] for i in shortlist]
-                trends = await client.call("trend.get", {
-                    "itemids": all_item_ids,
-                    "time_from": time_from,
-                    "output": ["itemid", "clock", "value_avg"],
-                    "limit": len(all_item_ids) * wk * 7 * 24 + 1000,
-                })
+                trends = await fetch_trends(client, all_item_ids, time_from, ("itemid", "clock", "value_avg"))
                 item_points: dict[str, list[tuple[int, float]]] = {}
                 for t in trends:
                     try:
