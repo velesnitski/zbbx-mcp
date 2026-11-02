@@ -53,13 +53,14 @@ class Geo:
         self.trends: dict[str, list[dict]] = {}
 
     def add(self, hid, name, *, ip=None, group="app_free", daily=None, now=None,
-            rows=None, service=None):
+            rows=None, service=None, stale=False):
         self.hosts.append({"hostid": hid, "host": name, "groups": [{"name": group}],
                            "interfaces": [{"ip": ip}] if ip else []})
         if daily is not None or rows is not None or now is not None:
             cur = now if now is not None else daily[-1]
             self.items.append({"itemid": f"t{hid}", "hostid": hid, "key_": NIC,
-                               "lastvalue": str(cur * M), "lastclock": LIVE, "value_type": "3"})
+                               "lastvalue": str(cur * M), "lastclock": "0" if stale else LIVE,
+                               "value_type": "3"})
             if daily is not None:
                 self.trends[f"t{hid}"] = _daily(f"t{hid}", daily)
             elif rows is not None:
@@ -241,6 +242,25 @@ class TestGeoTrafficTrends:
                         region="EMEA") == "No countries with enough servers."
         assert run_tool(geo_traffic, "get_geo_traffic_trends", g.client(**{"trend.get": []}),
                         period="30d") == "No traffic trend data for 30d."
+
+
+class TestSilentItems:
+    """ADR 161: an item that stopped reporting has no current reading; the
+    tools that summed or compared it crashed on the first such host."""
+
+    def test_trends_report_with_a_silent_item(self):
+        g = _trend_fleet()
+        g.add("90", "srv-aq9090", ip="192.0.2.90", daily=[40] * 7, stale=True)
+        out = run_tool(geo_traffic, "get_geo_traffic_trends", g.client())
+        assert "AQ" in out and not out.startswith("Error")
+
+    def test_regional_anomalies_list_a_silent_item_as_na(self):
+        g = _daily_fleet()
+        g.hosts = [h for h in g.hosts if h["hostid"] != "2"]
+        g.items = [it for it in g.items if it["hostid"] != "2"]
+        g.add("2", "srv-aq9002", ip="192.0.2.2", daily=[100] * 5 + [10, 10], stale=True)
+        out = run_tool(geo_traffic, "detect_regional_anomalies", g.client())
+        assert "Error" not in out
 
 
 class TestTrafficDropTimeline:

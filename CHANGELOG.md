@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.16.81] - 2026-11-02
+
+### Fixed
+
+- **Fleet reports no longer crash on a silent traffic item** (ADR 161):
+  `get_geo_traffic_trends`, `detect_regional_anomalies`,
+  `get_health_assessment` and `generate_service_brief` raised `TypeError`
+  when any host's traffic item had stopped reporting.
+
+### Added
+
+- **Analytics `api_top`**: the three costliest API methods per tool call.
+
 ## [1.16.80] - 2026-11-02
 
 ### Fixed

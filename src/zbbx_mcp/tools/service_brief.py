@@ -322,7 +322,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     tr = host_trend.get(hid)
                     if not tr:
                         continue
-                    if tr.avg > 1 and tr.current < tr.avg * 0.5:
+                    if tr.current is not None and tr.avg > 1 and tr.current < tr.avg * 0.5:
                         drop_pct = (tr.avg - tr.current) / tr.avg * 100
                         drop_pct_sum += drop_pct
                         drop_count += 1

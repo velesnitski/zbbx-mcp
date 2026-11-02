@@ -74,6 +74,7 @@ class TestApiAccounting:
         asyncio.run(some_tool())
         (r,) = captured
         assert r.api_calls == 4 and r.api_ms >= 10
+        assert r.api_top.startswith("host.get:3/") and "item.get:1/" in r.api_top
 
     def test_concurrent_tool_calls_do_not_mix(self, captured):
         client = _client()
@@ -103,3 +104,9 @@ class TestApiAccounting:
         rec.tool, rec.api_calls, rec.api_ms = "t", 3, 120
         entry = json.loads(zlog.AnalyticsFormatter().format(rec))
         assert entry["api_calls"] == 3 and entry["api_ms"] == 120
+
+
+def test_api_top_ranks_methods_by_time_and_names_no_parameters():
+    per = {"trend.get": [5, 9.04], "host.get": [1, 0.2], "item.get": [3, 1.5], "problem.get": [1, 0.1]}
+    assert zlog.api_top(per) == "trend.get:5/9.0s,item.get:3/1.5s,host.get:1/0.2s"
+    assert zlog.api_top({}) == ""

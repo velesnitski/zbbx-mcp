@@ -57,7 +57,7 @@ class Fleet:
     def add(self, hid, name, *, ip=None, group="app_free", agent="0",
             cpu_used=None, cpu_used_min=None, cpu_used_max=None, cpu_now=None,
             mbps=None, mbps_avgs=None, mbps_peak=None, mbps_now=None,
-            load=None, service=None, n=24):
+            load=None, service=None, n=24, stale=False):
         h = {"hostid": hid, "host": name, "groups": [{"name": group}],
              "interfaces": [{"ip": ip}] if ip else [], "active_available": agent}
         self.hosts.append(h)
@@ -74,7 +74,8 @@ class Fleet:
             peak = mbps_peak if mbps_peak is not None else max(avgs)
             now_v = mbps_now if mbps_now is not None else avgs[-1]
             self.items.append({"itemid": f"t{hid}", "hostid": hid, "key_": NIC,
-                               "lastvalue": str(now_v * 1_000_000), "lastclock": LIVE, "value_type": "3"})
+                               "lastvalue": str(now_v * 1_000_000),
+                               "lastclock": "0" if stale else LIVE, "value_type": "3"})
             self.trends[f"t{hid}"] = _records(
                 f"t{hid}", [a * 1_000_000 for a in avgs],
                 maxs=[peak * 1_000_000] * len(avgs), mins=[min(avgs) * 1_000_000] * len(avgs))
@@ -309,3 +310,13 @@ class TestCapacityPlanning:
         assert run_tool(trends_health, "get_capacity_planning", f.client()) == "No overloaded servers among 1."
         assert run_tool(trends_health, "get_capacity_planning", f.client(),
                         country="aq") == "No servers match the filters."
+
+
+def test_a_traffic_item_that_stopped_reporting_does_not_crash_the_assessment():
+    """ADR 161: ``current`` is None for a silent item (ADR 141); comparing it
+    with the average raised TypeError and failed the whole fleet's report."""
+    f = Fleet()
+    f.add("1", "srv-bv9001", ip="198.51.100.1", cpu_used=20, mbps=50)
+    f.add("2", "srv-bv9002", ip="198.51.100.2", cpu_used=20, mbps=50, stale=True)
+    out = run_tool(trends_health, "get_health_assessment", f.client(), min_severity="INFO")
+    assert not out.startswith("Error")

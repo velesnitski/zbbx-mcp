@@ -185,7 +185,8 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()):
                         server_issues.append(f"High CPU: avg {cpu.avg}%")
                         score -= 20
 
-                    if traffic and traffic.avg > 10 and traffic.current < traffic.avg * 0.7:
+                    if (traffic and traffic.current is not None
+                            and traffic.avg > 10 and traffic.current < traffic.avg * 0.7):
                         drop = round((1 - traffic.current / traffic.avg) * 100)
                         server_issues.append(f"Traffic dropped {drop}%: {traffic.current} vs avg {traffic.avg} Mbps")
                         score -= 25

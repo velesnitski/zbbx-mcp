@@ -325,7 +325,8 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                         hm = host_metrics.get(h["hostid"], {})
                         traffic = hm.get("traffic")
                         service1_status = service1_map.get(h["hostid"])
-                        t_now = f"{traffic.current:.1f}" if traffic else "N/A"
+                        t_now = (f"{traffic.current:.1f}" if traffic and traffic.current is not None
+                                 else "N/A")
                         t_avg = f"{traffic.avg:.1f}" if traffic else "N/A"
                         service = "DOWN" if service1_status == 0 else ("OK" if service1_status == 1 else "?")
                         parts.append(f"- {h['host']}: {t_now} Mbps (was {t_avg}) | service: {service}")
@@ -396,7 +397,11 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                                 "trend": "", "daily": {},
                             })
                             cd["avg"] += r.avg
-                            cd["current"] += r.current
+                            # An item that stopped reporting has no current
+                            # reading (ADR 141); it adds nothing rather than
+                            # crashing the whole report (ADR 161).
+                            if r.current is not None:
+                                cd["current"] += r.current
                             cd["trend"] = r.trend_dir
                             # Sum daily values
                             for day, val in r.daily.items():

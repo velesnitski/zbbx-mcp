@@ -96,9 +96,9 @@ class AnalyticsFormatter(logging.Formatter):
         error_detail = getattr(record, "error_detail", None)
         if error_detail:
             entry["error"] = error_detail
-        for key in ("api_calls", "api_ms"):
+        for key in ("api_calls", "api_ms", "api_top"):
             value = getattr(record, key, None)
-            if value is not None:
+            if value is not None and value != "":
                 entry[key] = value
         return json.dumps(entry, ensure_ascii=False)
 
@@ -311,12 +311,23 @@ def _add_sentry_breadcrumb(
 _api_stats: contextvars.ContextVar[list | None] = contextvars.ContextVar("zbbx_api_stats", default=None)
 
 
-def note_api_call(seconds: float) -> None:
+def note_api_call(seconds: float, method: str = "") -> None:
     """Count one API round trip against the tool call in progress, if any."""
     stats = _api_stats.get()
     if stats is not None:
         stats[0] += 1
         stats[1] += seconds
+        if method:
+            per = stats[2].setdefault(method, [0, 0.0])
+            per[0] += 1
+            per[1] += seconds
+
+
+def api_top(per_method: dict, n: int = 3) -> str:
+    """The ``n`` methods that cost the most time, as ``method:calls/seconds``.
+    Method names only — never parameters. Pure."""
+    top = sorted(per_method.items(), key=lambda kv: -kv[1][1])[:n]
+    return ",".join(f"{m}:{c}/{s:.1f}s" for m, (c, s) in top)
 
 
 def is_error_text(result: object) -> bool:
@@ -343,7 +354,7 @@ def logged(func):
         status = "ok"
         response_size = 0
         error_detail = ""
-        api = [0, 0.0]
+        api: list = [0, 0.0, {}]
         token = _api_stats.set(api)
 
         try:
@@ -380,6 +391,7 @@ def logged(func):
                         "error_detail": error_detail,
                         "api_calls": api[0],
                         "api_ms": int(api[1] * 1000),
+                        "api_top": api_top(api[2]),
                     },
                 )
 

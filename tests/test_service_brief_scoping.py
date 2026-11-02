@@ -132,3 +132,37 @@ class TestSlaDashboardDisclosesItsCoverage:
         monkeypatch.setattr(executive, "KEY_service_PRIMARY", CARRIED, raising=False)
         out = self._run(carriers=["1", "2", "3"])
         assert "carry no item" not in out
+
+
+def test_a_traffic_item_that_stopped_reporting_does_not_crash_the_brief(tmp_path):
+    """ADR 161: a silent NIC item has no current reading (ADR 141); comparing
+    it with the average raised TypeError before any report was written. The
+    comparison runs only for a busy host in a country that carries traffic,
+    so the fixture has one live and one silent busy host in the same country."""
+    now = int(time.time())
+    hosts = [{"hostid": "1", "host": "edge-aq9001", "groups": [{"name": "prod"}]},
+             {"hostid": "2", "host": "edge-aq9002", "groups": [{"name": "prod"}]}]
+    nics = [{"itemid": "n1", "hostid": "1", "key_": "net.if.in[eth0]", "value_type": "3",
+             "lastvalue": "100000000", "lastclock": str(now)},
+            {"itemid": "n2", "hostid": "2", "key_": "net.if.in[eth0]", "value_type": "3",
+             "lastvalue": "100000000", "lastclock": "0"}]
+
+    def item_get(params):
+        key = (params.get("filter") or {}).get("key_")
+        if key == "system.cpu.util[,idle]":
+            return [{"hostid": h["hostid"], "lastvalue": "50", "lastclock": str(now)}
+                    for h in hosts]
+        if isinstance(key, list) and CARRIED in key:
+            return [{"hostid": h["hostid"], "key_": CARRIED, "lastvalue": "1",
+                     "state": "0", "lastclock": str(now)} for h in hosts]
+        if "search" in params or "tags" in params or isinstance(key, list):
+            return [dict(n) for n in nics]
+        return []
+
+    trends = [{"itemid": n["itemid"], "clock": str(now - h * 3600), "value_avg": "100000000",
+               "value_max": "100000000", "value_min": "100000000"}
+              for n in nics for h in range(48)]
+    client = RecordingClient({"host.get": hosts, "item.get": item_get, "trend.get": trends})
+    out = run_tool(service_brief, "generate_service_brief", client, output_dir=str(tmp_path))
+    assert not out.startswith("Error"), out
+    assert list(pathlib.Path(tmp_path).glob("*.html"))

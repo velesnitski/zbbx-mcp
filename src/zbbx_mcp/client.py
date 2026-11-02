@@ -112,7 +112,7 @@ class ZabbixClient:
                 "/api_jsonrpc.php", json=payload, headers=headers
             )
         finally:
-            note_api_call(time.monotonic() - started)
+            note_api_call(time.monotonic() - started, method)
         resp.raise_for_status()
         body = resp.json()
 
