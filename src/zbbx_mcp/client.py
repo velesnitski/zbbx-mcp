@@ -126,7 +126,9 @@ class ZabbixClient:
                 raise ValueError(
                     f"No permissions for {method}. "
                     "Your API token may lack the required role (Admin or Super Admin). "
-                    "Check token permissions in Zabbix UI → User settings → API tokens."
+                    "Check token permissions in Zabbix UI → User settings → API tokens. "
+                    "On Zabbix 8.0 also check the user role's API access: new installs "
+                    "and newly created roles have it disabled by default."
                 )
             raise ValueError(f"Zabbix API error ({err.get('code', '?')}): {msg}")
 

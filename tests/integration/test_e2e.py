@@ -1,4 +1,5 @@
-"""End-to-end: the real MCP over stdio against a real, seeded Zabbix 7.0.
+"""End-to-end: the real MCP over stdio against a real, seeded Zabbix
+(7.0, 7.4 and 8.0 in CI).
 
 The wire-contract suite (``tests/wiretest.py``) proves which parameters a tool
 *sends*; only a live server proves Zabbix *accepts* them. Every call below
@@ -10,6 +11,7 @@ The fleet is the synthetic one in ``tests/integration/seed.py``.
 
 from __future__ import annotations
 
+import os
 import re
 import time
 
@@ -71,7 +73,8 @@ class TestConnection:
     def test_check_connection_reports_the_live_version(self, mcp, seed_state):
         out = mcp.call("check_connection")
         assert out.startswith(f"Connected. Zabbix version: {seed_state['version']}"), out
-        assert seed_state["version"].startswith("7.0")
+        # The matrix says which release this job stood up (ADR 162).
+        assert seed_state["version"].startswith(os.environ.get("ZBBX_IT_EXPECT_VERSION", "7.0"))
 
     def test_version_matrix_comes_from_the_server(self, mcp, seed_state):
         out = mcp.call("get_zabbix_version")

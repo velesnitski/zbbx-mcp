@@ -1,4 +1,4 @@
-# Throwaway Zabbix 7.0 LTS stack for the end-to-end integration tests.
+# Throwaway Zabbix stack for the end-to-end integration tests.
 #
 # Every credential below is the documented public default of the official
 # images, used only against these disposable containers (they are created and
@@ -6,7 +6,9 @@
 #
 #   docker compose -f tests/integration/docker-compose.yml up -d
 #
-# Image tags are pinned to an exact 7.0 patch release; bump them deliberately.
+# ZBX_VERSION picks the release. CI runs a matrix — the oldest supported LTS,
+# the current 7.x minor and the newest LTS (ADR 162); every value is an exact
+# patch release, bumped deliberately. Unset: 7.0 LTS.
 name: zbbx-it
 
 services:
@@ -23,7 +25,7 @@ services:
       retries: 30
 
   zabbix-server:
-    image: zabbix/zabbix-server-pgsql:alpine-7.0.31
+    image: zabbix/zabbix-server-pgsql:alpine-${ZBX_VERSION:-7.0.31}
     depends_on:
       postgres:
         condition: service_healthy
@@ -44,7 +46,7 @@ services:
       retries: 30
 
   zabbix-web:
-    image: zabbix/zabbix-web-nginx-pgsql:alpine-7.0.31
+    image: zabbix/zabbix-web-nginx-pgsql:alpine-${ZBX_VERSION:-7.0.31}
     depends_on:
       postgres:
         condition: service_healthy

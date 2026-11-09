@@ -5,6 +5,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.17.0] - 2026-11-09
+
+### Added
+
+- **Zabbix 8.0 LTS support** (ADR 162), with 7.x unchanged: JSON (6) and
+  binary (5) item values render as one table-safe line; the item-history
+  override accepts types 0–6; Telemetry query items and the Push media type
+  are named; maintenance suppress/release entries in a problem's
+  acknowledgements are attributed to the system; `get_zabbix_version` lists
+  the 8.0 features.
+- **`api_compat` module**: the one place that knows how the API differs
+  across versions.
+- **CI runs real Zabbix 7.0, 7.4 and 8.0** end to end, one job each.
+
+### Changed
+
+- The permission error names the 8.0 default of API access disabled for new
+  roles.
+
 ## [1.16.81] - 2026-11-02
 
 ### Fixed

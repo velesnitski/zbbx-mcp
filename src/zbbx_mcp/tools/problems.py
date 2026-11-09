@@ -3,6 +3,7 @@ import time
 
 import httpx
 
+from zbbx_mcp.api_compat import ack_actions, is_system_ack
 from zbbx_mcp.data import filter_suppressed
 from zbbx_mcp.formatters import _ts, format_problem_list, format_severity
 from zbbx_mcp.frozen import drop_frozen, frozen_note
@@ -578,16 +579,25 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 acks = p.get("acknowledges", [])
                 if acks:
                     names = await _resolve_usernames(
-                        client, [a.get("userid") for a in acks]
+                        client, [a.get("userid") for a in acks if not is_system_ack(a)]
                     )
                     parts.append("")
                     parts.append(f"## Acknowledgements ({len(acks)})")
                     for a in acks:
-                        uid = str(a.get("userid") or "")
-                        who = names.get(uid) or (f"user {uid}" if uid else "?")
+                        # 8.0 records maintenance suppressing or releasing
+                        # a problem here, with no user and no message; name
+                        # the system as the actor (ADR 162). The labels come
+                        # from ``action``, which every version returns.
+                        what = ", ".join(ack_actions(a.get("action")))
+                        if is_system_ack(a):
+                            who = "system"
+                        else:
+                            uid = str(a.get("userid") or "")
+                            who = names.get(uid) or (f"user {uid}" if uid else "?")
+                        text = a.get("message", "") or ""
+                        detail = "; ".join(x for x in (f"_{what}_" if what else "", text) if x)
                         parts.append(
-                            f"- **{who}** ({_ts(a.get('clock', '0'))}): "
-                            f"{a.get('message', '')}"
+                            f"- **{who}** ({_ts(a.get('clock', '0'))}): {detail}"
                         )
 
                 return "\n".join(parts)

@@ -56,6 +56,10 @@ def _feature_matrix(major: int, minor: int) -> list[tuple[str, bool]]:
         ("Connector API (data streaming)", v >= (7, 0)),
         ("Proxy groups (proxygroup.get)", v >= (7, 0)),
         ("HA cluster API (core.ha.get)", v >= (7, 0)),
+        ("JSON item value type (value_type 6)", v >= (8, 0)),
+        ("Telemetry query items (type 24)", v >= (8, 0)),
+        ("Maintenance by trigger / event name", v >= (8, 0)),
+        ("massupdate and host-interface write API removed", v >= (8, 0)),
     ]
 
 

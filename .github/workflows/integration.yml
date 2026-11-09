@@ -1,8 +1,11 @@
 name: Integration
 
-# End-to-end layer: a throwaway Zabbix 7.0 LTS stack in Docker, seeded with a
+# End-to-end layer: a throwaway Zabbix stack in Docker, seeded with a
 # synthetic fleet, driven through the real MCP over stdio. Catches what the
 # recorded-fake wire tests cannot: parameters the live API rejects (-32602).
+# One job per release in the matrix — the oldest supported LTS, the current
+# 7.x minor, the newest LTS — so a change that works on one and
+# breaks another cannot ship (ADR 162).
 # No secrets: the only credentials are the official images' public defaults,
 # used against containers that live and die inside this job.
 on:
@@ -25,11 +28,18 @@ concurrency:
 
 jobs:
   e2e:
+    name: e2e (Zabbix ${{ matrix.zabbix }})
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        zabbix: ["7.0.31", "7.4.9", "8.0.0"]
     env:
       COMPOSE_FILE: tests/integration/docker-compose.yml
       ZBBX_IT_URL: http://localhost:8080
+      ZBX_VERSION: ${{ matrix.zabbix }}
+      ZBBX_IT_EXPECT_VERSION: ${{ matrix.zabbix }}
     steps:
       - uses: actions/checkout@v4
 

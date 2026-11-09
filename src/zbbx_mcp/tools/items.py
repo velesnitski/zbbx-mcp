@@ -3,6 +3,9 @@ import time
 
 import httpx
 
+from zbbx_mcp.api_compat import HISTORY_TYPES, NUMERIC_VALUE_TYPES, compact_text
+from zbbx_mcp.api_compat import ITEM_TYPES as _ITEM_TYPES
+from zbbx_mcp.api_compat import VALUE_TYPES as _VALUE_TYPES
 from zbbx_mcp.formatters import _lastclock, _ts, cell, format_value
 from zbbx_mcp.resolver import InstanceResolver
 from zbbx_mcp.utils import contains_pattern, parse_time, resolve_group_ids
@@ -66,33 +69,9 @@ def _parse_delay_seconds(delay: str, default: int = 300) -> int:
     return qty * _DELAY_UNITS.get(unit, 1)
 
 
-ITEM_TYPES = {
-    "0": "Zabbix agent",
-    "2": "Zabbix trapper",
-    "3": "Simple check",
-    "5": "Zabbix internal",
-    "7": "Zabbix agent (active)",
-    "9": "Web item",
-    "10": "External check",
-    "11": "Database monitor",
-    "12": "IPMI agent",
-    "13": "SSH agent",
-    "14": "Telnet agent",
-    "15": "Calculated",
-    "17": "SNMP trap",
-    "18": "Dependent item",
-    "19": "HTTP agent",
-    "20": "SNMP agent",
-    "21": "Script",
-}
-
-VALUE_TYPES = {
-    "0": "float",
-    "1": "character",
-    "2": "log",
-    "3": "unsigned int",
-    "4": "text",
-}
+# Type maps live with the rest of the cross-version API knowledge (ADR 162).
+ITEM_TYPES = _ITEM_TYPES
+VALUE_TYPES = _VALUE_TYPES
 
 
 # _format_value moved to zbbx_mcp.formatters.format_value (output formatter).
@@ -120,7 +99,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 host_id: Host ID to create the item on
                 name: Item name
                 key: Item key (e.g., 'system.cpu.load[all,avg1]')
-                value_type: 0=float, 1=char, 2=log, 3=uint, 4=text (default: 0)
+                value_type: 0=float, 1=char, 2=log, 3=uint, 4=text, 5=binary, 6=JSON (8.0+) (default: 0)
                 item_type: Item type: 0=agent, 2=trapper, 7=agent(active), etc. (default: 7)
                 delay: Update interval (default: 60s)
                 units: Value units (optional, e.g., 'B', '%', 's')
@@ -384,7 +363,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
             Args:
                 item_id: Zabbix item ID
                 value_type: Override only — read from the item by default (-1). 0=float,
-                    1=character, 2=log, 3=unsigned int, 4=text
+                    1=character, 2=log, 3=unsigned int, 4=text, 5=binary, 6=JSON (8.0+)
                 limit: Number of history records to return (default: 20)
                 time_from: Start time — epoch, ISO ("2026-04-19"), ISO datetime, or relative ("24h", "7d")
                 time_till: End time — same formats as time_from (optional)
@@ -405,7 +384,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 # The item knows its own type; the parameter is an override,
                 # not a guess the caller must get right (ADR 158). It was
                 # declared with a default of 0 and then silently ignored.
-                vtype = value_type if value_type in (0, 1, 2, 3, 4) else int(item.get("value_type", 0))
+                vtype = value_type if value_type in HISTORY_TYPES else int(item.get("value_type", 0))
                 units = item.get("units", "")
 
                 params = {
@@ -444,7 +423,10 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
 
                 for record in data:
                     ts = _ts(record.get("clock", "0"))
-                    val = format_value(record.get("value", ""), units)
+                    # Numbers get units; text, log, binary and JSON (8.0)
+                    # get one table-safe line (ADR 162).
+                    val = (format_value(record.get("value", ""), units)
+                           if vtype in NUMERIC_VALUE_TYPES else compact_text(record.get("value", "")))
                     parts.append(f"| {ts} | {val} |")
 
                 return "\n".join(parts)

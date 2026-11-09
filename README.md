@@ -622,8 +622,13 @@ If you prefer not to use `uv`, see [Alternative installation](#alternative-insta
 ### Zabbix 6.2+
 
 Requires Zabbix 6.2 or later with JSON-RPC API enabled (Bearer-token auth
-and the `selectHostGroups` selector). Spans 6.2 through 7.x; tested on
-Zabbix 7.4.
+and the `selectHostGroups` selector). Spans 6.2 through 8.0; every change is
+tested end-to-end against real Zabbix 7.0 LTS, 7.4 and 8.0 LTS.
+
+On **Zabbix 8.0**, the token's user role must have API access: new installs
+and newly created roles have it disabled by default (the Super admin role
+keeps it). Nothing here uses the `massupdate` or host-interface write methods
+8.0 removed.
 
 ## License
 

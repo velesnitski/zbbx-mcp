@@ -2,11 +2,11 @@
 
 import httpx
 
+from zbbx_mcp.api_compat import MEDIA_TYPES as _MEDIA_TYPES
 from zbbx_mcp.resolver import InstanceResolver
 
-MEDIA_TYPES = {
-    "0": "Email", "1": "Script", "2": "SMS", "4": "Webhook",
-}
+# Shared with the rest of the cross-version API knowledge (ADR 162).
+MEDIA_TYPES = _MEDIA_TYPES
 
 ACTION_EVENTSOURCE = {
     "0": "Triggers", "1": "Discovery", "2": "Autoregistration",
