@@ -209,7 +209,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
 
                 # Get trends for all hosts
                 all_ids = [h["hostid"] for c_hosts in countries.values() for h in c_hosts]
-                trend_rows, _ = await fetch_trends_batch(client, all_ids, ["cpu", "traffic"], f"{baseline_days}d")
+                trend_rows, _ = await fetch_trends_batch(client, all_ids, ["cpu", "traffic"], f"{baseline_days}d", extremes=False)
 
                 # Also get service health status. Skip stale/unsupported items
                 # so a broken monitoring script doesn't read as service-down.
@@ -385,7 +385,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     return "No countries with enough servers."
 
                 all_ids = [hid for ids in countries.values() for hid in ids]
-                trend_rows, _ = await fetch_trends_batch(client, all_ids, ["traffic"], period)
+                trend_rows, _ = await fetch_trends_batch(client, all_ids, ["traffic"], period, extremes=False)
 
                 # Aggregate by country
                 country_data: dict[str, dict] = {}
@@ -514,7 +514,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                     return "No countries with enough servers."
 
                 all_ids = [hid for ids in countries.values() for hid in ids]
-                trend_rows, _ = await fetch_trends_batch(client, all_ids, ["traffic"], period)
+                trend_rows, _ = await fetch_trends_batch(client, all_ids, ["traffic"], period, extremes=False)
 
                 # Aggregate daily traffic per country
                 country_daily: dict[str, dict[str, float]] = {}

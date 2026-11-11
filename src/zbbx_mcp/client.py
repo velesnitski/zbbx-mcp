@@ -11,6 +11,19 @@ from zbbx_mcp.rollback import SNAPSHOT_CONFIG, Action, RollbackLog
 
 __all__ = ["ZabbixClient"]
 
+try:  # Rust-backed parser, about twice as fast on fleet-sized responses (ADR 166)
+    import orjson as _orjson
+
+    def _loads(raw: bytes):
+        return _orjson.loads(raw)
+except ImportError:  # pragma: no cover — orjson is a declared dependency
+    def _loads(raw: bytes):
+        return json.loads(raw)
+
+# Methods that change nothing; every other method clears the configuration
+# cache, so a tool that writes and then reads sees its own write (ADR 166).
+_READ_SUFFIXES = (".get", ".version", ".export", ".importcompare", ".checkAuthentication")
+
 # Zabbix 7.2 renamed the host-group selector on these methods
 # (`selectGroups` -> `selectHostGroups`) and the returned property
 # (`groups` -> `hostgroups`). The client translates both ways (see `call`) so
@@ -113,8 +126,10 @@ class ZabbixClient:
             )
         finally:
             note_api_call(time.monotonic() - started, method)
+        if not method.endswith(_READ_SUFFIXES):
+            self._cache.clear()
         resp.raise_for_status()
-        body = resp.json()
+        body = _loads(resp.content)
 
         if "error" in body:
             err = body["error"]

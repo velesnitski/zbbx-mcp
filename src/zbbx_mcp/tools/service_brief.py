@@ -181,7 +181,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 host_checks.setdefault(hid, {})[key] = int(v) if v is not None else 0
 
             # 7-day traffic trends; request size is bounded inside (ADR 160).
-            trend_rows, _ = await fetch_trends_batch(client, all_ids, ["traffic"], period)
+            trend_rows, _ = await fetch_trends_batch(client, all_ids, ["traffic"], period, extremes=False)
             host_trend: dict[str, object] = {tr.hostid: tr for tr in trend_rows}
 
             # --- Build per-product health scores ---

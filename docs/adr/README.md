@@ -214,6 +214,7 @@ fixed headings (`## Problem`, `## Decision`, `## Test approach`,
 | [163](163-headless-mode.md) | Headless mode | `zbbx-mcp tools` / `zbbx-mcp run <tool> key=value … [--json]`: the real server in-process, schema-typed arguments, exit codes 0/1/2, written files listed from the output gate. |
 | [164](164-integration-seed-and-pull-retries.md) | Integration seed feeds the trigger until it fires | The seed re-pushes the trigger item while waiting (values accepted before the trigger is cached are never evaluated); image pulls retry on registry errors. |
 | [165](165-agent-guide-follows-the-example-convention.md) | The agent guide follows the example convention | `AGENTS.md` states ADR 127's naming convention; the remaining fixtures use it. |
+| [166](166-configuration-cache-and-lean-trend-reads.md) | Configuration cache and lean trend reads | Cached, coalesced NIC discovery read by item id; one discovery for the traffic map; average-only trend reads where extremes are unused; per-day keys and orjson parsing; configurable trend concurrency. |
 
 ## Writing a new ADR
 

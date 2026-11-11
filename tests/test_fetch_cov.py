@@ -152,30 +152,17 @@ class TestFetchTrafficMap:
         out = await fetch_traffic_map(c, ["9001", "9002", "9003"])
         assert out == {"9001": 125.0}
         p = c.sent("item.get")
-        assert p["tags"] == [{"tag": "Application", "value": "Network interfaces", "operator": "1"}]
+        assert "tags" not in p      # the one NIC discovery, not a tag search (ADR 166)
         assert p["search"] == {"key_": fetch.TRAFFIC_IN_KEY_SEARCH}
         assert p["searchWildcardsEnabled"] is True
         assert "lastclock" in p["output"]
 
-    async def test_falls_back_to_the_key_list_when_the_tag_search_is_empty(self):
-        def item_get(p):
-            if "tags" in p:
-                return []
-            return [_item("9001", "net.if.in[eth0]", 8_000_000)]
-
-        c = RecordingClient({"item.get": item_get})
+    async def test_quoted_stock_template_keys_count_and_it_is_one_query(self):
+        """The tag search and its exact-key fallback missed quoted keys and
+        cost two scans; the shared discovery sees them in one (ADR 166)."""
+        c = RecordingClient({"item.get": [_item("9001", 'net.if.in["enp3s0"]', 8_000_000)]})
         assert await fetch_traffic_map(c, ["9001"]) == {"9001": 8.0}
-        assert len(c.calls) == 2
-        assert c.calls[1][1]["filter"] == {"key_": TRAFFIC_IN_KEYS}
-
-    async def test_falls_back_when_the_tag_search_raises(self):
-        def item_get(p):
-            if "tags" in p:
-                raise ValueError("tags unsupported")
-            return [_item("9001", "net.if.in[eth0]", 8_000_000)]
-
-        c = RecordingClient({"item.get": item_get})
-        assert await fetch_traffic_map(c, ["9001"]) == {"9001": 8.0}
+        assert len(c.calls) == 1
 
 
 # --- fetch_host_dashboards -------------------------------------------------------

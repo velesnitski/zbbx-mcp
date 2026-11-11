@@ -163,7 +163,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 all_ids = [h["hostid"] for h in hosts]
 
                 # Request size is bounded inside the trend read (ADR 160).
-                trend_rows, _ = await fetch_trends_batch(client, all_ids, ["traffic"], period)
+                trend_rows, _ = await fetch_trends_batch(client, all_ids, ["traffic"], period, extremes=False)
 
                 traffic_map, cpu_map, cost_macros = await asyncio.gather(
                     fetch_traffic_map(client, all_ids),

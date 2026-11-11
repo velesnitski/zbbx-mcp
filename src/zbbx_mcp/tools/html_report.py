@@ -154,8 +154,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 if hostids:
                     # Request size is bounded inside the trend read (ADR 160).
                     trend_rows, _ = await fetch_trends_batch(
-                        client, hostids, ["cpu", "traffic"], period,
-                    )
+                        client, hostids, ["cpu", "traffic"], period, extremes=False)
 
                 # Build trend lookup
                 host_trends: dict[str, dict] = {}

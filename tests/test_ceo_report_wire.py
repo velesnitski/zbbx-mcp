@@ -97,7 +97,7 @@ def _client(hosts=None, traffic=None, trends=TRENDS, cost=COST):
 
     def item_get(p):
         hostids = set(p.get("hostids", []))
-        if "tags" in p or "itemid" in p.get("output", []):
+        if "search" in p or "itemid" in p.get("output", []):
             return [t for t in traffic if t["hostid"] in hostids]
         if (p.get("filter") or {}).get("key_") == KEY_CPU:
             return [c for c in CPU if c["hostid"] in hostids]
@@ -128,7 +128,7 @@ class TestWire:
         hosts = c.sent("host.get")
         assert hosts["filter"] == {"status": "0"} and hosts["sortfield"] == "host"
         assert hosts["selectGroups"] == ["name"] and hosts["selectInterfaces"] == ["ip"]
-        traffic = next(p for m, p in c.calls if m == "item.get" and "tags" in p)
+        traffic = next(p for m, p in c.calls if m == "item.get" and "search" in p)
         assert traffic["search"] == {"key_": "*net.if.in[*"} and traffic["searchWildcardsEnabled"] is True
         assert "lastclock" in traffic["output"]
         cpu = next(p for m, p in c.calls if m == "item.get" and (p.get("filter") or {}).get("key_") == KEY_CPU)

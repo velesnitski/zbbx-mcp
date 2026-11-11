@@ -57,7 +57,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 traffic_map, cpu_map, (trend_rows, _) = await asyncio.gather(
                     fetch_traffic_map(client, all_ids),
                     fetch_cpu_map(client, all_ids),
-                    fetch_trends_batch(client, all_ids, ["traffic"], period),
+                    fetch_trends_batch(client, all_ids, ["traffic"], period, extremes=False),
                 )
 
                 # Totals
@@ -148,7 +148,7 @@ def register(mcp, resolver: InstanceResolver, skip: set[str] = frozenset()) -> N
                 all_ids = [h["hostid"] for h in hosts]
 
                 # Fetch two separate periods (avoids Zabbix 500 on large ranges)
-                rows_a, _ = await fetch_trends_batch(client, all_ids, ["traffic"], f"{days * 2}d")
+                rows_a, _ = await fetch_trends_batch(client, all_ids, ["traffic"], f"{days * 2}d", extremes=False)
 
                 def _agg(rows, recent: bool):
                     """Split daily data: recent=True for period B, False for A."""

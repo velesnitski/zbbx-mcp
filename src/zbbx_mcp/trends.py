@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import asyncio
 import math
+import os
 import time
 from collections.abc import Iterable, Sequence
 
@@ -30,8 +31,20 @@ from collections.abc import Iterable, Sequence
 # wider output columns.
 ROWS_PER_CALL = 75_000
 # Requests in flight at once: enough to overlap round trips, few enough not to
-# occupy every frontend worker of a shared monitoring server.
+# occupy every frontend worker of a shared monitoring server. An operator who
+# owns the server's capacity may raise it with ZABBIX_TREND_CONCURRENCY (1–16).
 CONCURRENCY = 4
+MAX_CONCURRENCY = 16
+
+
+def concurrency() -> int:
+    """Trend requests in flight at once, from ``ZABBIX_TREND_CONCURRENCY``
+    clamped to 1–16; unset or unparsable means the default. Read per call."""
+    raw = os.environ.get("ZABBIX_TREND_CONCURRENCY", "").strip()
+    try:
+        return min(MAX_CONCURRENCY, max(1, int(raw))) if raw else CONCURRENCY
+    except ValueError:
+        return CONCURRENCY
 
 
 def window_hours(time_from: int, time_till: int | None = None) -> int:
@@ -67,7 +80,7 @@ async def fetch_trends(
     if not ids:
         return []
     hours = window_hours(time_from, time_till)
-    sem = asyncio.Semaphore(CONCURRENCY)
+    sem = asyncio.Semaphore(concurrency())
 
     async def one(chunk: list[str]) -> list[dict]:
         params: dict = {

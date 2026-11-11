@@ -90,6 +90,7 @@ Each `ZabbixClient` holds its own `RollbackLog` (bounded deque, max 50 entries).
 - `ZABBIX_PRODUCT_MAP` — JSON file or inline JSON mapping host group names to `[product, tier]`
 - `ZABBIX_COMPACT=true` — strips markdown from responses (~40% token savings)
 - `ZABBIX_RESPONSE_BUDGET=6000` — max chars per tool response (0 = unlimited)
+- `ZABBIX_CONFIG_CACHE_TTL=300` — seconds configuration reads stay cached (0 = off); `ZABBIX_TREND_CONCURRENCY=4` — trend requests in flight (1–16)
 - `ZABBIX_COMPACT_TOOLS=true` (default on) — strips `Args:` sections from tool docstrings at runtime
 - `ZABBIX_ALLOW_HTTP=1` — allows non-HTTPS URLs
 - `ZABBIX_INSTANCES=prod,staging` — enables multi-instance mode

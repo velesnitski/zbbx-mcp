@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.19.0] - 2026-11-12
+
+### Changed
+
+- **Faster heavy tools** (ADR 166): the fleet's network-interface items are
+  discovered once, cached for five minutes (`ZABBIX_CONFIG_CACHE_TTL`) and
+  read by item id; concurrent identical lookups share one request; any write
+  clears the cache. Trend reads that use only averages fetch only averages.
+  Trend rows are built with one date conversion per day and responses are
+  parsed with orjson.
+- `fetch_traffic_map` uses the shared interface discovery, so interfaces
+  without the network tag and quoted stock-template keys count.
+
+### Added
+
+- `ZABBIX_TREND_CONCURRENCY` (1–16, default 4).
+
 ## [1.18.0] - 2026-11-11
 
 ### Added

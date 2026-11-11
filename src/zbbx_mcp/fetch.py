@@ -16,6 +16,7 @@ from typing import Any
 from zbbx_mcp.classify import classify_host as _classify_host
 from zbbx_mcp.classify import detect_provider
 from zbbx_mcp.client import ZabbixClient
+from zbbx_mcp.config_cache import cached_config, is_warm
 from zbbx_mcp.country import INVENTORY_COUNTRY_FIELDS
 from zbbx_mcp.data import (
     GB_BYTES,
@@ -198,6 +199,9 @@ TRAFFIC_IN_KEY_SEARCH = "*net.if.in[*"
 TRAFFIC_OUT_KEY_SEARCH = "*net.if.out[*"
 # Trend metrics that are found by NIC-key prefix rather than by exact key.
 _TRAFFIC_DIRECTION = {"traffic": "in", "traffic_out": "out"}
+# Fleet-wide cached NIC discovery from this many hosts; a warm cache from the lower bound (ADR 166).
+FLEET_DISCOVERY_MIN_HOSTS = 200
+WARM_DISCOVERY_MIN_HOSTS = 20
 
 
 def is_physical_traffic_in_key(key: str) -> bool:
@@ -261,23 +265,43 @@ async def physical_traffic_items(
 
     ``key_`` is always requested regardless of ``output`` — the filter needs it,
     and a caller that forgot to ask would silently get everything back.
+
+    Fleet-sized requests discover once for every host, cached briefly, and
+    read the requested values by item id (ADR 166).
     """
     ids = list(hostids)
     if not ids:
         return []
     want = list(dict.fromkeys((*output, "key_")))
-    items = await client.call("item.get", {
-        "hostids": ids,
-        "output": want,
-        "search": {"key_": (TRAFFIC_IN_KEY_SEARCH if direction == "in"
-                            else TRAFFIC_OUT_KEY_SEARCH)},
-        "searchWildcardsEnabled": True,
-        "filter": {"status": STATUS_ENABLED},
-    })
+    keep = is_physical_traffic_in_key if direction == "in" else is_physical_traffic_out_key
+    search = {"key_": (TRAFFIC_IN_KEY_SEARCH if direction == "in"
+                       else TRAFFIC_OUT_KEY_SEARCH)}
+    discover = {"output": ["itemid", "hostid", "key_"], "search": search,
+                "searchWildcardsEnabled": True, "templated": False,
+                "filter": {"status": STATUS_ENABLED}}
+    if len(ids) >= FLEET_DISCOVERY_MIN_HOSTS or (
+            len(ids) >= WARM_DISCOVERY_MIN_HOSTS and is_warm(client, "item.get", discover)):
+        wanted = set(ids)
+        found = [it for it in await cached_config(client, "item.get", discover)
+                 if it.get("hostid") in wanted and (not physical_only or keep(it.get("key_", "")))]
+        if not found or set(want) <= {"itemid", "hostid", "key_"}:
+            items = [dict(it) for it in found]
+        else:
+            items = await client.call("item.get", {
+                "itemids": [it["itemid"] for it in found],
+                "output": want,
+                "filter": {"status": STATUS_ENABLED},
+            })
+    else:
+        items = await client.call("item.get", {
+            "hostids": ids,
+            "output": want,
+            "search": search,
+            "searchWildcardsEnabled": True,
+            "filter": {"status": STATUS_ENABLED},
+        })
     if not physical_only:
         return list(items or [])
-    keep = (is_physical_traffic_in_key if direction == "in"
-            else is_physical_traffic_out_key)
     return [it for it in items or [] if keep(it.get("key_", ""))]
 
 
@@ -295,34 +319,13 @@ def day_label(day_key: str) -> str:
 
 
 async def fetch_traffic_map(client: ZabbixClient, hostids: list[str]) -> dict[str, float]:
-    """Fetch max inbound traffic (Mbps) per host. Returns {hostid: mbps}.
-
-    Uses tag-based discovery (Application: Network interfaces) to find ALL
-    physical NIC items, with fallback to TRAFFIC_IN_KEYS for older Zabbix.
-    """
+    """Max inbound traffic (Mbps) per host, ``{hostid: mbps}``, from the one
+    NIC discovery — its own tag search missed untagged and quoted-key NICs
+    and repeated the slowest item scan in every report (ADR 147, ADR 166)."""
     if not hostids:
         return {}
-
-    # Try tag-based discovery first (Zabbix 6.4+) — catches all NIC types
-    try:
-        items = await client.call("item.get", {
-            "hostids": hostids,
-            "output": ["hostid", "lastvalue", "lastclock", "key_"],
-            "tags": [{"tag": "Application", "value": "Network interfaces", "operator": "1"}],
-            "filter": {"status": STATUS_ENABLED},
-            "search": {"key_": "*net.if.in[*"},   # explicit wildcards, ADR 094
-            "searchWildcardsEnabled": True,
-        })
-    except Exception:
-        items = []
-
-    # Fallback: hardcoded NIC keys (for Zabbix < 6.4 or if tags not configured)
-    if not items:
-        items = await client.call("item.get", {
-            "hostids": hostids,
-            "output": ["hostid", "lastvalue", "lastclock", "key_"],
-            "filter": {"key_": TRAFFIC_IN_KEYS},
-        })
+    items = await physical_traffic_items(
+        client, hostids, output=("hostid", "lastvalue", "lastclock", "key_"))
 
     # This map corroborates liveness ("has traffic, so it is up") in several
     # tools, so a dead agent's last rate must not count as traffic (ADR 141).
@@ -823,6 +826,8 @@ async def fetch_trends_batch(
     hostids: list[str],
     metrics: list[str] | None = None,
     period: str = "7d",
+    *,
+    extremes: bool = True,
 ) -> tuple[list[TrendRow], dict[str, dict]]:
     """Fetch trend data for multiple hosts and metrics in 3 API calls.
 
@@ -831,6 +836,8 @@ async def fetch_trends_batch(
         hostids: List of host IDs
         metrics: List of metric names ('cpu', 'load', 'memory', 'traffic')
         period: Time period ('1d', '7d', '30d')
+        extremes: False for callers that read only averages: ~40 % less
+            data; ``peak``/``min_val`` are then NaN, never a wrong number (ADR 166).
 
     Returns:
         Tuple of (trend_rows, host_map) where host_map is {hostid: host_dict}
@@ -936,7 +943,18 @@ async def fetch_trends_batch(
     now = int(_time.time())
     time_from = now - _parse_period(period)
 
-    trends = await fetch_trends(client, item_ids, time_from, ("itemid", "clock", "value_avg", "value_max", "value_min"))
+    columns = ("itemid", "clock", "value_avg", "value_max", "value_min") if extremes \
+        else ("itemid", "clock", "value_avg")
+    trends = await fetch_trends(client, item_ids, time_from, columns)
+    # One strftime per UTC day, not per row: millions of rows a fleet-month (ADR 166).
+    day_keys: dict[int, str] = {}
+
+    def day_of(clock: int) -> str:
+        d = clock // 86400
+        key = day_keys.get(d)
+        if key is None:
+            key = day_keys[d] = datetime.fromtimestamp(d * 86400, tz=timezone.utc).strftime("%Y-%m-%d")
+        return key
 
     # Group trends by item
     item_trends: dict[str, list] = {}
@@ -958,8 +976,11 @@ async def fetch_trends_batch(
         current = live_value(item, now)
 
         avgs = [float(t["value_avg"]) for t in t_data]
-        peaks = [float(t["value_max"]) for t in t_data]
-        mins = [float(t["value_min"]) for t in t_data]
+        if extremes:
+            peaks = [float(t["value_max"]) for t in t_data]
+            mins = [float(t["value_min"]) for t in t_data]
+        else:
+            peaks = mins = []
 
         avg_val = sum(avgs) / len(avgs) if avgs else 0
         peak_val = max(peaks) if peaks else 0
@@ -1019,15 +1040,13 @@ async def fetch_trends_batch(
         # Build daily breakdown
         daily_sum: dict[str, float] = {}
         daily_count: dict[str, int] = {}
-        for t in t_data:
-            dt = datetime.fromtimestamp(int(t["clock"]), tz=timezone.utc)
+        for t, day_val in zip(t_data, avgs, strict=True):
             # ISO key so sorted() is always chronological. "%b %d" sorted
             # lexically (Jul < Jun), scrambling any window crossing a month
             # boundary — silently flipping verdicts in every consumer that
             # treated sorted(daily) as time order (ADR 086). Rendered as
             # "Mon DD" at display via day_label().
-            day_key = dt.strftime("%Y-%m-%d")
-            day_val = float(t["value_avg"])
+            day_key = day_of(int(t["clock"]))
             if metric_name == "cpu":
                 day_val = round(100 - day_val, 1)
             elif metric_name in _TRAFFIC_DIRECTION:
@@ -1045,8 +1064,8 @@ async def fetch_trends_batch(
             hostname=hostname,
             metric=metric_name,
             avg=round(avg_val, 1),
-            peak=round(peak_val, 1),
-            min_val=round(min_val, 1),
+            peak=round(peak_val, 1) if extremes else float("nan"),
+            min_val=round(min_val, 1) if extremes else float("nan"),
             current=round(current, 1) if current is not None else None,
             trend_dir=trend_dir,
             daily=daily,

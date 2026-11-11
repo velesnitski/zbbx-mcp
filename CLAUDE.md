@@ -31,6 +31,7 @@ uv run zbbx-mcp run <tool> key=value       # call one tool headless (ADR 163)
 | `classify.py` | Host classification + provider detection. Table loaded from `data/provider_cidrs.json` (generated — see `scripts/gen_provider_cidrs.py`); override with `ZABBIX_PROVIDER_CIDRS`. No tools/ imports |
 | `app_map.py` | The product's catalogue as a map the tool is given (`ZABBIX_APP_MAP`): dataclasses, fail-closed loader, age vs predicate window, IP join over every interface. No tools/ imports (ADR 143) |
 | `api_compat.py` | What differs across Zabbix 6.2–8.0: removed methods (guard-enforced), value/item/media type maps, acknowledge-action labels, table-safe text. Never request a newer-only field. No tools/ imports (ADR 162) |
+| `config_cache.py` | Short-lived cache + single-flight for configuration reads (never values); cleared by any write through the client (ADR 166) |
 | `trends.py` | `fetch_trends` — the one fleet-scale `trend.get`: row-budgeted chunks, bounded concurrency, window-sized limits; guard-enforced (ADR 160) |
 | `rollback.py` | Pre-mutation snapshots, `SNAPSHOT_CONFIG` |
 | `excel.py` | Shared Excel formatting (bandwidth thresholds, color fills) |
@@ -112,6 +113,8 @@ uv run zbbx-mcp run <tool> key=value       # call one tool headless (ADR 163)
 | `ZABBIX_TRAFFIC_UNIT` | Set `bytes` if net.if.in returns bytes/sec (default: bits/sec) |
 | `ZABBIX_COMPACT` / `ZABBIX_COMPACT_TOOLS` | Token optimization |
 | `ZABBIX_RESPONSE_BUDGET` | Max chars per response (default: 6000) |
+| `ZABBIX_CONFIG_CACHE_TTL` | Seconds configuration reads (NIC discovery) stay cached; default 300, `0` off; writes clear it — ADR 166 |
+| `ZABBIX_TREND_CONCURRENCY` | Trend requests in flight, 1–16, default 4 — ADR 166 |
 | `ZABBIX_READ_ONLY` | Disable write operations |
 | `ZABBIX_PROVIDER_CIDRS` | Provider → CIDR map (inline JSON or a file path) searched before the generated table, most-specific-first. **This is where accurate detection comes from** — the built-in table resolves little of any specific deployment. Draft one with the `build_provider_overrides` tool. Unset = generated table only, ADR 120 |
 | `ZABBIX_DATACENTER_CIDRS` | Datacenter ranges as `{"Provider": [["cidr", "City, CC"], …]}` (inline JSON or a file path), most-specific-first. **The built-in table is empty** — unset means no city is reported. Draft one with the `build_datacenter_overrides` tool, ADR 122 |
