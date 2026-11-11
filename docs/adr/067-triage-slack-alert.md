@@ -30,7 +30,7 @@ testing:
   only), and host candidates. `extract_host_candidates` pulls hyphen/dot
   host tokens and bare short hosts (`db14`), and drops multi-VIP suffixes
   (`bb2` after `…-a1 `) and tokens that are merely part of a hyphen
-  host (`br3` in `node-eu-br3`).
+  host (`bv9003` in `node-aq-bv9003`).
 - **Resolve** (task 165, `classify_match` + `_search_host`): exact
   host-name match wins; one fuzzy hit is FUZZY (catches multi-VIP and
   Web-Check domains via substring search); several is **AMBIGUOUS**; none

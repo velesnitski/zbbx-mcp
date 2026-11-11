@@ -213,6 +213,7 @@ fixed headings (`## Problem`, `## Decision`, `## Test approach`,
 | [162](162-one-tool-layer-across-zabbix-6-2-to-8-0.md) | One tool layer across Zabbix 6.2 to 8.0 | `api_compat` holds the version differences; a guard forbids removed methods and 8.0-only request fields; 8.0 values recognised; CI runs real 7.0, 7.4 and 8.0. |
 | [163](163-headless-mode.md) | Headless mode | `zbbx-mcp tools` / `zbbx-mcp run <tool> key=value … [--json]`: the real server in-process, schema-typed arguments, exit codes 0/1/2, written files listed from the output gate. |
 | [164](164-integration-seed-and-pull-retries.md) | Integration seed feeds the trigger until it fires | The seed re-pushes the trigger item while waiting (values accepted before the trigger is cached are never evaluated); image pulls retry on registry errors. |
+| [165](165-agent-guide-follows-the-example-convention.md) | The agent guide follows the example convention | `AGENTS.md` states ADR 127's naming convention; the remaining fixtures use it. |
 
 ## Writing a new ADR
 

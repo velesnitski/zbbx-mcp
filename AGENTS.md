@@ -101,7 +101,7 @@ Each `ZabbixClient` holds its own `RollbackLog` (bounded deque, max 50 entries).
 
 ## Rules
 - **Never commit `tasks.md`** — it's in `.gitignore` and contains internal planning notes
-- **No sensitive data in code or git** — no real hostnames, company names, product names, or server naming patterns; use generic examples like `srv-nl01`, `srv-us01` in docstrings and tests
+- **No sensitive data in code or git** — no real hostnames, company names, product names, or server naming patterns; examples in docstrings and tests follow ADR 127 — uninhabited-territory country codes (`AQ`, `BV`, `HM`, `TF`, …) numbered in the 9000 band (e.g. `srv-aq9001`), RFC 5737 documentation IPs, and `example.com` / `.org` / `.net` domains
 - **No hardcoded service identifiers** — use generic labels (Primary, Secondary, Tertiary) in public output
 - **Country filter** — always use `extract_country(hostname)` for exact 2-letter match; never use substring `country in hostname`
 - **Compact by default** — tools should return concise output; use `max_results` with sensible defaults, group repetitive entries, show omitted count

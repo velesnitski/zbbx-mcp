@@ -82,7 +82,7 @@ def extract_host_candidates(text):
     spans = list(hspans)
     for m in _BARE_HOST_RE.finditer(text):
         s, e = m.start(), m.end()
-        # Inside a hyphen-host token ("br3" within "node-eu-br3") — skip.
+        # Inside a hyphen-host token ("bv9003" within "node-aq-bv9003") — skip.
         if any(hs <= s and e <= he for hs, he in hspans):
             continue
         # Multi-VIP suffix ("bb2" right after "…-a1 ") — skip.

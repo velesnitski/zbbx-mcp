@@ -42,7 +42,7 @@ class TestDetectState:
 
 class TestExtractHostCandidates:
     def test_single_hyphen_host(self):
-        assert extract_host_candidates("Service: TLS UDP 443 error on node-eu-br3") == ["node-eu-br3"]
+        assert extract_host_candidates("Service: TLS UDP 443 error on node-aq-bv9003") == ["node-aq-bv9003"]
 
     def test_multiple_comma_separated(self):
         out = extract_host_candidates("Service Down — node-eu-a1, node-eu-b2, node-us-c3")
@@ -63,8 +63,8 @@ class TestExtractHostCandidates:
         assert extract_host_candidates("Service error on port 8080 for 20m") == []
 
     def test_in_token_bare_match_suppressed(self):
-        # "br3" inside "node-eu-br3" must not become a second candidate.
-        assert extract_host_candidates("error on node-eu-br3") == ["node-eu-br3"]
+        # "bv9003" inside "node-aq-bv9003" must not become a second candidate.
+        assert extract_host_candidates("error on node-aq-bv9003") == ["node-aq-bv9003"]
 
     def test_dedupes_preserving_order(self):
         out = extract_host_candidates("db14 problem, db14 again, node-eu-x1")

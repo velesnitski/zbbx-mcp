@@ -115,7 +115,7 @@ class TestNeverCollectedIsNotZero:
         import zbbx_mcp.tools.traffic as traffic_mod
         from tests.wiretest import RecordingClient, run_tool
         monkeypatch.setattr(traffic_mod, "KEY_CONNECTIONS", CONN_KEY, raising=False)
-        client = RecordingClient({"host.get": [{"hostid": "1", "host": "srv-nl01",
+        client = RecordingClient({"host.get": [{"hostid": "1", "host": "srv-aq9001",
                                                 "groups": [{"name": "g"}], "interfaces": []}]})
         run_tool(traffic_mod, "get_traffic_report", client)
         conn_calls = [pr for mth, pr in client.calls
