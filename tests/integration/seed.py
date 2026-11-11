@@ -159,6 +159,11 @@ def _item_id(api: Api, hostid: str, key: str, value_type: int, units: str) -> st
         "hostid": hostid, "name": f"Trapper {key}", "key_": key,
         "type": ITEM_TYPE_TRAPPER, "value_type": value_type, "units": units,
         "history": "7d", "trends": "365d",
+        # Zabbix 8.0 refuses pushed values from a client not in the item's
+        # allowed hosts ("Client IP is not in item's allowed hosts list.")
+        # where 7.x accepted an empty list as "anyone". The containers are
+        # throwaway and bound to the runner, so allow every source (ADR 164).
+        "trapper_hosts": "0.0.0.0/0,::/0",
     })["itemids"][0]
 
 

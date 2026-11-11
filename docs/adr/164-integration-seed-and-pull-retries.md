@@ -28,6 +28,11 @@ test executed.
 - When values are never accepted, the failure quotes the server's own
   per-row reasons, so a cache race and a version that refuses the rows read
   differently in the log.
+- Trapper items are created with explicit allowed hosts. Zabbix 8.0 refuses
+  a pushed value from a client outside an item's allowed hosts ("Client IP is
+  not in item's allowed hosts list."), where 7.x read an empty list as
+  "anyone"; found by the 8.0 job once the failure quoted the server. The
+  stack is throwaway and bound to the runner, so every source is allowed.
 - The workflow pulls the images in their own step, retried four times with a
   growing pause, before starting the stack.
 
