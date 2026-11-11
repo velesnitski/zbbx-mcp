@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.18.0] - 2026-11-11
+
+### Added
+
+- **Headless mode** (ADR 163): `zbbx-mcp tools [--json]` and
+  `zbbx-mcp run <tool> [key=value …] [--args JSON|-] [--json] [--timeout S]`
+  run any tool once for cron, CI or another bot — in-process, with the same
+  gating, compression and analytics as an MCP client. Arguments are typed by
+  the tool's schema; `--json` gives `tool`, `args`, `ok`, `text` and the
+  `files` the call wrote; exit codes 0 / 1 / 2.
+- Analytics lines from headless calls carry `"via": "cli"`.
+
 ## [1.17.0] - 2026-11-09
 
 ### Added

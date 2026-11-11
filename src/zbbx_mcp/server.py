@@ -270,8 +270,15 @@ def create_server() -> tuple[FastMCP, dict[str, ZabbixClient]]:
 
 def main():
     import argparse
+    import sys
 
     from zbbx_mcp import __version__
+    from zbbx_mcp.headless import is_headless
+    from zbbx_mcp.headless import main as headless_main
+
+    # `zbbx-mcp tools` / `zbbx-mcp run <tool> …`: one call, then exit (ADR 163).
+    if is_headless(sys.argv[1:]):
+        sys.exit(headless_main(sys.argv[1:]))
 
     parser = argparse.ArgumentParser(description="Zabbix MCP server")
     parser.add_argument(

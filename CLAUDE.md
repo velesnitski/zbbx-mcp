@@ -13,6 +13,7 @@ uv run pytest                              # run all tests (~2,600 tests, ~15s)
 uv run pytest tests/test_registration.py   # tool registration only
 uv run pytest tests/test_server.py         # JSON-RPC subprocess test
 uv run pytest -k "test_name"               # single test by name
+uv run zbbx-mcp run <tool> key=value       # call one tool headless (ADR 163)
 ```
 
 ## Architecture
@@ -22,6 +23,7 @@ uv run pytest -k "test_name"               # single test by name
 | File | Purpose |
 |------|---------|
 | `server.py` | Entry point, `create_server()` factory, response compression |
+| `headless.py` | `zbbx-mcp tools` / `zbbx-mcp run <tool>`: one call through the real server in-process, schema-typed args, `--json`, exit codes 0/1/2, written files from the output gate (ADR 163) |
 | `client.py` | `ZabbixClient` — async httpx HTTP/2, JSON-RPC, rollback log |
 | `config.py` | Env var loading, multi-instance config |
 | `data.py` | Shared data fetching, `ServerRow`, `extract_country()`, constants, region maps |

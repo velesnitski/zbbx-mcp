@@ -96,11 +96,32 @@ class AnalyticsFormatter(logging.Formatter):
         error_detail = getattr(record, "error_detail", None)
         if error_detail:
             entry["error"] = error_detail
+        if _via:
+            entry["via"] = _via
         for key in ("api_calls", "api_ms", "api_top"):
             value = getattr(record, key, None)
             if value is not None and value != "":
                 entry[key] = value
         return json.dumps(entry, ensure_ascii=False)
+
+
+# How the tool was reached: unset for an MCP client, "cli" for headless mode
+# (ADR 163), so the analytics can tell a scheduled job from a conversation.
+_via: str = ""
+
+
+def set_via(value: str) -> None:
+    global _via
+    _via = value
+
+
+def set_stderr_level(level: int) -> None:
+    """Raise the threshold of the stderr handler only. Headless mode keeps
+    stderr for warnings and stdout for the result; the log file and the
+    analytics are unaffected (ADR 163)."""
+    for h in logging.getLogger("zbbx_mcp").handlers:
+        if isinstance(h, logging.StreamHandler) and not isinstance(h, logging.FileHandler):
+            h.setLevel(level)
 
 
 def setup_logging() -> logging.Logger:

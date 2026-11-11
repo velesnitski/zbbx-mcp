@@ -1,5 +1,6 @@
 """Shared utilities for tool modules."""
 
+import contextvars
 import os
 import re
 import tempfile
@@ -176,6 +177,46 @@ def _confined_dir(output_dir: str) -> str:
     return path
 
 
+# Output files a tool call resolved, for the caller that asked to know
+# (headless mode lists them, ADR 163). Every write goes through one of the two
+# confinement gates below, so recording here sees every file without parsing
+# any tool's text. Unset outside such a caller: recording is then a no-op.
+_outputs: contextvars.ContextVar[list[str] | None] = contextvars.ContextVar(
+    "zbbx_outputs", default=None)
+
+
+def _record_output(path: str) -> str:
+    seen = _outputs.get()
+    if seen is not None and path not in seen:
+        seen.append(path)
+    return path
+
+
+def track_outputs() -> tuple[list[str], contextvars.Token]:
+    """Start recording output paths for the current context. Returns the list
+    that fills up and the token to pass to :func:`stop_tracking_outputs`."""
+    paths: list[str] = []
+    return paths, _outputs.set(paths)
+
+
+def stop_tracking_outputs(token: contextvars.Token) -> None:
+    _outputs.reset(token)
+
+
+def written_since(paths: list[str], since: float) -> list[str]:
+    """The recorded paths that exist and were modified at or after ``since``
+    (a resolved path is not a written file: the tool may have failed after
+    resolving it). Pure apart from ``stat``."""
+    out = []
+    for p in paths:
+        try:
+            if os.stat(p).st_mtime >= since - 1:
+                out.append(p)
+        except OSError:
+            continue
+    return out
+
+
 def safe_output_path(output_dir: str, filename: str) -> str:
     """Validate an output dir + filename, confined to the allowed roots.
 
@@ -184,7 +225,7 @@ def safe_output_path(output_dir: str, filename: str) -> str:
     """
     if filename != os.path.basename(filename) or filename in ("", ".", ".."):
         raise ValueError(f"Unsafe output filename: {filename!r}")
-    return os.path.join(_confined_dir(output_dir), filename)
+    return _record_output(os.path.join(_confined_dir(output_dir), filename))
 
 
 def confined_output_path(path: str) -> str:
@@ -202,7 +243,7 @@ def confined_output_path(path: str) -> str:
             "Use ~/Downloads, ~/Documents, ~/Desktop, temp, or set ZBBX_FILE_ROOTS."
         )
     os.makedirs(parent, exist_ok=True)
-    return resolved
+    return _record_output(resolved)
 
 
 # Read-only fields to strip when restoring Zabbix objects (rollback)

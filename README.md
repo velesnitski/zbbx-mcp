@@ -442,6 +442,36 @@ pip install -e .
 zbbx-mcp
 ```
 
+## Headless mode (scripts and schedulers)
+
+The same command runs any tool once from the command line, for cron,
+launchd, CI jobs or another bot. It builds the server in-process and calls
+the tool exactly as an MCP client would: the same output, the same
+`ZABBIX_READ_ONLY` / `DISABLED_TOOLS` / `ZABBIX_TIER` gating (a write tool
+under read-only does not exist here either), the same analytics, marked
+`"via": "cli"`.
+
+```bash
+zbbx-mcp tools                                   # what is available (--json: full schemas)
+zbbx-mcp run get_problems severity_min=4 max_results=20
+zbbx-mcp run detect_traffic_drops country=AQ --json
+echo '{"hosts": "srv-a,srv-b", "period": "7d"}' | zbbx-mcp run get_trends_batch --args -
+```
+
+- **Arguments** are `key=value` pairs typed by the tool's input schema
+  (numbers, booleans, JSON for lists), or a JSON object via `--args`
+  (`-` reads stdin); pairs override the object. A key the tool does not take
+  is an error that lists the keys it does take.
+- **`--json`** prints one object: `tool`, `args`, `ok`, `text`, and `files` —
+  the paths a report tool wrote during the call, taken from the file-output
+  gate rather than parsed from the text.
+- **Exit codes**: `0` success, `1` the tool reported an error or ran past
+  `--timeout` (default 300 s), `2` a usage or configuration error. Logs go to
+  stderr at WARNING; stdout holds only the result.
+- Output is cut at `ZABBIX_RESPONSE_BUDGET` as for a client; set it to `0`
+  for a job that wants everything. For unattended read-only jobs, set
+  `ZABBIX_READ_ONLY=true` so the write tools are not there to call.
+
 ## Using with n8n, Langchain, and other HTTP clients
 
 By default the server uses **stdio** transport (for Claude Code). For integration with **n8n**, **Langchain**, **OpenAI Agents SDK**, or any HTTP-based MCP client, start the server in **SSE** or **streamable-http** mode:
