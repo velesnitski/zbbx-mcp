@@ -52,6 +52,17 @@ jobs:
       - name: Install dependencies
         run: uv sync --extra test
 
+      # The registry answers 502 now and then; a failed pull is not a failed
+      # test, so retry it before giving up (ADR 164).
+      - name: Pull images
+        run: |
+          for attempt in 1 2 3 4; do
+            docker compose pull --quiet && exit 0
+            echo "pull attempt $attempt failed; retrying in $((attempt * 15))s"
+            sleep $((attempt * 15))
+          done
+          exit 1
+
       - name: Start Zabbix stack
         run: docker compose up -d
 

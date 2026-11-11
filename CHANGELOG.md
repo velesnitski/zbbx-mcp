@@ -17,6 +17,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   `files` the call wrote; exit codes 0 / 1 / 2.
 - Analytics lines from headless calls carry `"via": "cli"`.
 
+### Fixed
+
+- **End-to-end CI no longer flakes in the seed step** (ADR 164): the seed
+  re-pushes the trigger's value until the problem opens, and image pulls
+  retry on registry errors.
+
 ## [1.17.0] - 2026-11-09
 
 ### Added

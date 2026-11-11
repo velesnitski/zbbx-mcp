@@ -265,12 +265,27 @@ def trends_sql(items: list[dict], now: int | None = None, days: int = 7) -> str:
     return "\n".join(lines) + "\n"
 
 
-def wait_for_problem(api: Api, hostid: str, timeout_s: float = 120) -> None:
+def wait_for_problem(api: Api, hostid: str, timeout_s: float = 180,
+                     repush=None, poll_s: float = 3, repush_every_s: float = 10) -> None:
+    """Wait for the seeded trigger to open a problem, feeding it fresh values.
+
+    The trigger is created after its item, so the server can accept the item's
+    values before the trigger reaches its configuration cache. A value
+    processed then is never evaluated, and ``last()`` re-evaluates only on a
+    new value: one push can leave the problem unopened forever (the
+    intermittent CI failure, ADR 164). ``repush`` sends a fresh value;
+    calling it every ``repush_every_s`` gives the trigger a new chance as soon
+    as the cache has it.
+    """
     deadline = time.monotonic() + timeout_s
+    next_push = time.monotonic() + repush_every_s
     while time.monotonic() < deadline:
         if api.call("problem.get", {"output": ["eventid"], "hostids": [hostid]}):
             return
-        time.sleep(3)
+        if repush is not None and time.monotonic() >= next_push:
+            repush()
+            next_push = time.monotonic() + repush_every_s
+        time.sleep(poll_s)
     raise SystemExit("The seeded trigger never produced a problem.")
 
 
@@ -311,7 +326,9 @@ def main(argv: list[str] | None = None) -> int:
 
     via = push_values(api, items, (args.sender_host, args.sender_port))
     print(f"Pushed {len(items)} items via {via}")
-    wait_for_problem(api, hostids[TRIGGER_HOST])
+    trigger_items = [it for it in items if it["host"] == TRIGGER_HOST and it["key"] == KEY_CPU_IDLE]
+    wait_for_problem(api, hostids[TRIGGER_HOST],
+                     repush=lambda: push_values(api, trigger_items, (args.sender_host, args.sender_port)))
     print("Trigger fired")
 
     if args.trends_sql:
