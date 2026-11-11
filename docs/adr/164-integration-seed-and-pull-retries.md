@@ -25,6 +25,9 @@ test executed.
   while waiting; the seed passes one that pushes a fresh value for the
   trigger's item. The first value the cached trigger sees opens the problem.
   The wait is three minutes.
+- When values are never accepted, the failure quotes the server's own
+  per-row reasons, so a cache race and a version that refuses the rows read
+  differently in the log.
 - The workflow pulls the images in their own step, retried four times with a
   growing pause, before starting the stack.
 

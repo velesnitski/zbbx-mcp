@@ -213,6 +213,7 @@ def push_values(api: Api, items: list[dict], sender: tuple[str, int], timeout_s:
     pending = list(items)
     deadline = time.monotonic() + timeout_s
     use_sender = False
+    reasons: set[str] = set()
     while pending and time.monotonic() < deadline:
         if not use_sender:
             rows = [{"itemid": it["itemid"], "value": str(it["value"]), "clock": c, "ns": 0}
@@ -226,6 +227,11 @@ def push_values(api: Api, items: list[dict], sender: tuple[str, int], timeout_s:
                 raise
             per_row = result.get("data", [])
             failed = {rows[i]["itemid"] for i, r in enumerate(per_row) if "error" in r}
+            # Keep the server's own reason: "never accepted" alone cannot
+            # tell a cache race from a version that refuses the rows (ADR 164).
+            reasons = {str(r["error"]) for r in per_row if "error" in r} or reasons
+            if not per_row:
+                reasons = {f"history.push returned no per-row result: {result!r:.200}"}
             pending = [it for it in pending if it["itemid"] in failed]
         else:
             rows = [{"host": it["host"], "key": it["key"], "value": str(it["value"]),
@@ -236,7 +242,9 @@ def push_values(api: Api, items: list[dict], sender: tuple[str, int], timeout_s:
         if pending:
             time.sleep(3)
     if pending:
-        raise SystemExit(f"Server never accepted values for: {[it['key'] for it in pending]}")
+        why = "; ".join(sorted(reasons)[:3]) or "no reason given"
+        raise SystemExit(f"Server never accepted values for: {[it['key'] for it in pending]} "
+                         f"(server said: {why})")
     return "sender" if use_sender else "history.push"
 
 
