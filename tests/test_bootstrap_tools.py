@@ -45,7 +45,7 @@ class TestCityFromPtr:
 
 class TestRdnsLabel:
     def test_takes_the_operator_tail(self):
-        assert rdns_label("a.clients.your-server.de") == "clients.your-server.de"
+        assert rdns_label("a.clients.example.net") == "clients.example.net"
 
     def test_short_name_kept_whole(self):
         assert rdns_label("example.com") == "example.com"

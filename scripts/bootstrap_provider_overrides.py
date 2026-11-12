@@ -80,7 +80,7 @@ async def collect(url: str, token: str) -> list[tuple[str, str]]:
 def rdns_label(ip: str) -> str:
     """The registrable-ish tail of a reverse-DNS name, or "".
 
-    `clients.your-server.de` and `clients.gthost.com` name the operator far
+    `clients.example.net` and `dc1.example.org` name the operator far
     better than a placeholder does, and this is exactly what the
     `identify_providers` tool surfaces. A prefix with no PTR simply keeps its
     placeholder — an unnamed entry is still a usable range.

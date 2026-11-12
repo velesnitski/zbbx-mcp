@@ -56,7 +56,7 @@ def city_from_ptr(name: str) -> str:
 def rdns_label(name: str) -> str:
     """The operator-ish tail of a reverse-DNS name, or "". Pure.
 
-    `clients.your-server.de` names the operator better than a placeholder.
+    `clients.example.net` names the operator better than a placeholder.
     """
     if not name:
         return ""
