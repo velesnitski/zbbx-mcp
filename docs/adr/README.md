@@ -216,6 +216,7 @@ fixed headings (`## Problem`, `## Decision`, `## Test approach`,
 | [165](165-agent-guide-follows-the-example-convention.md) | The agent guide follows the example convention | `AGENTS.md` states ADR 127's naming convention; the remaining fixtures use it. |
 | [166](166-configuration-cache-and-lean-trend-reads.md) | Configuration cache and lean trend reads | Cached, coalesced NIC discovery read by item id; one discovery for the traffic map; average-only trend reads where extremes are unused; per-day keys and orjson parsing; configurable trend concurrency. |
 | [167](167-reverse-dns-examples-use-documentation-domains.md) | Reverse-DNS examples use documentation domains | The `rdns_label` docstrings and test use `example.*` names, per ADR 127. |
+| [168](168-error-reporting-never-stops-the-server.md) | Error reporting never stops the server | `sentry-sdk` capped below 3; Sentry setup retries without a rejected option and otherwise disables itself instead of failing startup. |
 
 ## Writing a new ADR
 

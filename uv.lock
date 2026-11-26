@@ -2041,7 +2041,7 @@ wheels = [
 
 [[package]]
 name = "zbbx-mcp"
-version = "1.19.0"
+version = "1.19.1"
 source = { editable = "." }
 dependencies = [
     { name = "anyio", version = "4.14.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.14'" },
@@ -2092,7 +2092,7 @@ requires-dist = [
     { name = "pytest-asyncio", marker = "extra == 'test'", specifier = ">=1,<2" },
     { name = "pytest-cov", marker = "extra == 'test'", specifier = ">=7,<8" },
     { name = "ruff", marker = "extra == 'lint'", specifier = "==0.16.0" },
-    { name = "sentry-sdk", specifier = ">=2.0" },
+    { name = "sentry-sdk", specifier = ">=2.0,<3" },
     { name = "urllib3", specifier = ">=2.8.0" },
 ]
 provides-extras = ["test", "lint", "typecheck"]

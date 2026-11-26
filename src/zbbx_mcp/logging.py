@@ -21,6 +21,7 @@ import sys
 import time
 import uuid
 from pathlib import Path
+from typing import Any
 
 from zbbx_mcp import __version__
 
@@ -162,30 +163,49 @@ def setup_logging() -> logging.Logger:
 
 
 def setup_sentry() -> None:
-    """Initialize Sentry if SENTRY_DSN is set."""
+    """Initialize Sentry if SENTRY_DSN is set.
+
+    Error reporting must never stop the server (ADR 168): an SDK release that
+    rejects an option, or any other setup failure, leaves the server running
+    without Sentry and says so on stderr.
+    """
     dsn = os.environ.get("SENTRY_DSN")
     if not dsn:
         return
 
-    import sentry_sdk
-    from sentry_sdk.integrations.logging import LoggingIntegration
-
-    sentry_sdk.init(
-        dsn=dsn,
-        release=f"zbbx-mcp@{__version__}",
-        environment=os.environ.get("SENTRY_ENVIRONMENT", "production"),
-        traces_sample_rate=0,
-        send_default_pii=False,
-        # Sentry's typed signature differs by version (Event/dict, hint type);
-        # _scrub_event accepts/returns dict which is compatible at runtime.
-        before_send=_scrub_event,  # type: ignore[arg-type]
-        integrations=[
-            LoggingIntegration(level=logging.WARNING, event_level=logging.ERROR),
-        ],
-    )
-    sentry_sdk.set_tag("instance_id", INSTANCE_ID)
     global _sentry_enabled
-    _sentry_enabled = True
+    try:
+        import sentry_sdk
+
+        options: dict[str, Any] = {
+            "dsn": dsn,
+            "release": f"zbbx-mcp@{__version__}",
+            "environment": os.environ.get("SENTRY_ENVIRONMENT", "production"),
+            "traces_sample_rate": 0,
+            "send_default_pii": False,
+            # _scrub_event accepts/returns dict, compatible at runtime.
+            "before_send": _scrub_event,
+        }
+        try:
+            from sentry_sdk.integrations.logging import LoggingIntegration
+
+            options["integrations"] = [
+                LoggingIntegration(level=logging.WARNING, event_level=logging.ERROR),
+            ]
+        except Exception:  # noqa: BLE001 - the integration is optional
+            pass
+        try:
+            sentry_sdk.init(**options)
+        except TypeError:
+            # A newer SDK that no longer knows an option: retry with the
+            # minimum. The scrubber stays, so nothing personal is sent.
+            options.pop("send_default_pii", None)
+            sentry_sdk.init(**options)
+        sentry_sdk.set_tag("instance_id", INSTANCE_ID)
+        _sentry_enabled = True
+    except Exception as exc:  # noqa: BLE001 - telemetry is optional
+        _sentry_enabled = False
+        print(f"zbbx-mcp: Sentry disabled ({type(exc).__name__}: {exc})", file=sys.stderr)
 
 
 _SENSITIVE_PATTERNS = ("token", "secret", "password", "dsn", "key", "auth", "credential")

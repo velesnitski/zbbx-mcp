@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.19.1] - 2026-11-26
+
+### Fixed
+
+- **Startup no longer depends on error reporting** (ADR 168): `sentry-sdk`
+  is capped below 3, and a Sentry setup failure (such as an SDK rejecting an
+  option) disables Sentry with a note on stderr instead of stopping the
+  server.
+
 ## [1.19.0] - 2026-11-12
 
 ### Changed
